@@ -223,7 +223,7 @@ internal/
 | **协议逆向方法论** —— 证据等级标注（🟢 实测 / 🟡 推断 / ⚪ 未确认） | [`docs/research/`](docs/research/) |
 | **指标与聚合** —— 原子计数器 + 单锁聚合；TPS 分母的取法 | [`metrics.go`](internal/obs/metrics.go) |
 
-**反例也值得看**：[已知限制](#已知限制)如实列出 7 项已确认未修复的缺陷和 7 个零覆盖率的包 —— 「能跑的原型」与「可上生产的系统」之间的真实差距，比只看成功案例更有参考价值。
+**反例也值得看**：[已知限制](#已知限制)如实记录设计取舍，缺陷修复过程（含根因与回归测试）也完整保留在 CHANGELOG 中 —— 「能跑的原型」与「可上生产的系统」之间的真实差距，比只看成功案例更有参考价值。
 
 ---
 
@@ -255,13 +255,16 @@ go test ./... -race
 
 | 包 | 覆盖率 |
 |---|---|
-| [`internal/obs`](internal/obs/) | 93.4% |
-| [`internal/api/anthropic/messages`](internal/api/anthropic/messages/) | 56.0% |
-| [`internal/api/openai/responses`](internal/api/openai/responses/) | 49.2% |
-| [`internal/adapter/workbuddy`](internal/adapter/workbuddy/) | 27.1% |
-| [`cmd/agent2api`](cmd/agent2api/) · [`api/common`](internal/api/common/) · [`openai/chat`](internal/api/openai/chat/) · [`app`](internal/app/) · [`config`](internal/config/) · [`llm`](internal/llm/) · [`web`](internal/web/) | **0.0%** |
-
-编排核心与 Chat 编解码器目前没有测试，欢迎补充（见[贡献](#贡献)）。
+| [`internal/api/common`](internal/api/common/) | 94.3% |
+| [`internal/obs`](internal/obs/) | 93.3% |
+| [`internal/llm`](internal/llm/) | 88.6% |
+| [`internal/config`](internal/config/) | 75.0% |
+| [`internal/api/anthropic/messages`](internal/api/anthropic/messages/) | 56.4% |
+| [`internal/api/openai/responses`](internal/api/openai/responses/) | 55.9% |
+| [`internal/adapter/workbuddy`](internal/adapter/workbuddy/) | 55.2% |
+| [`internal/api/openai/chat`](internal/api/openai/chat/) | 53.1% |
+| [`internal/app`](internal/app/) | 50.1% |
+| [`cmd/agent2api`](cmd/agent2api/) · [`internal/web`](internal/web/) | 0.0%（CLI 薄壳 / go:embed 静态资源，无可测逻辑） |
 
 ---
 
@@ -274,15 +277,17 @@ go test ./... -race
 - **额度查询端点未实现**：上游该路由需企业版权限，返回 403
 - **DSML 文本态工具调用兜底未实现**：实测上游走原生 `tool_calls` 通道，如遇回退需补上
 
-### 已知缺陷（尚未修复，按影响排序）
+### 已知缺陷（7 项已全部修复，2026-09-16）
 
-1. **Chat Completions 流式中断静默截断** —— [`chat.go`](internal/api/openai/chat/chat.go) 对 `EventError` 编码出 **0 个帧**：客户端已收到 HTTP 200，内容直接截断，**无 `finish_reason`、无 `[DONE]`、无错误帧**，无法区分「正常结束」与「上游挂了」。
-2. **Anthropic 流式 `input_tokens` 恒为 0** —— [`messages.go`](internal/api/anthropic/messages/messages.go) 的 `message_start` 硬编码 0，流式模式从不报告输入 token。
-3. **Responses 协议 `output` 可能丢项** —— [`responses.go`](internal/api/openai/responses/responses.go) 按密集下标遍历稀疏 map；块「已 start 未 end」（流中途断开）时该条目静默消失。
-4. **工具描述未脱敏** —— [`sanitize.go`](internal/adapter/workbuddy/sanitize.go) 的 `SanitizeToolDescription` 已实现但从未被调用，只有 system 提示词走脱敏。
-5. **没有任何重试 / 退避** —— 仅 401 时刷新凭证重拨一次；上游 5xx / 429 直接失败给客户端（`isRetryableTransportError` 等目前是死代码）。
-6. **控制台无法携带 API Key** —— 前端不发鉴权头，`-api-key` 模式下控制台 `/api/*` 全部 401。
-7. **测试缺口** —— 编排核心、Chat 编解码器、配置层无测试。
+以下问题曾长期存在，现已在对应位置修复并有回归测试锁定（见 `CHANGELOG.md` 与各测试文件）：
+
+1. ~~Chat Completions 流式中断静默截断~~ —— `EventError` 现发出 `{"error":{...}}` 帧（官方 SDK 契约），不再谎报正常收尾。回归：`chat_test.go` / `app_test.go`。
+2. ~~Anthropic 流式 `input_tokens` 恒为 0~~ —— `message_delta` 补发真实值（官方 SDK 累积覆盖语义）。回归：`messages_test.go`。
+3. ~~Responses 协议 `output` 可能丢项~~ —— 按 map 实际 key 遍历，未完成块合成 `incomplete` 终态。回归：`responses_test.go`。
+4. ~~工具描述未脱敏~~ —— `convertTools` 已接线 `SanitizeToolDescription`。回归：`payload_test.go`。
+5. ~~没有任何重试 / 退避~~ —— dial 阶段最多 3 次、指数退避 + Retry-After；401 刷新每轮至多一次（防死循环）；401/429 分类显式置位。回归：`adapter_test.go`。
+6. ~~控制台无法携带 API Key~~ —— 前端全链路携带 `X-Api-Key`，401 引导输入并验证后持久化；新增不鉴权的 `/api/auth-hint`；鉴权失败返回正确的 401（原 400）。
+7. ~~测试缺口~~ —— `llm` 88.6%、`config` 75%、`chat` 53.1%、`app` 50.1%、`common` 94.3%（原 0%）。
 
 ### 其他已知行为
 
@@ -292,8 +297,8 @@ go test ./... -race
 
 ## 路线图
 
-- [ ] 修复上述 7 项已知缺陷
-- [ ] 接入重试与退避
+- [x] 修复 7 项已知缺陷（2026-09-16，见上方「已知缺陷」）
+- [x] 接入重试与退避（dial 退避 + Retry-After + 401 刷新闸门）
 - [ ] 第二个平台适配器（Devin / Cursor）
 - [ ] `cmd/probe` 协议漂移检测
 - [ ] 多账号池 + 冷却 + 熔断

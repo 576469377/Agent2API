@@ -215,7 +215,7 @@ In recommended reading order (all paths clickable):
 | **Reverse-engineering methodology** — evidence grading (🟢 verified / 🟡 inferred / ⚪ unconfirmed) | [`docs/research/`](docs/research/) |
 | **Metrics & aggregation** — atomics + single lock; how to pick the TPS denominator | [`metrics.go`](internal/obs/metrics.go) |
 
-The flip side matters too: [Known Limitations](#known-limitations) honestly lists 7 confirmed unfixed defects and 7 zero-coverage packages — the real gap between "runs" and "production-ready."
+The flip side matters too: [Known Limitations](#known-limitations) honestly records design trade-offs, with every defect fix (root cause + regression test) preserved in the CHANGELOG — the real gap between "runs" and "production-ready."
 
 ---
 
@@ -245,13 +245,16 @@ Current coverage (measured):
 
 | Package | Coverage |
 |---|---|
-| [`internal/obs`](internal/obs/) | 93.4% |
-| [`internal/api/anthropic/messages`](internal/api/anthropic/messages/) | 56.0% |
-| [`internal/api/openai/responses`](internal/api/openai/responses/) | 49.2% |
-| [`internal/adapter/workbuddy`](internal/adapter/workbuddy/) | 27.1% |
-| [`cmd/agent2api`](cmd/agent2api/) · [`api/common`](internal/api/common/) · [`openai/chat`](internal/api/openai/chat/) · [`app`](internal/app/) · [`config`](internal/config/) · [`llm`](internal/llm/) · [`web`](internal/web/) | **0.0%** |
-
-The orchestration core and the Chat codec have **no tests** at all. Contributions welcome.
+| [`internal/api/common`](internal/api/common/) | 94.3% |
+| [`internal/obs`](internal/obs/) | 93.3% |
+| [`internal/llm`](internal/llm/) | 88.6% |
+| [`internal/config`](internal/config/) | 75.0% |
+| [`internal/api/anthropic/messages`](internal/api/anthropic/messages/) | 56.4% |
+| [`internal/api/openai/responses`](internal/api/openai/responses/) | 55.9% |
+| [`internal/adapter/workbuddy`](internal/adapter/workbuddy/) | 55.2% |
+| [`internal/api/openai/chat`](internal/api/openai/chat/) | 53.1% |
+| [`internal/app`](internal/app/) | 50.1% |
+| [`cmd/agent2api`](cmd/agent2api/) · [`internal/web`](internal/web/) | 0.0% (thin CLI shell / go:embed static assets) |
 
 ---
 
@@ -264,15 +267,17 @@ The orchestration core and the Chat codec have **no tests** at all. Contribution
 - **Quota query endpoint not implemented** — requires enterprise privileges upstream (403)
 - **DSML text-mode tool-call fallback not implemented** — upstream currently uses native `tool_calls`
 
-### Known defects (unfixed, ordered by impact)
+### Known defects (all 7 fixed on 2026-09-16)
 
-1. **Chat Completions silently truncates on mid-stream failure** — [`chat.go`](internal/api/openai/chat/chat.go) encodes `EventError` to **zero frames**: the client already got HTTP 200, then content just stops — **no `finish_reason`, no `[DONE]`, no error frame**.
-2. **Anthropic streaming `input_tokens` is always 0** — `message_start` in [`messages.go`](internal/api/anthropic/messages/messages.go) hardcodes 0; input tokens are never reported while streaming.
-3. **Responses API `output` can drop items** — [`responses.go`](internal/api/openai/responses/responses.go) iterates a sparse map with dense indices; a block started but never ended (stream dies mid-tool-call) silently vanishes.
-4. **Tool descriptions are not sanitized** — `SanitizeToolDescription` in [`sanitize.go`](internal/adapter/workbuddy/sanitize.go) is implemented but never called.
-5. **No retry or backoff anywhere** — only a single credential-refresh redial on 401; upstream 5xx / 429 fail straight through.
-6. **The console cannot send an API key** — with `-api-key` set, every console `/api/*` call returns 401.
-7. **Test gaps** — orchestration core, Chat codec, and config have no tests.
+These used to be open issues; each fix now ships with a regression test (see `CHANGELOG.md` and the test files):
+
+1. ~~Chat Completions silently truncates on mid-stream failure~~ — `EventError` now emits an `{"error":{...}}` frame per the official SDK contract; no fake `finish_reason`/`[DONE]` afterwards.
+2. ~~Anthropic streaming `input_tokens` is always 0~~ — `message_delta.usage` now carries the real value (official SDK treats it as a cumulative overwrite).
+3. ~~Responses API `output` can drop items~~ — iterates by actual map keys; blocks started but never ended are synthesized as `incomplete` items.
+4. ~~Tool descriptions are not sanitized~~ — `convertTools` now wires in `SanitizeToolDescription`.
+5. ~~No retry or backoff anywhere~~ — up to 3 dial attempts with exponential backoff + Retry-After; at most one 401-refresh per attempt (loop guard); only transport errors / 5xx / 429 retry.
+6. ~~The console cannot send an API key~~ — the frontend now attaches `X-Api-Key` everywhere, prompts on 401 and persists after verification; new unauthenticated `/api/auth-hint`; auth failures correctly return 401 (was 400).
+7. ~~Test gaps~~ — `llm` 88.6%, `common` 94.3%, `config` 75%, `chat` 53.1%, `app` 50.1% (all were 0%).
 
 ### Other known behavior
 
@@ -282,8 +287,8 @@ The orchestration core and the Chat codec have **no tests** at all. Contribution
 
 ## Roadmap
 
-- [ ] Fix the 7 known defects above
-- [ ] Wire up retry/backoff
+- [x] Fix the 7 known defects (2026-09-16, see above)
+- [x] Wire up retry/backoff (dial backoff + Retry-After + 401-refresh guard)
 - [ ] Second platform adapter (Devin / Cursor)
 - [ ] `cmd/probe` protocol drift detection
 - [ ] Multi-account pool + cooldown + circuit breaking

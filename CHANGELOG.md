@@ -5,17 +5,24 @@
 
 ## [Unreleased]
 
-### 已知问题（尚未修复）
+### 修复
 
-按影响排序，详见 README 的[已知限制](README.md#已知限制)：
+- **全部 7 项已知缺陷已修复**（原列于本节与 README，回归测试全部锁定）：
 
-- Chat Completions 流式中断时**静默截断**（无 `finish_reason`、无 `[DONE]`、无错误帧）
-- Anthropic 流式 `input_tokens` 恒为 `0`
-- Responses 协议在稀疏内容下标下可能**丢失 `output` 条目**
-- `SanitizeToolDescription` 已实现但**从未被调用**（工具描述未脱敏）
-- **无任何重试 / 退避**（仅 401 刷新重连）
-- 网页控制台**不携带 API Key**，开启鉴权后 `/api/*` 全部 401
-- 编排核心、Chat 编解码器、配置层**无测试**
+- **Chat Completions 流式中断静默截断**：`EventError` 现发出 `{"error":{...}}` 数据帧（官方 openai-python SDK 的流内错误契约），错误后不再补发 `finish_reason`/`[DONE]`。
+- **Anthropic 流式 `input_tokens` 恒为 0**：`message_delta.usage` 补发真实 input tokens（官方 SDK 按累积覆盖处理）。
+- **Responses 协议 `output` 丢项**：`responseShell` 改按实际 key 遍历；「已 start 未 end」的块合成 `incomplete` 终态，不再静默消失。
+- **工具描述未脱敏**：`convertTools` 接线 `SanitizeToolDescription`（sanitize 开关透传）。
+- **无重试/退避**：dial 失败最多重试 3 次（指数退避 500ms→4s，尊重 Retry-After 但受 4s 安全阀钳制）；401 刷新每轮至多一次（防「refresh 恒成功而 chat 恒 401」的无界循环）；仅传输错误/5xx/429 重试。原 `isRetryableTransportError`/`parseRetryAfter` 死代码已接线。
+- **控制台不带 API Key**：前端全链路（`api()` + 对话页流式请求）携带 `X-Api-Key`；401 时引导输入、验证通过才持久化；新增不鉴权的 `/api/auth-hint`（仅暴露布尔）；设置页新增密钥管理。
+- **测试缺口**：新增 6 个测试文件；`llm` 88.6%、`common` 94.3%、`config` 75%、`chat` 53.1%、`app` 50.1%（此前 0%）。
+
+- **错误分类修正**（伴随上述修复）：
+  - 新增 `Failure.Unauthorized` 分类，凭据错误返回 **401**（原被 `ClientFixable` 统一映射为 400——客户端 SDK 靠 401 触发重新配置凭据）；上游 401 显式置位，不再依赖响应体文本。
+  - 上游 429 显式置 `RateLimited`（原靠文本匹配，中文响应体会漏判成 502）。
+  - `classify` 不再匹配裸数字 "401"/"429"——错误消息回显请求体片段（含 "user_401"）会把 `decode_failed` 误判成鉴权失败。
+  - `Wrap` 对已是 `*Failure` 的输入补齐派生分类（幂等）：字面量经 Wrap 后派生字段不再全为零值。
+  - 405 响应不再被映射成 400，且按 RFC 7231 带 `Allow: POST` 头。
 
 ## [0.2.0] - 2026-09-16
 
