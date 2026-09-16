@@ -36,7 +36,7 @@ make test-race  # 竞态检测（CI 也跑）
 
 1. 样本存放在 [`fixtures/`](fixtures/)，测试时逐帧喂给解码器
 2. **断言产出的 IR 事件序列，而不是字节** —— 这样测试与协议细节解耦
-3. 参考实现：`internal/adapter/workbuddy/sse_test.go` 的 `replayFixture`
+3. 参考实现：[`internal/adapter/workbuddy/sse_test.go`](internal/adapter/workbuddy/sse_test.go) 的 `replayFixture`
 
 好处：协议转换可以完全离线验证，不需要真实上游账号，也不会因为上游抖动而 flaky。
 
@@ -50,9 +50,9 @@ make test-race  # 竞态检测（CI 也跑）
 
 欢迎优先补这些（目前覆盖率为 0.0%）：
 
-- `internal/app` —— 编排核心（`serve` / `writeStream` / `aggregate`）
-- `internal/api/openai/chat` —— Chat 编解码器（**最常用且完全无测试**）
-- `internal/config` —— 配置加载与校验
+- [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate`）
+- [`internal/api/openai/chat`](internal/api/openai/chat/) —— Chat 编解码器（**最常用且完全无测试**）
+- [`internal/config`](internal/config/) —— 配置加载与校验
 
 ## 新增上游平台
 
@@ -61,7 +61,7 @@ make test-race  # 竞态检测（CI 也跑）
 1. 在 `internal/adapter/<平台名>/` 下新建包
 2. 实现 `adapter.Adapter` 接口（3 个方法：`Stream` / `ListModels` / `Name`）
 3. 可选：实现 `adapter.Describer` / `adapter.Configurable`（用于控制台展示与热更新，不实现也能跑）
-4. 在 `cmd/agent2api` 里注册
+4. 在 [`cmd/agent2api`](cmd/agent2api/) 里注册
 
 **三个下游协议编码器一行都不用改** —— 这是 IR 分层设计的核心收益。
 
@@ -95,7 +95,7 @@ make test-race  # 竞态检测（CI 也跑）
 
 ## 关于许可证
 
-本仓库**当前没有 LICENSE 文件**，即默认保留所有权利（详见 README「许可证」）。
+本仓库**当前没有 LICENSE 文件**，即默认保留所有权利（详见 [README「许可证」](README.md#许可证)）。
 
 在许可证确定前提交贡献，即表示你同意：你的贡献将以本项目最终选定的开源许可证发布。
 

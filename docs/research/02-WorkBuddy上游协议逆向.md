@@ -10,7 +10,7 @@
 
 ## 一、端点总览
 
-Base URL：`https://copilot.tencent.com`
+Base URL：[copilot.tencent.com](https://copilot.tencent.com)
 （🟢 实测：`GET /v3/config` 返回的 `data.endpoint` 字段值就是这个字符串）
 
 | 用途 | Method | Path | 证据 |
@@ -442,7 +442,7 @@ hawklithm README 原文：不启用脱敏时「**几乎每次请求都会被审�
 
 **修复**：工具调用的 IR 内容下标用独立的自增计数器分配，与上游 `index` 解耦；上游 `index` 仅用于把分片归组。
 
-**对应的回归测试**：`internal/adapter/workbuddy/sse_test.go` 的 `TestReplayTextThenToolCall`，用 `fixtures/workbuddy-stream-text-then-toolcall.jsonl`（专门录制的「文本 + 工具调用并存」真实流）做金帧回放，断言文本块与工具调用块的下标不相等。
+**对应的回归测试**：[`internal/adapter/workbuddy/sse_test.go`](../../internal/adapter/workbuddy/sse_test.go) 的 `TestReplayTextThenToolCall`，用 [`fixtures/workbuddy-stream-text-then-toolcall.jsonl`](../../fixtures/workbuddy-stream-text-then-toolcall.jsonl)（专门录制的「文本 + 工具调用并存」真实流）做金帧回放，断言文本块与工具调用块的下标不相等。
 
 > 教训：上游的 `index` 这类「数组下标」字段，只能当分组键用，不能直接当全局内容块标识。
 
@@ -467,4 +467,4 @@ hawklithm README 原文：不启用脱敏时「**几乎每次请求都会被审�
 调研期间使用的探测脚本位于 `/tmp/wb_probe/probe.py`（临时目录，未纳入版本库）。
 建议后续把探测能力固化成项目内的 `cmd/probe` 工具（参考 devin2api 的做法），便于协议漂移检测。
 
-原始 `/v3/config` 响应已归档：`fixtures/workbuddy-v3-config.sample.json`
+原始 `/v3/config` 响应已归档：[`fixtures/workbuddy-v3-config.sample.json`](../../fixtures/workbuddy-v3-config.sample.json)
