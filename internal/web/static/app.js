@@ -22,6 +22,9 @@
     reqError: '',
     modelsLoading: false,
     modelsError: '',
+    accounts: null,
+    modelView: 'list',
+    matrix: null,
   };
 
   let timer = null;
@@ -85,6 +88,7 @@
   const PAGES = {
     overview: { group: '运营', title: '概览' },
     requests: { group: '运营', title: '调用日志' },
+    accounts: { group: '上游', title: '账号' },
     platforms: { group: '上游', title: '平台' },
     models: { group: '上游', title: '模型' },
     chat: { group: '工具', title: '对话' },
@@ -102,6 +106,7 @@
 
     stopAutoRefresh();
     if (name === 'overview') { loadOverview(); startAutoRefresh(); }
+    if (name === 'accounts') loadAccounts();
     if (name === 'platforms') loadPlatforms();
     if (name === 'models') loadModels();
     if (name === 'requests') loadRequests();
@@ -268,6 +273,15 @@
   function renderRanks(m) {
     $('rankProto').innerHTML = rankRows(m.by_protocol || []);
     $('rankModel').innerHTML = rankRows(m.by_model || []);
+    // 账号排行：仅号池模式（by_account 非空且不是单一的 (unknown)）才展示。
+    const acc = (m.by_account || []).filter((g) => g.key !== '(unknown)');
+    const panel = $('panelAcctRank');
+    if (acc.length) {
+      panel.style.display = '';
+      $('rankAccount').innerHTML = rankRows(acc);
+    } else {
+      panel.style.display = 'none';
+    }
   }
 
   function rankRows(rows) {
@@ -561,10 +575,7 @@
     } catch (err) { showHealth(err.message, err); }
   }
 
-  // renderAccounts 渲染号池里的每个账号。
-  //
-  // 号池自上一版起就是核心能力，但数据一直只出现在 CLI 启动横幅里——
-  // 控制台完全看不到。这里把它搬进浏览器：状态、冷却倒计时、「下一个用谁」。
+  // renderAccounts 渲染平台页的号池摘要（详情在「账号」页）。
   function renderAccounts(d) {
     const host = $('accountPool');
     const list = (d && d.accounts) || [];
@@ -584,7 +595,8 @@
     const lv = st.healthy ? 'ok' : (st.reason === 'rate_limited' ? 'warn' : 'err');
     const label = st.healthy ? '正常'
       : st.reason === 'rate_limited' ? '限流中'
-      : st.reason === 'unauthorized' ? '鉴权失效' : '不可用';
+      : st.reason === 'unauthorized' ? '鉴权失效'
+      : st.reason === 'disabled' ? '已停用' : '不可用';
     const cool = st.cooldown_secs > 0 ? fmtCountdown(st.cooldown_secs) : '—';
     return `<div class="acct" data-level="${lv}"${st.is_next ? ' data-next' : ''}>
       <div class="acct-top">
@@ -597,6 +609,173 @@
         ${st.last_error ? `<dt>最近错误</dt><dd title="${esc(st.last_error)}">${esc(st.last_error)}</dd>` : ''}
       </dl>
     </div>`;
+  }
+
+  /* ────────────────── 账号管理页 ────────────────── */
+
+  async function loadAccounts() {
+    try {
+      const [mgr, mt] = await Promise.all([
+        get('/api/accounts/manage'),
+        get('/api/metrics').catch(() => null),
+      ]);
+      state.accounts = mgr;
+      state.metrics = mt || state.metrics;
+      renderAccountsPage(mgr, state.metrics);
+    } catch (err) { showHealth(err.message, err); }
+  }
+
+  // usageByAccount 把 /api/metrics 的 by_account 转成 map，供账号卡片附用量。
+  function usageByAccount(m) {
+    const out = {};
+    for (const g of (m && m.by_account) || []) out[g.key] = g;
+    return out;
+  }
+
+  function renderAccountsPage(d, m) {
+    const host = $('accountList');
+    const list = (d && d.accounts) || [];
+    const usage = usageByAccount(m);
+
+    if (!list.length) {
+      host.innerHTML = emptyPanel('还没有可用账号',
+        '把凭证文件放进号池目录，或用下方「添加账号」走设备码登录。');
+      $('acctSub').textContent = '号池为空';
+      return;
+    }
+
+    $('acctSub').textContent =
+      `${d.healthy}/${d.total} 个账号可用` + (d.accounts_dir ? ` · 号池目录 ${d.accounts_dir}` : '')
+      + (m && m.by_account && m.by_account.length ? ` · 用量累计自进程启动` : '');
+
+    const cards = list.map((a) => accountManageCard(a, usage[a.label])).join('');
+    host.innerHTML = `<div class="acct-grid acct-grid-wide">${cards}</div>`;
+  }
+
+  // accountManageCard 是账号页的卡片：调度状态 + 登录状态 + 用量 + 操作。
+  function accountManageCard(a, u) {
+    const id = a.identity || {};
+    const lv = a.healthy ? 'ok' : (a.reason === 'rate_limited' ? 'warn'
+      : a.reason === 'disabled' ? 'off' : 'err');
+    const stateTxt = a.healthy ? '正常'
+      : a.reason === 'rate_limited' ? `限流中 · ${fmtCountdown(a.cooldown_secs)}`
+      : a.reason === 'unauthorized' ? '鉴权失效'
+      : a.reason === 'disabled' ? '已停用' : '不可用';
+
+    // 登录状态：refreshToken 过期是终态（必须重新登录）；access 过期网关会自查。
+    let loginTxt = '未知', loginLv = '';
+    if (id.refresh_expired) { loginTxt = '登录已失效，需重新登录'; loginLv = 'err'; }
+    else if (id.needs_refresh) { loginTxt = '凭证即将过期（网关会自动刷新）'; loginLv = 'warn'; }
+    else if (id.expires_at) { loginTxt = '有效至 ' + new Date(id.expires_at).toLocaleString('zh-CN'); }
+    else { loginTxt = '有效'; }
+
+    const name = id.nickname || id.uid || a.label;
+    const usageRow = u
+      ? `<dt>用量</dt><dd>${fmtNum(u.total)} 次 · ${fmtNum(u.output_tokens)} tok 出</dd>
+         <dt>成功率</dt><dd>${(u.success_rate * 100).toFixed(1)}%</dd>`
+      : `<dt>用量</dt><dd>—</dd>`;
+
+    // 操作按钮：停用/启用、清除冷却、重新登录。
+    const acts = [];
+    if (a.reason === 'disabled') {
+      acts.push(`<button class="btn btn-xs" data-acct="enable" data-label="${esc(a.label)}">启用</button>`);
+    } else {
+      acts.push(`<button class="btn btn-xs" data-acct="disable" data-label="${esc(a.label)}">停用</button>`);
+    }
+    if (!a.healthy && a.reason === 'rate_limited') {
+      acts.push(`<button class="btn btn-xs" data-acct="reset" data-label="${esc(a.label)}">清除冷却</button>`);
+    }
+    acts.push(`<button class="btn btn-xs" data-acct="relogin" data-label="${esc(a.label)}" data-path="${esc(id.credential_path || '')}">重新登录</button>`);
+
+    return `<div class="acct acct-manage" data-level="${lv}"${a.is_next ? ' data-next' : ''}>
+      <div class="acct-top">
+        <span class="acct-name" title="${esc(a.label)}">${a.is_next ? '▸ ' : ''}${esc(name)}</span>
+        <span class="badge ${lv}">${stateTxt}</span>
+      </div>
+      <dl class="acct-kv">
+        <dt>凭证</dt><dd title="${esc(id.credential_path || '')}">${esc(a.label)}</dd>
+        <dt>登录</dt><dd class="${loginLv ? 'kv-' + loginLv : ''}" title="${esc(loginTxt)}">${esc(loginTxt)}</dd>
+        ${usageRow}
+        ${a.last_error ? `<dt>最近错误</dt><dd title="${esc(a.last_error)}">${esc(a.last_error)}</dd>` : ''}
+      </dl>
+      <div class="acct-acts">${acts.join('')}</div>
+    </div>`;
+  }
+
+  function emptyPanel(title, desc) {
+    return `<div class="panel" style="text-align:center;padding:38px 20px">
+      <div style="color:var(--text-dim);font-size:14.5px;font-weight:600">${esc(title)}</div>
+      <div style="color:var(--text-faint);font-size:13px;margin-top:5px">${esc(desc)}</div>
+    </div>`;
+  }
+
+  // handleAccountAction 处理账号卡片上的操作按钮。
+  async function handleAccountAction(btn) {
+    const act = btn.dataset.acct;
+    const label = btn.dataset.label;
+    if (act === 'relogin') { await startLogin(btn.dataset.path); return; }
+
+    btn.disabled = true;
+    try {
+      await post(`/api/accounts/manage?action=${encodeURIComponent(act)}`, { label });
+      toast(act === 'enable' ? `已启用 ${label}` : act === 'disable' ? `已停用 ${label}` : `已清除 ${label} 的冷却`, 'success');
+      await loadAccounts();
+      if (state.page === 'platforms') loadPlatforms();
+    } catch (err) {
+      toast('操作失败：' + err.message, 'error');
+    } finally { btn.disabled = false; }
+  }
+
+  // startLogin 发起设备码登录（添加账号 / 重新登录）。
+  // 异步 + 轮询：用户要去浏览器完成授权，同步请求必然超时。
+  async function startLogin(outPath) {
+    const name = outPath ? outPath.split('/').pop() : '';
+    const q = name ? `?name=${encodeURIComponent(name)}` : '';
+    let sess;
+    try {
+      sess = await post('/api/accounts/manage' + q, {});
+    } catch (err) {
+      toast('无法发起登录：' + err.message, 'error');
+      return;
+    }
+    showLoginDialog(sess);
+  }
+
+  function showLoginDialog(sess) {
+    const dlg = $('loginDialog');
+    const url = sess.auth_url || '';
+    $('loginUrl').value = url;
+    $('loginUrl').readOnly = true;
+    $('loginOpen').disabled = !url;
+    $('loginHint').textContent = url
+      ? '在浏览器中打开下面的地址完成授权（最长等待 5 分钟）'
+      : '正在获取授权地址…';
+    $('loginState').textContent = '';
+    dlg.showModal();
+
+    // 轮询状态：成功/失败即停。
+    let stop = false;
+    dlg.addEventListener('close', () => { stop = true; }, { once: true });
+    (async () => {
+      for (let i = 0; i < 150 && !stop; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        let s;
+        try { s = await get('/api/accounts/login-status?id=' + encodeURIComponent(sess.id)); } catch { continue; }
+        if (!s.auth_url && !$('loginUrl').value) { $('loginUrl').value = s.auth_url || ''; $('loginOpen').disabled = !s.auth_url; }
+        if (s.status === 'pending') { $('loginState').textContent = '等待授权中…'; continue; }
+        if (s.status === 'success') {
+          $('loginState').textContent = '登录成功' + (s.account ? '：' + s.account : '');
+          toast('账号已添加' + (s.account ? '：' + s.account : ''), 'success');
+          setTimeout(() => dlg.close(), 1200);
+          await loadAccounts();
+          if (state.page === 'platforms') loadPlatforms();
+          return;
+        }
+        $('loginState').textContent = '登录失败：' + (s.error || '未知错误');
+        toast('登录失败：' + (s.error || ''), 'error');
+        return;
+      }
+    })();
   }
 
   function renderPlatforms(d) {
@@ -640,6 +819,9 @@
   async function loadModels() {
     state.modelsLoading = true;
     if (state.page === 'models') renderModels();
+    if (state.modelView === 'matrix') {
+      try { state.matrix = await get('/api/accounts/models'); } catch (e) { state.matrix = null; }
+    }
     try {
       state.models = await get('/api/models');
       state.modelsError = '';
@@ -653,6 +835,7 @@
   }
 
   function renderModels() {
+    if (state.modelView === 'matrix') { renderModelMatrix(); return; }
     const d = state.models || {};
     const all = d.models || [];
     const q = state.modelsFilter.trim().toLowerCase();
@@ -664,6 +847,35 @@
         <th>能力</th>
       </tr></thead>
       <tbody>${modelsBody(rows, all, q)}</tbody>`;
+  }
+
+  // renderModelMatrix 画「模型 × 账号」矩阵：看得出哪个账号支持哪个模型。
+  //
+  // 多账号场景下这个信息很关键——不同账号开放的模型集可能不同，
+  // 而 /v1/models 只返回并集，看不出差异。
+  function renderModelMatrix() {
+    const m = state.matrix;
+    const host = $('modelTable');
+    if (!m || !m.accounts || !m.accounts.length) {
+      $('modelsSub').textContent = '账号 × 模型矩阵';
+      host.innerHTML = `<tbody>${emptyRow(2, state.modelsLoading ? '加载中…' : '暂无矩阵数据', '需要号池模式；单账号模式请切回列表视图')}</tbody>`;
+      return;
+    }
+    const q = state.modelsFilter.trim().toLowerCase();
+    const models = q ? m.models.filter((x) => x.toLowerCase().includes(q)) : m.models;
+    $('modelsSub').textContent = `账号 × 模型矩阵 · ${m.accounts.length} 个账号 / ${m.models.length} 个模型`;
+
+    const has = {};
+    for (const acc of m.accounts) has[acc] = new Set(m.matrix[acc] || []);
+
+    host.innerHTML = `
+      <thead><tr><th>模型</th>${m.accounts.map((a) => `<th class="mx-acct" title="${esc(a)}">${esc(a)}</th>`).join('')}</tr></thead>
+      <tbody>${models.map((id) => `<tr>
+        <td class="mono">${esc(id)}</td>
+        ${m.accounts.map((a) => `<td class="mx-cell">${has[a].has(id)
+          ? '<span class="mx-yes" title="支持">✓</span>'
+          : '<span class="mx-no" title="不支持">·</span>'}</td>`).join('')}
+      </tr>`).join('')}</tbody>`;
   }
 
   function modelsBody(rows, all, q) {
@@ -735,18 +947,18 @@
     if (state.reqFilter === 'ok') rows = rows.filter((r) => r.ok);
     $('reqTable').innerHTML = `
       <thead><tr>
-        <th>时间</th><th>状态</th><th>协议</th><th>模型</th><th>方式</th>
+        <th>时间</th><th>状态</th><th>协议</th><th>模型</th><th>账号</th><th>方式</th>
         <th class="num">耗时</th><th class="num">输入</th><th class="num">输出</th><th>错误</th>
       </tr></thead>
       <tbody>${reqBody(rows)}</tbody>`;
   }
 
   function reqBody(rows) {
-    if (state.reqLoading && !rows.length) return skeletonRows(9, 6);
-    if (state.reqError && !rows.length) return emptyRow(9, '加载失败', state.reqError);
+    if (state.reqLoading && !rows.length) return skeletonRows(10, 6);
+    if (state.reqError && !rows.length) return emptyRow(10, '加载失败', state.reqError);
     if (!rows.length) {
       const filtered = state.reqFilter;
-      return emptyRow(9, filtered ? '没有符合筛选条件的记录' : '还没有请求记录',
+      return emptyRow(10, filtered ? '没有符合筛选条件的记录' : '还没有请求记录',
         filtered ? '试试切回「全部」' : '通过 /v1/* 接口发起一次请求后，这里会出现明细');
     }
     return rows.map((r) => `
@@ -755,6 +967,7 @@
         <td><span class="badge ${r.ok ? 'ok' : 'err'}">${r.ok ? '成功' : (r.status || '失败')}</span></td>
         <td>${esc(r.protocol)}</td>
         <td class="mono">${esc(r.model || '-')}</td>
+        <td class="mono">${esc(r.account || '—')}</td>
         <td>${r.stream ? '流式' : '非流式'}</td>
         <td class="num">${fmtMs(r.duration_ms)}</td>
         <td class="num">${r.input_tokens || '-'}</td>
@@ -1318,10 +1531,22 @@
 
   $('btnRefresh').addEventListener('click', () => loadOverview());
   $('btnReloadPlatforms').addEventListener('click', loadPlatforms);
+  $('btnReloadAccounts').addEventListener('click', loadAccounts);
+  $('btnAddAccount').addEventListener('click', () => startLogin(''));
+  // 账号卡片按钮用事件委托：卡片每次重绘，逐个绑定会漏。
+  $('accountList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-acct]');
+    if (b) handleAccountAction(b);
+  });
+  $('loginOpen').addEventListener('click', () => {
+    const u = $('loginUrl').value.trim();
+    if (u) window.open(u, '_blank', 'noopener');
+  });
   $('btnReloadModels').addEventListener('click', loadModels);
   $('btnReloadReq').addEventListener('click', loadRequests);
   $('reqFilter').addEventListener('change', (e) => { state.reqFilter = e.target.value; renderRequests(); });
   $('modelFilter').addEventListener('input', (e) => { state.modelsFilter = e.target.value; renderModels(); });
+  $('modelView').addEventListener('change', (e) => { state.modelView = e.target.value; loadModels(); });
 
   $('btnChatSettings').addEventListener('click', () => $('chatParams').classList.toggle('show'));
   $('btnClear').addEventListener('click', clearChat);

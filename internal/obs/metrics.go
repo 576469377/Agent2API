@@ -41,6 +41,11 @@ type Record struct {
 	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
 	Error           string    `json:"error,omitempty"`
 
+	// Account 是本次请求实际使用的上游账号标识（号池的凭证文件名）。
+	// 单账号模式为空。它是「每个账号用了多少额度」的唯一归因来源——
+	// 没有它，多账号场景下控制台只能看到总量，看不出账号间的分布。
+	Account string `json:"account,omitempty"`
+
 	// GenMs 是本次请求的「生成耗时」（毫秒）：从上游开始产出算起，到流结束或被中断为止。
 	// 它是 TPS 的分母，与 DurationMs（含建连、解码、写回）语义不同。
 	// 0 表示**未测量**（失败请求、未产出 token、或来自无该字段的旧指标文件），
@@ -97,21 +102,23 @@ type Metrics struct {
 	genTokSum atomic.Int64
 	genCount  atomic.Int64
 
-	mu      sync.Mutex
-	byModel map[string]*groupCounter
-	byProto map[string]*groupCounter
-	recent  []Record
-	series  []minuteBucket
+	mu        sync.Mutex
+	byModel   map[string]*groupCounter
+	byProto   map[string]*groupCounter
+	byAccount map[string]*groupCounter
+	recent    []Record
+	series    []minuteBucket
 }
 
 // New 创建指标采集器。
 func New() *Metrics {
 	return &Metrics{
-		started: time.Now(),
-		byModel: map[string]*groupCounter{},
-		byProto: map[string]*groupCounter{},
-		recent:  make([]Record, 0, recentCap),
-		series:  make([]minuteBucket, 0, seriesCap),
+		started:   time.Now(),
+		byModel:   map[string]*groupCounter{},
+		byProto:   map[string]*groupCounter{},
+		byAccount: map[string]*groupCounter{},
+		recent:    make([]Record, 0, recentCap),
+		series:    make([]minuteBucket, 0, seriesCap),
 	}
 }
 
@@ -158,6 +165,7 @@ func (m *Metrics) Record(r Record) {
 
 	m.bump(m.byModel, r.Model, r)
 	m.bump(m.byProto, r.Protocol, r)
+	m.bump(m.byAccount, r.Account, r)
 
 	// 最近请求（新在前）
 	m.recent = append(m.recent, r)
@@ -241,6 +249,7 @@ type Snapshot struct {
 
 	ByModel    []GroupStat    `json:"by_model"`
 	ByProtocol []GroupStat    `json:"by_protocol"`
+	ByAccount  []GroupStat    `json:"by_account"`
 	Series     []minuteBucket `json:"series"`
 	Recent     []Record       `json:"recent"`
 }
@@ -272,6 +281,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	m.mu.Lock()
 	byModel := toStats(m.byModel)
 	byProto := toStats(m.byProto)
+	byAccount := toStats(m.byAccount)
 	rawSeries := make([]minuteBucket, len(m.series))
 	copy(rawSeries, m.series)
 	series := fillSeriesBuckets(rawSeries, seriesWindow)
@@ -302,6 +312,7 @@ func (m *Metrics) Snapshot() Snapshot {
 		TPSSamples:      genN,
 		ByModel:         byModel,
 		ByProtocol:      byProto,
+		ByAccount:       byAccount,
 		Series:          series,
 		Recent:          recent,
 	}
@@ -397,6 +408,7 @@ type persisted struct {
 	GenCount  int64                     `json:"gen_count,omitempty"`
 	ByModel   map[string]persistCounter `json:"by_model"`
 	ByProto   map[string]persistCounter `json:"by_proto"`
+	ByAccount map[string]persistCounter `json:"by_account,omitempty"`
 	Recent    []Record                  `json:"recent"`
 	Series    []minuteBucket            `json:"series"`
 	SavedAt   int64                     `json:"saved_at"`
@@ -424,6 +436,7 @@ func (m *Metrics) Save(path string) error {
 		GenCount:  m.genCount.Load(),
 		ByModel:   cloneCounters(m.byModel),
 		ByProto:   cloneCounters(m.byProto),
+		ByAccount: cloneCounters(m.byAccount),
 		Recent:    append([]Record(nil), m.recent...),
 		Series:    append([]minuteBucket(nil), m.series...),
 		SavedAt:   time.Now().Unix(),
@@ -468,6 +481,7 @@ func (m *Metrics) Load(path string) error {
 	m.mu.Lock()
 	m.byModel = rebuildCounters(p.ByModel)
 	m.byProto = rebuildCounters(p.ByProto)
+	m.byAccount = rebuildCounters(p.ByAccount)
 	m.recent = append([]Record(nil), p.Recent...)
 	m.series = append([]minuteBucket(nil), p.Series...)
 	m.mu.Unlock()

@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
+	"github.com/576469377/Agent2API/internal/api/common"
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
@@ -119,6 +123,245 @@ func (a *App) apiAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+// ───────────────────────── 账号管理（登录状态 / 重新登录 / 增删） ─────────────────────────
+
+// accountIdentityProvider 由能自报身份与凭证健康度的适配器实现。
+type accountIdentityProvider interface {
+	AccountIdentity() workbuddy.AccountIdentity
+}
+
+// accountLister 由能列出账号的适配器实现（号池或单账号）。
+type accountLister interface {
+	AccountLabels() []string
+}
+
+// apiAccountsManage 是账号管理端点：
+//
+//	GET    /api/accounts/manage          列出账号 + 登录状态
+//	POST   /api/accounts/manage          启动添加账号（设备码登录）
+//	POST   /api/accounts/manage?action=enable|disable|reset&label=X
+func (a *App) apiAccountsManage(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		a.listManagedAccounts(w)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "仅支持 GET / POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 不带 action = 启动一次新登录（添加账号）。
+	action := r.URL.Query().Get("action")
+	if action == "" {
+		a.startAccountLogin(w, r)
+		return
+	}
+
+	var body struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Label == "" {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "缺少 label"},
+		})
+		return
+	}
+
+	// 账号操作走可选接口：非号池模式（单账号）自然不支持。
+	ctl, ok := a.adapter.(adapter.PoolController)
+	if !ok {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "当前为单账号模式，不支持账号操作"},
+		})
+		return
+	}
+
+	var err error
+	switch action {
+	case "enable":
+		err = ctl.SetAccountEnabled(body.Label, true)
+	case "disable":
+		err = ctl.SetAccountEnabled(body.Label, false)
+	case "reset":
+		err = ctl.ResetAccountCooldown(body.Label)
+	default:
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "未知操作: " + action},
+		})
+		return
+	}
+	if err != nil {
+		f := llm.Wrap(err)
+		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+		return
+	}
+	a.listManagedAccounts(w)
+}
+
+// managedAccount 是账号管理视图：调度状态 + 登录状态合并。
+type managedAccount struct {
+	adapter.AccountStatus
+	Identity *workbuddy.AccountIdentity `json:"identity,omitempty"`
+}
+
+func (a *App) listManagedAccounts(w http.ResponseWriter) {
+	out := struct {
+		Accounts    []managedAccount `json:"accounts"`
+		Total       int              `json:"total"`
+		Healthy     int              `json:"healthy"`
+		AccountsDir string           `json:"accounts_dir,omitempty"`
+	}{Accounts: []managedAccount{}}
+
+	lister, ok := a.adapter.(accountStatusLister)
+	if !ok {
+		writeJSON(w, out)
+		return
+	}
+	sts := lister.Statuses()
+	out.Total = len(sts)
+	for _, st := range sts {
+		if st.Healthy {
+			out.Healthy++
+		}
+		m := managedAccount{AccountStatus: st}
+		// 登录状态：凭证是否还有效、refreshToken 是否已死。
+		if p, ok := st.Adapter.(accountIdentityProvider); ok {
+			id := p.AccountIdentity()
+			m.Identity = &id
+		}
+		out.Accounts = append(out.Accounts, m)
+	}
+	out.AccountsDir = a.cfg.Upstream.AccountsDir
+	writeJSON(w, out)
+}
+
+// startAccountLogin 发起设备码登录（添加新账号）。
+func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
+	dir := a.cfg.Upstream.AccountsDir
+	if dir == "" {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{
+				"message": "未配置 accounts_dir，无法确定新凭证的存放位置。请用 -accounts-dir 或配置文件指定",
+			},
+		})
+		return
+	}
+	// 新凭证文件名由前端给（默认 account-N）；只接受纯文件名，防目录穿越。
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = fmt.Sprintf("account-%d.json", time.Now().Unix())
+	}
+	if !safeCredentialName(name) {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "非法的凭证文件名（只允许字母数字、点、下划线、短横线）"},
+		})
+		return
+	}
+	sess, err := a.logins.Start(filepath.Join(dir, name))
+	if err != nil {
+		f := llm.Wrap(err)
+		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+		return
+	}
+	writeJSON(w, sess)
+}
+
+// apiLoginStatus 轮询一次登录会话。
+func (a *App) apiLoginStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "缺少 id"},
+		})
+		return
+	}
+	sess, err := a.logins.Get(id)
+	if err != nil {
+		f := llm.Wrap(err)
+		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+		return
+	}
+	writeJSON(w, sess)
+}
+
+// accountModelLister 由能按账号列模型（号池）的适配器实现。
+type accountModelLister interface {
+	ModelsByAccount(ctx context.Context) map[string][]string
+}
+
+// apiAccountModels 返回模型×账号矩阵。
+//
+// 单账号模式退化：只有一个账号时返回该账号的模型，前端矩阵自然退化成列表。
+func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	type resp struct {
+		Accounts []string            `json:"accounts"`
+		Models   []string            `json:"models"`
+		Matrix   map[string][]string `json:"matrix"`
+	}
+	out := resp{Accounts: []string{}, Models: []string{}, Matrix: map[string][]string{}}
+
+	if lister, ok := a.adapter.(accountModelLister); ok {
+		m := lister.ModelsByAccount(ctx)
+		seen := map[string]bool{}
+		for label, ids := range m {
+			out.Accounts = append(out.Accounts, label)
+			out.Matrix[label] = ids
+			for _, id := range ids {
+				if !seen[id] {
+					seen[id] = true
+					out.Models = append(out.Models, id)
+				}
+			}
+		}
+	} else {
+		// 单账号：直接列模型。
+		models, err := a.adapter.ListModels(ctx)
+		if err != nil {
+			f := llm.Wrap(err)
+			writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+			return
+		}
+		out.Accounts = []string{"(单账号)"}
+		for _, md := range models {
+			out.Models = append(out.Models, md.ID)
+			out.Matrix["(单账号)"] = append(out.Matrix["(单账号)"], md.ID)
+		}
+	}
+	sort.Strings(out.Accounts)
+	sort.Strings(out.Models)
+	writeJSON(w, out)
+}
+
+// safeCredentialName 只允许纯文件名，挡住 ../ 之类的路径穿越。
+func safeCredentialName(name string) bool {
+	if name == "" || len(name) > 128 || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// writeJSONWithStatus 写指定状态码的 JSON。
+func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // describePlatform 读取当前平台的运行时描述；适配器未实现 Describer 时给出兜底信息。

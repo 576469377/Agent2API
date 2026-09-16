@@ -54,6 +54,8 @@ type App struct {
 	// createdAt 用于 /v1/models 的 created 字段稳定输出。
 	createdAt int64
 	startedAt time.Time
+	// logins 管理进行中的设备码登录（控制台「添加账号」「重新登录」）。
+	logins *loginManager
 }
 
 // New 构造应用。
@@ -74,6 +76,7 @@ func New(cfg config.Config, adp adapter.Adapter, logger *log.Logger) *App {
 		cfg: cfg, adapter: adp, logger: logger,
 		metrics: metrics, metricsFile: cfg.MetricsFile,
 		createdAt: now.Unix(), startedAt: now,
+		logins: newLoginManager(cfg.Upstream.BaseURL, func(f string, a ...any) { logger.Printf(f, a...) }),
 	}
 }
 
@@ -124,6 +127,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/metrics", a.withAuth(a.apiMetrics))
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
 	mux.HandleFunc("/api/accounts", a.withAuth(a.apiAccounts))
+	mux.HandleFunc("/api/accounts/manage", a.withAuth(a.apiAccountsManage))
+	mux.HandleFunc("/api/accounts/login-status", a.withAuth(a.apiLoginStatus))
+	mux.HandleFunc("/api/accounts/models", a.withAuth(a.apiAccountModels))
 	mux.HandleFunc("/api/models", a.withAuth(a.apiModels))
 	mux.HandleFunc("/api/config", a.withAuth(a.apiConfig))
 
@@ -303,6 +309,8 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 		common.WriteError(w, llm.Wrap(err))
 		return
 	}
+	// 账号归因：控制台的「每账号用量」完全依赖这一行。
+	rec.Account = adapter.AccountOf(stream)
 	defer func() {
 		if c, ok := stream.(io.Closer); ok {
 			_ = c.Close()
@@ -355,6 +363,8 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 		common.WriteError(w, llm.Wrap(err))
 		return
 	}
+	// 账号归因：控制台的「每账号用量」完全依赖这一行。
+	rec.Account = adapter.AccountOf(stream)
 	defer func() {
 		if c, ok := stream.(io.Closer); ok {
 			_ = c.Close()

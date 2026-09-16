@@ -220,3 +220,78 @@ func TestSnapshotMarshalable(t *testing.T) {
 		}
 	}
 }
+
+// ───────────────────────── 账号维度归因 ─────────────────────────
+
+// TestByAccountAggregation 验证请求按账号正确分组统计。
+// 这是「每个账号用了多少额度」的唯一数据来源。
+func TestByAccountAggregation(t *testing.T) {
+	m := New()
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", Account: "a.json", OK: true, OutputTokens: 100, DurationMs: 200})
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", Account: "a.json", OK: true, OutputTokens: 50, DurationMs: 100})
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", Account: "b.json", OK: false, Status: 429, DurationMs: 300})
+
+	s := m.Snapshot()
+	if len(s.ByAccount) != 2 {
+		t.Fatalf("应有 2 个账号分组, got %d: %+v", len(s.ByAccount), s.ByAccount)
+	}
+	byKey := map[string]GroupStat{}
+	for _, g := range s.ByAccount {
+		byKey[g.Key] = g
+	}
+	a := byKey["a.json"]
+	if a.Total != 2 || a.OutputTokens != 150 {
+		t.Fatalf("a.json 统计错误: %+v", a)
+	}
+	if a.SuccessRate != 1 {
+		t.Fatalf("a.json 成功率应为 1: %+v", a)
+	}
+	b := byKey["b.json"]
+	if b.Total != 1 || b.Failed != 1 || b.SuccessRate != 0 {
+		t.Fatalf("b.json 统计错误: %+v", b)
+	}
+}
+
+// TestAccountEmptyFallsBackToUnknown 验证单账号模式（Account 为空）的归因。
+func TestAccountEmptyFallsBackToUnknown(t *testing.T) {
+	m := New()
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", OK: true})
+	s := m.Snapshot()
+	if len(s.ByAccount) != 1 || s.ByAccount[0].Key != "(unknown)" {
+		t.Fatalf("空账号应归入 (unknown): %+v", s.ByAccount)
+	}
+}
+
+// TestByAccountSurvivesSaveLoad 验证账号维度能落盘并恢复。
+// 用户明确要求账号级统计持久化——重启后不该清零。
+func TestByAccountSurvivesSaveLoad(t *testing.T) {
+	m := New()
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", Account: "a.json", OK: true, OutputTokens: 42})
+	m.Record(Record{Time: time.Now(), Protocol: "openai", Model: "m", Account: "b.json", OK: true, OutputTokens: 8})
+
+	path := filepath.Join(t.TempDir(), "metrics.json")
+	if err := m.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m2 := New()
+	if err := m2.Load(path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := m2.Snapshot()
+	if len(s.ByAccount) != 2 {
+		t.Fatalf("恢复后应有 2 个账号分组, got %d", len(s.ByAccount))
+	}
+	byKey := map[string]GroupStat{}
+	for _, g := range s.ByAccount {
+		byKey[g.Key] = g
+	}
+	if byKey["a.json"].OutputTokens != 42 || byKey["b.json"].OutputTokens != 8 {
+		t.Fatalf("账号 token 未正确恢复: %+v", s.ByAccount)
+	}
+	// recent 明细里的账号也要在（控制台日志页要显示「哪个账号」）。
+	for _, r := range s.Recent {
+		if r.Account == "" {
+			t.Fatalf("recent 丢失账号归因: %+v", r)
+		}
+	}
+}

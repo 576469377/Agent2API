@@ -184,6 +184,13 @@ func newAuth(cli *httpClient, cred *Credential, path string) *Auth {
 	return &Auth{cli: cli, cred: cred, credentialPath: path}
 }
 
+// CredentialPath 返回凭证文件路径（供控制台展示与「重新登录写回哪个文件」）。
+func (a *Auth) CredentialPath() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.credentialPath
+}
+
 // Credential 返回当前凭证快照。
 func (a *Auth) Credential() Credential {
 	a.mu.Lock()

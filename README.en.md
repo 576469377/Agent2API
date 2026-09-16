@@ -121,7 +121,11 @@ Embedded in the gateway — no separate deployment, no frontend build step (asse
 | **Settings** | Sanitization toggle (hot reload), model-list refetch, effective config |
 
 > [!NOTE]
-> Zero CDN dependencies for core functionality. Only **math rendering** lazily loads KaTeX on first use and degrades to plain text offline. Screenshots are welcome — see [Contributing](#contributing).
+**Accounts page** (the management entry for the multi-account pool):
+
+![Console · Accounts](docs/images/console-accounts.png)
+
+> Zero CDN dependencies for core functionality. Only **math rendering** lazily loads KaTeX on first use and degrades to plain text offline. Account names in the screenshot are demo data.
 
 ---
 

@@ -39,6 +39,9 @@ const (
 	stateCooldown
 	// stateBlocked 鉴权失效（刷新后仍 401），需人工介入。
 	stateBlocked
+	// stateDisabled 由操作者在控制台手动停用（不参与调度，直到重新启用）。
+	// 与 blocked 的区别：blocked 是上游判定，disabled 是人的决定。
+	stateDisabled
 )
 
 func (s accountState) String() string {
@@ -47,6 +50,8 @@ func (s accountState) String() string {
 		return "cooldown"
 	case stateBlocked:
 		return "blocked"
+	case stateDisabled:
+		return "disabled"
 	default:
 		return "ready"
 	}
@@ -178,7 +183,9 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			bs, probeErr := probeFirstEvent(ctx, s)
 			if probeErr == nil {
 				p.succeed(idx)
-				return bs, nil
+				// 带上账号标签：app 层据此把请求归因到具体账号，
+				// 控制台才能回答「每个账号用了多少额度」。
+				return &labeledStream{ResponseStream: bs, label: acc.label}, nil
 			}
 			_ = closeStream(s)
 			err = probeErr
@@ -271,8 +278,14 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 	return nil, lastErr
 }
 
-// available 判断账号当前是否可服务（读时判定：冷却已过期即视为可用）。
+// available 判断账号当前是否可服务。
+//
+// 读时判定：冷却已过期即视为可用（不需要后台解冻任务）；
+// 但手动停用的账号只有重新启用才会回到调度。
 func (a *poolAccount) available(now time.Time) bool {
+	if a.state == stateDisabled {
+		return false
+	}
 	return !a.cooldownUntil.After(now)
 }
 
@@ -415,6 +428,33 @@ func probeFirstEvent(ctx context.Context, s llm.ResponseStream) (llm.ResponseStr
 	return &bufferedStream{inner: s, first: &ev}, nil
 }
 
+// AccountLabeler 由带账号归因的流实现。
+//
+// 用可选接口而不是往 llm.ResponseStream 里加方法：下游协议编码器不关心
+// 账号是谁，只有 app 层的观测需要它。
+type AccountLabeler interface {
+	AccountLabel() string
+}
+
+// labeledStream 把账号标签附加到流上，Recv/Close 全部透传。
+type labeledStream struct {
+	llm.ResponseStream
+	label string
+}
+
+// AccountLabel 实现 AccountLabeler。
+func (s *labeledStream) AccountLabel() string { return s.label }
+
+func (s *labeledStream) Close() error { return closeStream(s.ResponseStream) }
+
+// AccountOf 从流中提取账号标签；无标签（单账号模式）返回空串。
+func AccountOf(s llm.ResponseStream) string {
+	if l, ok := s.(AccountLabeler); ok {
+		return l.AccountLabel()
+	}
+	return ""
+}
+
 // bufferedStream 把探测阶段读到的事件缓存起来，先吐缓存再直通内层流。
 type bufferedStream struct {
 	inner llm.ResponseStream
@@ -440,6 +480,30 @@ func closeStream(s llm.ResponseStream) error {
 	return nil
 }
 
+// ModelsByAccount 返回每个账号的可用模型 id 集合（模型×账号矩阵用）。
+//
+// 逐账号查询，失败记为空集合而不是整体失败——某个账号掉线不该让矩阵整块不可用。
+func (p *Pool) ModelsByAccount(ctx context.Context) map[string][]string {
+	p.mu.Lock()
+	accs := append([]*poolAccount(nil), p.accounts...)
+	p.mu.Unlock()
+
+	out := make(map[string][]string, len(accs))
+	for _, acc := range accs {
+		models, err := acc.adp.ListModels(ctx)
+		if err != nil {
+			out[acc.label] = nil
+			continue
+		}
+		ids := make([]string, 0, len(models))
+		for _, m := range models {
+			ids = append(ids, m.ID)
+		}
+		out[acc.label] = ids
+	}
+	return out
+}
+
 // ListModels 实现 adapter.Adapter：用第一个健康账号的模型目录。
 // 同平台账号的目录应当一致；全冷却时退回第一个账号让其报出真实错误。
 func (p *Pool) ListModels(ctx context.Context) ([]ModelInfo, error) {
@@ -463,6 +527,14 @@ func (p *Pool) Statuses() []AccountStatus {
 	out := make([]AccountStatus, 0, len(p.accounts))
 	for i, acc := range p.accounts {
 		st := AccountStatus{Label: acc.label, Adapter: acc.adp, IsNext: i == p.next%len(p.accounts)}
+		if acc.state == stateDisabled {
+			// 手动停用：不健康但不是故障，且没有冷却倒计时。
+			st.State = stateDisabled.String()
+			st.Reason = "disabled"
+			st.LastError = acc.lastErr
+			out = append(out, st)
+			continue
+		}
 		if acc.available(now) {
 			st.Healthy = true
 			st.State = stateReady.String()
@@ -552,6 +624,74 @@ func joinLabels(labels []string) string {
 	return out
 }
 
+// PoolController 是号池的操作面（控制台用）。
+//
+// 与控制台既有的 Describer/Configurable 同一模式：可选接口，
+// 不实现的控制台自然禁用对应按钮。
+type PoolController interface {
+	// SetAccountEnabled 启用/停用某个账号（按 label 定位，不重启即生效）。
+	SetAccountEnabled(label string, enabled bool) error
+	// ResetAccountCooldown 手动清除某个账号的冷却（用于「上游已恢复但我还在等」）。
+	ResetAccountCooldown(label string) error
+}
+
+// SetAccountEnabled 启用或停用账号。停用后不参与调度，直到再次启用。
+func (p *Pool) SetAccountEnabled(label string, enabled bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, acc := range p.accounts {
+		if acc.label != label {
+			continue
+		}
+		if enabled {
+			if acc.state == stateDisabled {
+				acc.state = stateReady
+				acc.cooldownUntil = time.Time{}
+				acc.backoffLevel = 0
+				acc.lastErr = ""
+			}
+		} else {
+			acc.state = stateDisabled
+			acc.cooldownUntil = time.Time{}
+		}
+		p.logfNow("账号 %s 已%s", label, map[bool]string{true: "启用", false: "停用"}[enabled])
+		return nil
+	}
+	return &llm.Failure{Code: "account_not_found", Message: "账号不存在: " + label, ClientFixable: true}
+}
+
+// ResetAccountCooldown 清除冷却，让账号立刻回到调度。
+func (p *Pool) ResetAccountCooldown(label string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, acc := range p.accounts {
+		if acc.label != label {
+			continue
+		}
+		if acc.state == stateDisabled {
+			return &llm.Failure{Code: "account_disabled", Message: "账号已停用，请先启用: " + label, ClientFixable: true}
+		}
+		acc.state = stateReady
+		acc.cooldownUntil = time.Time{}
+		acc.backoffLevel = 0
+		acc.lastErr = ""
+		p.logfNow("账号 %s 的冷却已手动清除", label)
+		return nil
+	}
+	return &llm.Failure{Code: "account_not_found", Message: "账号不存在: " + label, ClientFixable: true}
+}
+
+// AccountLabels 返回账号 label 列表（供控制台操作面做参数校验）。
+func (p *Pool) AccountLabels() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, 0, len(p.accounts))
+	for _, acc := range p.accounts {
+		out = append(out, acc.label)
+	}
+	return out
+}
+
 // SetSanitize 实现 adapter.Configurable：作用于所有账号。
 func (p *Pool) SetSanitize(v bool) {
 	p.mu.Lock()
@@ -588,7 +728,8 @@ func (p *Pool) InvalidateModels() {
 
 // 编译期断言：Pool 满足平台接缝的全部接口。
 var (
-	_ Adapter      = (*Pool)(nil)
-	_ Describer    = (*Pool)(nil)
-	_ Configurable = (*Pool)(nil)
+	_ Adapter        = (*Pool)(nil)
+	_ Describer      = (*Pool)(nil)
+	_ Configurable   = (*Pool)(nil)
+	_ PoolController = (*Pool)(nil)
 )

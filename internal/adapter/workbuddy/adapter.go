@@ -128,6 +128,36 @@ func (a *Adapter) AccountUID() string {
 	return a.auth.Credential().UID
 }
 
+// AccountIdentity 是账号的身份与凭证健康度（供控制台展示登录状态）。
+type AccountIdentity struct {
+	UID      string `json:"uid,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
+	CredPath string `json:"credential_path,omitempty"`
+	// ExpiresAt 是 access token 到期时刻（Unix 毫秒）；0 表示未知。
+	ExpiresAt int64 `json:"expires_at,omitempty"`
+	// RefreshExpAt 是 refresh token 到期时刻；它过期就只能重新登录。
+	RefreshExpAt int64 `json:"refresh_expires_at,omitempty"`
+	// NeedsRefresh 表示 access token 已过期或即将过期（网关会自行刷新）。
+	NeedsRefresh bool `json:"needs_refresh"`
+	// RefreshExpired 表示 refresh token 也已过期——**只能重新登录**。
+	RefreshExpired bool `json:"refresh_expired"`
+}
+
+// AccountIdentity 返回账号身份与凭证健康度。
+func (a *Adapter) AccountIdentity() AccountIdentity {
+	c := a.auth.Credential()
+	id := AccountIdentity{
+		UID: c.UID, Nickname: c.Nickname,
+		CredPath:  a.auth.CredentialPath(),
+		ExpiresAt: c.ExpiresAt, RefreshExpAt: c.RefreshExpAt,
+	}
+	now := time.Now().UnixMilli()
+	id.NeedsRefresh = c.ExpiresAt > 0 && c.ExpiresAt < now+60_000
+	// refresh token 过期是终态：网关自己救不回来，必须重新登录。
+	id.RefreshExpired = c.RefreshExpAt > 0 && c.RefreshExpAt < now
+	return id
+}
+
 // retryAttemptLimit 是 dial 的最大尝试次数（含首次）。
 const retryAttemptLimit = 3
 

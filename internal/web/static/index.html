@@ -17,6 +17,7 @@
   <symbol id="i-platform" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 7.4L4.6 6 12 2.6 19.4 6 12 9.4zM2 17l10 5 10-5-2.2-1.1L12 19.6 4.2 15.9 2 17zm0-5 10 5 10-5-2.2-1.1L12 14.6 4.2 10.9 2 12z"/></symbol>
   <symbol id="i-model" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zm-9 5.6-6-3.4V9.4l6 3.4v8.8z"/></symbol>
   <symbol id="i-log" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></symbol>
+  <symbol id="i-account" viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3H9l-.3 2.5c-.6.3-1.2.6-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1L9 21h6l.3-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></symbol>
 </svg>
 <div class="shell">
@@ -36,6 +37,7 @@
       <button class="nav-item active" data-page="overview"><svg class="ic"><use href="#i-overview"/></svg>概览</button>
       <button class="nav-item" data-page="requests"><svg class="ic"><use href="#i-log"/></svg>调用日志</button>
       <div class="nav-group">上游</div>
+      <button class="nav-item" data-page="accounts"><svg class="ic"><use href="#i-account"/></svg>账号</button>
       <button class="nav-item" data-page="platforms"><svg class="ic"><use href="#i-platform"/></svg>平台</button>
       <button class="nav-item" data-page="models"><svg class="ic"><use href="#i-model"/></svg>模型</button>
       <div class="nav-group">工具</div>
@@ -90,6 +92,13 @@
         <div class="panel">
           <div class="panel-head"><h2>模型调用排行</h2></div>
           <div class="rank" id="rankModel"></div>
+        </div>
+      </div>
+
+      <div class="panel-row" id="panelAcctRank" style="display:none">
+        <div class="panel">
+          <div class="panel-head"><h2>账号用量排行</h2><span class="panel-note">按请求数</span></div>
+          <div class="rank" id="rankAccount"></div>
         </div>
       </div>
 
@@ -148,6 +157,22 @@
       </div>
     </section>
 
+    <!-- 账号 -->
+    <section class="page" id="page-accounts">
+      <header class="page-head">
+        <div>
+          <div class="crumb" data-crumb></div>
+          <h1>账号</h1>
+          <p class="sub" id="acctSub">号池中的上游账号与登录状态</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="btnAddAccount">添加账号</button>
+          <button class="btn" id="btnReloadAccounts">刷新</button>
+        </div>
+      </header>
+      <div id="accountList"></div>
+    </section>
+
     <!-- 平台 -->
     <section class="page" id="page-platforms">
       <header class="page-head">
@@ -168,6 +193,10 @@
         <div><h1>模型</h1><p class="sub" id="modelsSub">当前平台可用模型</p></div>
         <div class="page-actions">
           <input type="text" id="modelFilter" class="filter" placeholder="筛选模型…">
+          <select id="modelView" title="视图">
+            <option value="list">列表</option>
+            <option value="matrix">账号矩阵</option>
+          </select>
           <button class="btn" id="btnReloadModels">刷新</button>
         </div>
       </header>
@@ -244,6 +273,17 @@
 
   </main>
 </div>
+<dialog id="loginDialog" class="dlg">
+  <h3>添加账号 / 重新登录</h3>
+  <p class="dlg-hint" id="loginHint"></p>
+  <input type="text" id="loginUrl" class="filter" style="width:100%">
+  <div class="dlg-actions">
+    <span id="loginState" class="dlg-state"></span>
+    <div class="spacer"></div>
+    <button class="btn" id="loginOpen">在浏览器打开</button>
+    <button class="btn" onclick="document.getElementById('loginDialog').close()">关闭</button>
+  </div>
+</dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>
