@@ -60,6 +60,16 @@ func (a *App) apiStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiAuthHint 是唯一一个**不要求鉴权**的管理端点。
+//
+// 它只暴露「网关是否启用了鉴权」这一个布尔值——这本身不是敏感信息
+// （探测 /v1/chat/completions 是否 401 也能得到同样结论），却能让网页控制台
+// 在 401 时给出可行动的提示：弹出密钥输入框，而不是一脸懵地白屏。
+// 除这个布尔外什么都不返回，避免成为未鉴权的信息出口。
+func (a *App) apiAuthHint(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]bool{"auth_enabled": a.cfg.Auth.APIKey != ""})
+}
+
 // ───────────────────────── 指标 ─────────────────────────
 
 func (a *App) apiMetrics(w http.ResponseWriter, r *http.Request) {

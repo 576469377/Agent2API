@@ -122,10 +122,21 @@ func (a *Adapter) CredentialInfo() string {
 	return "unknown"
 }
 
+// retryAttemptLimit 是 dial 的最大尝试次数（含首次）。
+const retryAttemptLimit = 3
+
+// retryMaxBackoff 是退避上限；下限为 500ms，按 2 倍递增。
+const retryMaxBackoff = 4 * time.Second
+
 // Stream 实现 adapter.Adapter。
 //
 // 上游不支持非流式，因此这里始终以流式请求；调用方需要单条完整响应时
 // 在 app 层聚合即可。
+//
+// 重试语义：dial 失败意味着连接尚未建立、请求体未被消费，重拨是安全的；
+// 一旦拿到流（哪怕第一帧还没到），失败就走流内错误通道，绝不在这一层重发，
+// 否则会把已生成的半截内容变成两份。可重试的只有传输错误与 5xx/429；
+// 4xx 语义拒绝（参数错、鉴权错）重试没有意义，直接失败。
 func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.ResponseStream, error) {
 	if err := a.auth.EnsureValid(); err != nil {
 		a.logf("凭证刷新失败: %v", err)
@@ -134,21 +145,94 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 
 	body := buildUpstreamRequest(req, a.sanitize.Load())
 
-	s, err := a.dial(ctx, body)
-	if err == nil {
-		return s, nil
-	}
+	backoff := 500 * time.Millisecond
+	var lastErr error
+	var refreshedOnAttempt bool
+	for attempt := 1; attempt <= retryAttemptLimit; attempt++ {
+		if attempt > 1 {
+			a.logf("重试上游连接（第 %d/%d 次）: %s", attempt, retryAttemptLimit, lastErr)
+		}
+		s, err := a.dial(ctx, body)
+		if err == nil {
+			return s, nil
+		}
+		lastErr = err
 
-	// 401 视为凭证过期：刷新一次后重试。
-	if isUnauthorized(err) {
-		a.logf("收到 401，尝试刷新 token 后重试")
-		if refreshErr := a.auth.Refresh(); refreshErr != nil {
-			a.logf("刷新 token 失败: %v", refreshErr)
+		// 客户端已放弃：不再重试，原样返回。
+		if ctx.Err() != nil {
 			return nil, err
 		}
-		return a.dial(ctx, body)
+
+		// 401 视为凭证过期：刷新后立刻重试。每次 attempt 只允许刷新一次，
+		// 否则「chat 恒 401 而 refresh 恒 200」会因 attempt--/attempt++ 抵消
+		// 变成无界循环（实测可 3 秒打近 4 万次上游）。
+		if isUnauthorized(err) {
+			if refreshedOnAttempt {
+				a.logf("刷新后仍 401，放弃: %s", err)
+				return nil, err
+			}
+			refreshedOnAttempt = true
+			a.logf("收到 401，尝试刷新 token 后重试")
+			if refreshErr := a.auth.Refresh(); refreshErr != nil {
+				a.logf("刷新 token 失败: %v", refreshErr)
+				return nil, err
+			}
+			attempt-- // 刷新本身不消耗退避节奏，但仍受 refreshedOnAttempt 闸门保护
+			continue
+		}
+
+		// 不可重试的错误（语义拒绝等）直接失败。
+		if !shouldRetryDial(err) {
+			return nil, err
+		}
+		// 最后一次失败无需等待。
+		if attempt == retryAttemptLimit {
+			break
+		}
+
+		// 指数退避；上游给了 Retry-After 时取两者较大值。
+		// Retry-After 最终受 retryMaxBackoff 钳制（4s）：这是有意的安全阀——
+		// 上游（或中间的攻击者）给一个 Retry-After: 86400 时不该真的把
+		// 客户端请求挂起一整天，超出部分宁可放弃重试。持续限流的场景下
+		// 重试名额会更快耗尽并失败返回，那是可接受的降级。
+		wait := backoff
+		if ra := retryAfterOf(err); ra > wait {
+			wait = ra
+		}
+		if wait > retryMaxBackoff {
+			wait = retryMaxBackoff
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(wait):
+		}
+		backoff *= 2
 	}
-	return nil, err
+	return nil, lastErr
+}
+
+// shouldRetryDial 判断连接失败是否值得重拨：传输层断裂或 5xx/429。
+func shouldRetryDial(err error) bool {
+	if isRetryableTransportError(err) {
+		return true
+	}
+	var f *llm.Failure
+	if errors.As(err, &f) {
+		if f.RateLimited || f.UpstreamFault {
+			return true
+		}
+	}
+	return false
+}
+
+// retryAfterOf 提取上游建议的等待时长；无则返回 0。
+func retryAfterOf(err error) time.Duration {
+	var f *llm.Failure
+	if errors.As(err, &f) && f.RetryAfterSeconds > 0 {
+		return time.Duration(f.RetryAfterSeconds) * time.Second
+	}
+	return 0
 }
 
 // dial 建立上游流式连接。

@@ -111,7 +111,7 @@ func buildUpstreamRequest(req llm.RequestMessages, sanitize bool) upstreamReques
 		out.ResponseFormat = map[string]any{"type": "json_object"}
 	}
 	if len(req.Tools) > 0 {
-		out.Tools = convertTools(req.Tools)
+		out.Tools = convertTools(req.Tools, sanitize)
 	}
 	if req.ToolChoice != nil {
 		out.ToolChoice = normalizeToolChoice(req.ToolChoice)
@@ -214,7 +214,11 @@ func toolResultHasImage(blocks []llm.Content) bool {
 //
 // 上游要求 parameters 是非空 dict 且必须含 type 字段，否则 400。
 // 这里过滤掉不合规的定义，而不是把错误抛给上游。
-func convertTools(defs []llm.ToolDefinition) []upstreamTool {
+//
+// sanitize 时对描述同样脱敏：工具描述常含攻击术语（安全类工具的常规描述，
+// 如 "exploit"、"SQL injection"），会被上游关键词审核误伤。
+// 此前 SanitizeToolDescription 已实现却从未接线，工具描述成了漏网之鱼。
+func convertTools(defs []llm.ToolDefinition, sanitize bool) []upstreamTool {
 	out := make([]upstreamTool, 0, len(defs))
 	for _, d := range defs {
 		if d.Name == "" {
@@ -228,11 +232,15 @@ func convertTools(defs []llm.ToolDefinition) []upstreamTool {
 		if _, ok := params["type"]; !ok {
 			params = cloneWithType(params)
 		}
+		desc := d.Description
+		if sanitize {
+			desc = SanitizeToolDescription(desc)
+		}
 		out = append(out, upstreamTool{
 			Type: "function",
 			Function: upstreamToolFn{
 				Name:        d.Name,
-				Description: d.Description,
+				Description: desc,
 				Parameters:  params,
 			},
 		})

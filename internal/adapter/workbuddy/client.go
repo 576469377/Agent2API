@@ -214,9 +214,18 @@ func httpError(status int, raw []byte, retryAfter string) error {
 	if status == 401 {
 		f.Code = "unauthorized"
 		f.ClientFixable = true
+		// 必须显式置 Unauthorized：classify 靠响应体文本匹配，而 401 响应体
+		// 未必含 "unauthorized" 字面量；漏标会让上游 401 被 HTTPStatus
+		// 映射成 400，客户端 SDK（Claude Code 等）就无法据此重新配置凭据。
+		f.Unauthorized = true
 	}
 	if status == 429 {
 		f.Code = "rate_limited"
+		// 必须显式置 RateLimited：classify 靠消息文本匹配，而 429 的响应体
+		// 未必含 "rate limit"/"429" 字面量（例如 {"code":429,"msg":"slow down"}），
+		// 漏标会导致 HTTPStatus 走 default 返回 502、ErrorType 变 server_error，
+		// 与错误码 rate_limited 自相矛盾，重试层也会把它当成不可重试。
+		f.RateLimited = true
 	}
 	if retryAfter != "" {
 		var secs int

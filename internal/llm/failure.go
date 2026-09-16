@@ -31,6 +31,10 @@ type Failure struct {
 	ContextLength bool
 	Timeout       bool
 	Canceled      bool
+	// Unauthorized 表示凭据缺失或错误。必须独立于 ClientFixable：
+	// HTTP 层要求这类失败返回 401（客户端 SDK 靠 401 触发重新配置凭据），
+	// 而 ClientFixable 会被统一映射成 400，掩盖真实原因。
+	Unauthorized bool
 	// ClientFixable 表示调用方修改请求后可以成功。
 	ClientFixable bool
 }
@@ -56,10 +60,18 @@ func NewFailure(code, message string, cause error) *Failure {
 	return f
 }
 
-// Wrap 把任意 error 包成 *Failure；本身已是 *Failure 则原样返回。
+// Wrap 把任意 error 包成 *Failure；本身已是 *Failure 则补齐派生分类后返回。
+//
+// 补分类是必要的：调用方常直接构造 Failure 字面量（只填 Code/Message/Cause
+// 等生产侧字段）再交给 Wrap，若原样返回，派生字段（Timeout/RateLimited…）
+// 会全部停留在零值——超时被判成通用上游故障、HTTPStatus 给出 502 而非 504。
+// classify 只依据生产侧字段重新推导派生字段，重复调用是幂等的。
 func Wrap(err error) *Failure {
 	var f *Failure
 	if errors.As(err, &f) {
+		if f != nil {
+			f.Classify()
+		}
 		return f
 	}
 	if err == nil {
@@ -83,6 +95,12 @@ func (f *Failure) classify() {
 		msg += " " + strings.ToLower(f.Cause.Error())
 	}
 
+	// 文本匹配的兜底。刻意不匹配裸数字 "401"/"429"：错误消息常回显请求体
+	// 片段或含 "user_401" 这类 ID，裸数字会把 decode_failed 之类的错误
+	// 误判成鉴权/限流失败（连 HTTP 状态码都被带偏）。可靠的信号只有两种：
+	// 1) 生产方显式设置——httpError 对上游 401/429 显式置位；
+	// 2) 语义化词组——"unauthorized"/"rate limit"/"too many requests"/中文同义。
+
 	switch {
 	case errors.Is(f.Cause, context.Canceled):
 		f.Canceled = true
@@ -105,13 +123,15 @@ func (f *Failure) classify() {
 		f.ContextLength = true
 		f.ClientFixable = true
 	case strings.Contains(msg, "rate limit"), strings.Contains(msg, "too many request"),
-		strings.Contains(msg, "quota"), strings.Contains(msg, "429"):
+		strings.Contains(msg, "quota"), strings.Contains(msg, "rate limited"):
 		f.RateLimited = true
 	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "timeout"),
 		strings.Contains(msg, "timed out"):
 		f.Timeout = true
 	case strings.Contains(msg, "invalid api key"), strings.Contains(msg, "unauthorized"),
-		strings.Contains(msg, "401"), strings.Contains(msg, "authentication"):
+		strings.Contains(msg, "authentication"), strings.Contains(msg, "please login"),
+		strings.Contains(msg, "凭证过期"), strings.Contains(msg, "请重新登录"):
+		f.Unauthorized = true
 		f.ClientFixable = true
 	}
 }
@@ -126,6 +146,10 @@ func (f *Failure) HTTPStatus() int {
 		return 499 // 客户端断开
 	case f.Timeout:
 		return 504
+	case f.Unauthorized:
+		// 凭据错误必须是 401：客户端 SDK（Claude Code / openai-python 等）
+		// 靠这个状态码区分「该换密钥了」与「请求体有问题」。
+		return 401
 	case f.ContextLength:
 		return 413
 	case f.RateLimited:

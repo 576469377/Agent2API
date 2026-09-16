@@ -58,12 +58,19 @@
   async function showAuthPrompt(err) {
     const k = prompt('网关已启用 API Key 鉴权，本次请求被拒绝（' + (err && err.message || '401') + '）。\n请输入访问密钥（与 -api-key 一致）：', storedKey());
     if (k === null) return false;
-    saveKey(k.trim());
-    // 立即验证：401 则视为输错，清掉避免下次还带着坏 key。
+    const key = k.trim();
+    // 必须先验证再持久化：验证请求本身失败（网关不可达）不能算通过，
+    // 否则网络抖动时输错的密钥也会被存下来。
+    let verified = false;
     try {
-      const r = await fetch('/api/status', { headers: { 'X-Api-Key': k.trim() } });
-      if (r.status === 401) { saveKey(''); showBanner('密钥不正确，已丢弃'); return false; }
-    } catch { /* 网关不可达时交给正常错误通道 */ }
+      const r = await fetch('/api/status', { headers: { 'X-Api-Key': key } });
+      verified = r.ok;
+    } catch { verified = false; }
+    if (!verified) {
+      showBanner('密钥未通过验证（网络异常或密钥错误），未保存');
+      return false;
+    }
+    saveKey(key);
     location.reload();
     return true;
   }
@@ -681,13 +688,20 @@
     if ($('effort').value) body.reasoning_effort = $('effort').value;
 
     try {
+      // 对话走 /v1/chat/completions，同样要带网关密钥（与 api() 的注入逻辑一致）。
+      const headers = { 'Content-Type': 'application/json' };
+      const key = storedKey();
+      if (key) headers['X-Api-Key'] = key;
       const res = await fetch('/v1/chat/completions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers,
         body: JSON.stringify(body), signal: controller.signal,
       });
       if (!res.ok) {
         const d = await res.json().catch(() => null);
-        throw new Error((d && d.error && d.error.message) || `HTTP ${res.status}`);
+        const err = new Error((d && d.error && d.error.message) || `HTTP ${res.status}`);
+        err.status = res.status;
+        if (res.status === 401) { showAuthPrompt(err).catch(() => {}); }
+        throw err;
       }
       const reader = res.body.getReader();
       const dec = new TextDecoder('utf-8');
@@ -1123,14 +1137,28 @@
   $('apiKeyInput').value = storedKey();
   $('btnSaveKey').addEventListener('click', () => {
     saveKey($('apiKeyInput').value.trim());
-    $('healthText').textContent = $('apiKeyInput').value.trim() ? '密钥已保存' : '密钥已清除';
-    loadOverview(); // 立即用新密钥验证
+    const hasKey = !!$('apiKeyInput').value.trim();
+    $('healthText').textContent = hasKey ? '密钥已保存' : '密钥已清除';
+    // 立即用新密钥验证当前页面（用户可能停在任意一页，不只概览）。
+    switchPage(state.page);
   });
   $('btnClearKey').addEventListener('click', () => {
     saveKey('');
     $('apiKeyInput').value = '';
     $('healthText').textContent = '密钥已清除';
   });
+
+  // 启动时探测网关是否启用了鉴权（/api/auth-hint 刻意不鉴权）：
+  // 未启用时隐藏密钥管理行——展示一个永远用不上的输入框只会让人困惑；
+  // 已启用且本地无密钥时提前亮起提示，而不是等第一次 401。
+  fetch('/api/auth-hint').then((r) => (r.ok ? r.json() : null)).then((hint) => {
+    if (!hint) return;
+    const row = $('apiKeyInput').closest('.setting');
+    if (row) row.style.display = hint.auth_enabled ? '' : 'none';
+    if (hint.auth_enabled && !storedKey()) {
+      $('healthText').textContent = '网关已启用鉴权：请在设置页填入访问密钥';
+    }
+  }).catch(() => {});
 
   /* ────────────────── 启动 ────────────────── */
 

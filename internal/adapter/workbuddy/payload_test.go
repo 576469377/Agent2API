@@ -58,7 +58,7 @@ func TestConvertToolsRequiresType(t *testing.T) {
 	tools := convertTools([]llm.ToolDefinition{
 		{Name: "no_params"},
 		{Name: "no_type", Parameters: map[string]any{"properties": map[string]any{}}},
-	})
+	}, false)
 	if len(tools) != 2 {
 		t.Fatalf("期望保留 2 个工具，实际 %d", len(tools))
 	}
@@ -200,5 +200,36 @@ func TestSanitizeLeavesShortTextAlone(t *testing.T) {
 	in := "你是一个乐于助人的助手。"
 	if out := SanitizeSystemPrompt(in); out != in {
 		t.Errorf("短文本不应被改写，实际: %q", out)
+	}
+}
+
+// TestConvertToolsSanitizesDescription 是「工具描述未脱敏」的回归测试。
+//
+// 曾有 bug：SanitizeToolDescription 已实现却从未被调用，工具描述里的
+// 敏感术语（安全类工具的常规描述词）原样发往上游，被关键词审核误拦。
+func TestConvertToolsSanitizesDescription(t *testing.T) {
+	defs := []llm.ToolDefinition{
+		{Name: "sec_scan", Description: "Detect SQL injection and XSS vulnerabilities."},
+	}
+
+	on := convertTools(defs, true)
+	off := convertTools(defs, false)
+
+	if len(on) != 1 || len(off) != 1 {
+		t.Fatalf("工具数量错误: on=%d off=%d", len(on), len(off))
+	}
+	// 开启脱敏后，敏感词应被零宽空格打断（渲染不可见，但审核匹配失效）。
+	if got := on[0].Function.Description; got == off[0].Function.Description {
+		t.Fatalf("开启脱敏后描述应发生变化: %q", got)
+	}
+	if !strings.Contains(off[0].Function.Description, "SQL injection") {
+		t.Fatalf("关闭脱敏时应保留原文: %q", off[0].Function.Description)
+	}
+	if strings.Contains(on[0].Function.Description, "SQL injection") {
+		t.Fatalf("开启脱敏后不应残留未打断的敏感词: %q", on[0].Function.Description)
+	}
+	// 工具名与参数 schema 不受脱敏影响。
+	if on[0].Function.Name != "sec_scan" || off[0].Function.Name != "sec_scan" {
+		t.Fatal("工具名不应被改动")
 	}
 }

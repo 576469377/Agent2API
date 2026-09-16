@@ -415,7 +415,16 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 		return e.done(ev)
 
 	case llm.EventError:
-		return nil, nil
+		// 流中断必须给客户端一个明确的失败信号：官方 SDK 看到 data 帧里的
+		// error 字段会抛 APIError（openai-python _streaming.py 的既有契约）。
+		// 旧实现返回 0 帧——客户端已收到 200，只能拿到半截内容，
+		// 无法区分「正常结束」与「上游挂了」。
+		// 刻意不发 finish_reason / [DONE]：那等于谎报正常收尾。
+		body, err := json.Marshal(common.BuildErrorPayload(ev.Error))
+		if err != nil {
+			body = []byte(`{"error":{"message":"internal server error","type":"server_error"}}`)
+		}
+		return []common.SSEEvent{{Data: body}}, nil
 	}
 	return nil, nil
 }

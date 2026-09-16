@@ -117,6 +117,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/health", a.health)
 
 	// 控制台管理接口
+	// /api/auth-hint 刻意不鉴权：只暴露「是否启用了鉴权」布尔，供控制台在
+	// 401 时引导用户输入密钥；其余 /api/* 都走 withAuth。
+	mux.HandleFunc("/api/auth-hint", a.apiAuthHint)
 	mux.HandleFunc("/api/status", a.withAuth(a.apiStatus))
 	mux.HandleFunc("/api/metrics", a.withAuth(a.apiMetrics))
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
@@ -152,9 +155,10 @@ func (a *App) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		common.WriteError(w, &llm.Failure{
-			Code: "invalid_api_key", Message: "Invalid API key", ClientFixable: true,
-		})
+		// NewFailure 立即派生分类：Unauthorized → HTTPStatus 401。
+		// 不能直接给字面量——派生字段全为零值时会被映射成 400，
+		// 客户端 SDK 靠 401 才知道该重新配置密钥而不是改请求体。
+		common.WriteError(w, llm.NewFailure("invalid_api_key", "Invalid API key", nil))
 	}
 }
 
@@ -247,9 +251,16 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 
 	if r.Method != http.MethodPost {
 		rec.OK, rec.Status, rec.Error = false, 405, "仅支持 POST"
-		common.WriteError(w, &llm.Failure{
+		// 不能走 common.WriteError：它按 ClientFixable 统一映射 400，
+		// 会把「方法不对」伪装成「请求体有错」。405 是精确语义，
+		// 且 RFC 7231 要求响应带 Allow 头告知可用方法。
+		w.Header().Set("Allow", http.MethodPost)
+		body, _ := json.Marshal(common.BuildErrorPayload(&llm.Failure{
 			Code: "method_not_allowed", Message: "仅支持 POST", ClientFixable: true,
-		})
+		}))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write(body)
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))

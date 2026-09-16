@@ -264,3 +264,58 @@ func TestDecodeAnthropicToolResultTextOnly(t *testing.T) {
 		t.Errorf("纯文本不应产生 Blocks，实际 %d", len(tr.Blocks))
 	}
 }
+
+// TestStreamMessageDeltaCarriesInputTokens 是「input_tokens 恒为 0」的回归测试。
+//
+// 曾有 bug：message_start 硬编码 input_tokens=0，而上游只在流末尾回传 usage，
+// message_delta 又只发 output_tokens——流式客户端全程看到输入 token 为 0。
+// 修复依据官方 SDK 的累积覆盖语义（message_delta.usage 非零即覆盖快照）：
+// 在 message_delta 补发真实 input_tokens。
+func TestStreamMessageDeltaCarriesInputTokens(t *testing.T) {
+	p := Protocol{}
+	enc := p.NewStreamEncoder("test-model", true)
+
+	events := []llm.ResponseEvent{
+		{Type: llm.EventStart, Model: "test-model"},
+		{Type: llm.EventTextDelta, ContentIndex: 0, Delta: "你好"},
+		{Type: llm.EventDone, StopReason: llm.StopReasonStop,
+			Usage: &llm.Usage{InputTokens: 1234, OutputTokens: 56}},
+	}
+
+	var deltaUsage struct {
+		Input  int `json:"input_tokens"`
+		Output int `json:"output_tokens"`
+	}
+	found := false
+	for _, ev := range events {
+		out, err := enc.Encode(ev)
+		if err != nil {
+			t.Fatalf("编码 %s 失败: %v", ev.Type, err)
+		}
+		for _, sse := range out {
+			if sse.Name != "message_delta" {
+				continue
+			}
+			found = true
+			var frame struct {
+				Usage struct {
+					Input  int `json:"input_tokens"`
+					Output int `json:"output_tokens"`
+				} `json:"usage"`
+			}
+			if err := json.Unmarshal(sse.Data, &frame); err != nil {
+				t.Fatalf("message_delta 解析失败: %v", err)
+			}
+			deltaUsage = frame.Usage
+		}
+	}
+	if !found {
+		t.Fatal("没有 message_delta 帧")
+	}
+	if deltaUsage.Input != 1234 {
+		t.Fatalf("message_delta 的 input_tokens=%d, want 1234（客户端 SDK 靠它覆盖 message_start 的 0）", deltaUsage.Input)
+	}
+	if deltaUsage.Output != 56 {
+		t.Fatalf("message_delta 的 output_tokens=%d, want 56", deltaUsage.Output)
+	}
+}

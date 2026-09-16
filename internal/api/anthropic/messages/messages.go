@@ -489,8 +489,10 @@ func (e *StreamEncoder) done(ev llm.ResponseEvent) ([]common.SSEEvent, error) {
 	}
 
 	outTokens := 0
+	inTokens := 0
 	if ev.Usage != nil {
 		outTokens = ev.Usage.OutputTokens
+		inTokens = ev.Usage.InputTokens
 	}
 	deltaData, err := json.Marshal(map[string]any{
 		"type": "message_delta",
@@ -498,7 +500,11 @@ func (e *StreamEncoder) done(ev llm.ResponseEvent) ([]common.SSEEvent, error) {
 			"stop_reason":   mapStopReason(ev.StopReason),
 			"stop_sequence": nil,
 		},
-		"usage": map[string]any{"output_tokens": outTokens},
+		// input_tokens 必须在这里补报：上游只在流末尾回传 usage，message_start
+		// 时还不知道，只能填 0。官方 SDK 对 message_delta 的 usage 按「累积总量、
+		// 直接覆盖」处理（_messages.py: input_tokens 若非 None 则覆盖快照值），
+		// 所以在这里给出真实值即可修正快照，与官方 API 的行为一致。
+		"usage": map[string]any{"input_tokens": inTokens, "output_tokens": outTokens},
 	})
 	if err != nil {
 		return nil, err

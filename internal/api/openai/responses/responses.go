@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/576469377/Agent2API/internal/api/common"
@@ -241,7 +242,13 @@ type StreamEncoder struct {
 	model   string
 	created int64
 	// itemID 把 output_index 映射到 output item 的 id。
-	itemID    map[int]string
+	itemID map[int]string
+	// kind/callID/name/args 记录每个块的类型与进行中的内容，
+	// 用于「块已 start 但流在其 End 之前结束」时合成 incomplete 终态条目。
+	kind      map[int]string
+	callID    map[int]string
+	name      map[int]string
+	args      map[int]string
 	text      map[int]string
 	thinking  map[int]string
 	completed map[int]any
@@ -254,6 +261,10 @@ func (Protocol) NewStreamEncoder(model string, includeUsage bool) *StreamEncoder
 		model:     model,
 		created:   time.Now().Unix(),
 		itemID:    map[int]string{},
+		kind:      map[int]string{},
+		callID:    map[int]string{},
+		name:      map[int]string{},
+		args:      map[int]string{},
 		text:      map[int]string{},
 		thinking:  map[int]string{},
 		completed: map[int]any{},
@@ -273,6 +284,7 @@ func (e *StreamEncoder) item(idx int, kind string) string {
 	}
 	id := prefix + randomHex(24)
 	e.itemID[idx] = id
+	e.kind[idx] = kind
 	return id
 }
 
@@ -350,6 +362,8 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 
 	case llm.EventToolCallStart:
 		id := e.item(ev.ContentIndex, "function_call")
+		e.callID[ev.ContentIndex] = ev.ToolCallID
+		e.name[ev.ContentIndex] = ev.ToolName
 		return e.ev("response.output_item.added", map[string]any{
 			"output_index": ev.ContentIndex,
 			"item": map[string]any{
@@ -360,6 +374,7 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 
 	case llm.EventToolCallDelta:
 		id := e.item(ev.ContentIndex, "function_call")
+		e.args[ev.ContentIndex] += ev.Delta
 		return e.ev("response.function_call_arguments.delta", map[string]any{
 			"item_id": id, "output_index": ev.ContentIndex, "delta": ev.Delta,
 		})
@@ -400,23 +415,60 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 }
 
 // responseShell 构造 response 对象骨架。
+//
+// 遍历必须按 itemID 里实际存在的 key：旧实现 `for i := 0; i < len(e.itemID); i++`
+// 隐含「下标稠密且全部完成」的假设——一旦某块已 start 但流在其 End 之前中断
+// （比如工具调用中途上游断流），completed 里没有它，该条目就从 output[] 里
+// 静默消失，客户端看到的响应缺一块。
 func (e *StreamEncoder) responseShell(status string, usage map[string]any) map[string]any {
 	if usage == nil {
 		usage = map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 	}
 	output := []any{}
 	text := ""
-	for i := 0; i < len(e.itemID); i++ {
-		if item, ok := e.completed[i]; ok {
+	indices := make([]int, 0, len(e.itemID))
+	for idx := range e.itemID {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		if item, ok := e.completed[idx]; ok {
 			output = append(output, item)
+		} else {
+			// 未完成的条目不能静默丢弃：合成一个 incomplete 终态，
+			// 让客户端知道这块内容存在且被截断。
+			output = append(output, e.incompleteItem(idx))
 		}
-		text += e.text[i]
+		text += e.text[idx]
 	}
 	return map[string]any{
 		"id": e.id, "object": "response", "created_at": e.created, "status": status,
 		"model": e.model, "output": output, "output_text": text,
 		"parallel_tool_calls": true, "tool_choice": "auto", "tools": []any{},
 		"usage": usage,
+	}
+}
+
+// incompleteItem 为「已 start 未 end」的块合成 incomplete 终态。
+func (e *StreamEncoder) incompleteItem(idx int) map[string]any {
+	id := e.itemID[idx]
+	switch e.kind[idx] {
+	case "function_call":
+		return map[string]any{
+			"id": id, "type": "function_call", "call_id": e.callID[idx],
+			"name": e.name[idx], "arguments": e.args[idx], "status": "incomplete",
+		}
+	case "reasoning":
+		return map[string]any{
+			"id": id, "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": e.thinking[idx]},
+			}, "status": "incomplete",
+		}
+	default:
+		return map[string]any{
+			"id": id, "type": "message", "role": "assistant", "status": "incomplete",
+			"content": []any{map[string]any{"type": "output_text", "text": e.text[idx], "annotations": []any{}}},
+		}
 	}
 }
 
