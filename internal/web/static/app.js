@@ -85,11 +85,20 @@
       `监听 ${st.listen} · 已运行 ${fmtDuration(st.uptime_sec)} · 鉴权${st.auth_enabled ? '已启用' : '未启用'}`;
   }
 
+  // fmtTPS 渲染解码速度。tps_samples 为 0 表示从未测到生成耗时
+  // （例如刚重启且指标文件是旧格式），此时显示「—」而不是 "0.0 tok/s"。
+  function fmtTPS(m) {
+    if (!m.tps_samples) return { v: '—', sub: '暂无生成数据' };
+    return { v: Number(m.avg_tps || 0).toFixed(1) + ' tok/s', sub: `基于 ${m.tps_samples} 次生成` };
+  }
+
   function renderStats(m) {
+    const tps = fmtTPS(m);
     const cards = [
       { k: '请求总数', v: fmtNum(m.total), sub: `近 1 分钟 ${m.last_minute_rpm}` },
       { k: '成功率', v: (m.success_rate * 100).toFixed(1) + '%', sub: `失败 ${m.failed} 次`, cls: m.failed ? 'err' : 'ok' },
       { k: '平均延迟', v: fmtMs(m.avg_latency_ms), sub: '全部请求' },
+      { k: '解码速度', v: tps.v, sub: tps.sub },
       { k: '进行中', v: m.in_flight, sub: '当前并发' },
       { k: '输入 Token', v: fmtNum(m.input_tokens), sub: '' },
       { k: '输出 Token', v: fmtNum(m.output_tokens), sub: m.reasoning_tokens ? `思考 ${fmtNum(m.reasoning_tokens)}` : '' },
@@ -102,20 +111,44 @@
       </div>`).join('');
   }
 
+  // chartData 保存每个图表当前的数据，供悬停命中查询。
+  //
+  // 为什么不把监听挂在 SVG 上：renderCharts 每 5s 用 innerHTML 重建整个 SVG，
+  // 挂在 SVG 上的监听会随之销毁。容器节点（#chartReq/#chartTok）始终存在，
+  // 所以事件委托在容器上、数据也存在这里，就能免疫重建。
+  const chartData = Object.create(null);
+
   function renderCharts(m) {
     const s = m.series || [];
-    $('chartReq').innerHTML = s.length
-      ? lineChart(s, (b) => b.total, { color: '#2563eb', label: '请求/分钟' })
-      : emptyChart('暂无数据');
-    $('chartTok').innerHTML = s.length
-      ? barChart(s, [
-          (b) => b.input_tokens,
-          (b) => b.output_tokens,
-        ], [
-          { name: '输入', color: '#93b4f7' },
-          { name: '输出', color: '#2563eb' },
-        ])
-      : emptyChart('暂无数据');
+    const reqHost = $('chartReq'), tokHost = $('chartTok');
+
+    if (!s.length) {
+      chartData.chartReq = null;
+      chartData.chartTok = null;
+      reqHost.innerHTML = emptyChart('暂无数据');
+      tokHost.innerHTML = emptyChart('暂无数据');
+      hideTip(reqHost); hideTip(tokHost);
+      return;
+    }
+
+    const reqBox = chartBox(reqHost);
+    const tokBox = chartBox(tokHost);
+
+    chartData.chartReq = { series: s, box: reqBox, mode: 'line', accessor: (b) => b.total };
+    chartData.chartTok = { series: s, box: tokBox, mode: 'bar', accessor: (b) => b.input_tokens + b.output_tokens };
+
+    reqHost.innerHTML = lineChart(s, (b) => b.total, reqBox, { color: '#2563eb', label: '请求趋势：最近 30 分钟每分钟请求数' });
+    tokHost.innerHTML = barChart(s, [
+      (b) => b.input_tokens,
+      (b) => b.output_tokens,
+    ], [
+      { name: '输入', color: '#93b4f7' },
+      { name: '输出', color: '#2563eb' },
+    ], tokBox);
+
+    // 数据刚刚更新，旧的悬停位置已指向错位的桶 —— 直接收起气泡，
+    // 下一次 pointermove 会在几毫秒内重新出现。
+    hideTip(reqHost); hideTip(tokHost);
   }
 
   function renderRanks(m) {
@@ -155,24 +188,54 @@
 
   /* ────────────────── SVG 图表 ────────────────── */
 
-  const W = 600, H = 140, PAD = { l: 8, r: 8, t: 12, b: 20 };
-  const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  // 图表布局常量。注意 viewBox 尺寸不再是固定的 600x140 —— 每次渲染都按容器
+  // 实测像素尺寸重建，使 viewBox 单位与 CSS 像素 1:1。
+  //
+  // 旧实现用固定 viewBox + preserveAspectRatio="none" 把图拉伸到容器，
+  // 横向与纵向缩放比不同（1920px 视口下横向 1.32x / 纵向 1.06x），
+  // 导致 SVG 里的文字被横向拉伸约 1.25 倍 —— 这就是「字体是扁的」的根因。
+  const W_FALLBACK = 600, H_FALLBACK = 148;
+  const PAD = { l: 8, r: 12, t: 12, b: 20 };
 
-  function svgWrap(inner) {
-    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-      style="width:100%;height:100%" vector-effect="non-scaling-stroke">${inner}</svg>`;
+  // chartBox 量测容器的绘制尺寸（CSS 像素）。
+  // 每 5s 重绘时重新量测，所以窗口缩放无需 ResizeObserver；
+  // 首帧可能尚未布局（宽度 0），此时回退到默认值，下一次刷新自然纠正。
+  function chartBox(host) {
+    if (!host) return { w: W_FALLBACK, h: H_FALLBACK };
+    const w = Math.round(host.clientWidth), h = Math.round(host.clientHeight);
+    return { w: w > 40 ? w : W_FALLBACK, h: h > 40 ? h : H_FALLBACK };
+  }
+
+  // svgWrap 以「实测像素 = viewBox 单位」渲染，因此不存在非等比拉伸。
+  // 不要再加 preserveAspectRatio="none" —— 那正是文字变形的来源。
+  function svgWrap(box, inner, label) {
+    return `<svg viewBox="0 0 ${box.w} ${box.h}" width="${box.w}" height="${box.h}"
+      role="img" aria-label="${esc(label || '趋势图')}"
+      style="width:100%;height:100%">${inner}</svg>`;
   }
 
   function emptyChart(text) {
     return `<div style="height:100%;display:grid;place-items:center;color:var(--text-faint);font-size:12.5px">${esc(text)}</div>`;
   }
 
-  function lineChart(series, accessor, opts) {
+  // crosshair 是悬停时的十字准线层。它必须每次渲染重建（SVG 会被整体替换），
+  // 且作为最后一个子元素以便盖在图形之上。实际位置在悬停时用 transform 设置。
+  function crosshair(box) {
+    return `<g class="xh" style="display:none">
+      <line class="xh-line" x1="0" y1="${PAD.t}" x2="0" y2="${box.h - PAD.b}" vector-effect="non-scaling-stroke"/>
+      <circle class="xh-dot" cx="0" cy="0" r="3.5"/>
+    </g>`;
+  }
+
+  function lineChart(series, accessor, box, opts) {
+    const W = box.w, H = box.h;
     const values = series.map(accessor);
     const max = Math.max(1, ...values);
     const n = values.length;
+    // n === 1 时不能除以 n-1（会得到 NaN），单点居中放置。
+    const dx = n > 1 ? (W - PAD.l - PAD.r) / (n - 1) : 0;
     const xy = values.map((v, i) => {
-      const x = PAD.l + (i * (W - PAD.l - PAD.r)) / (n - 1);
+      const x = n > 1 ? PAD.l + i * dx : (W - PAD.l - PAD.r) / 2;
       const y = H - PAD.b - (v / max) * (H - PAD.t - PAD.b);
       return [x, y];
     });
@@ -180,23 +243,25 @@
     const area = `${line} L ${xy[n - 1][0].toFixed(1)} ${H - PAD.b} L ${xy[0][0].toFixed(1)} ${H - PAD.b} Z`;
     const grid = [0.25, 0.5, 0.75].map((f) => {
       const y = PAD.t + f * (H - PAD.t - PAD.b);
-      return `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="#eef0f3" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+      return `<line class="grid" x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" vector-effect="non-scaling-stroke"/>`;
     }).join('');
     const last = xy[n - 1];
-    return svgWrap(`
+    return svgWrap(box, `
       ${grid}
-      ${xAxis(series, xy, true)}
+      ${xAxis(series, xy, box)}
       <path d="${area}" fill="${opts.color}" opacity="0.10"/>
       <path d="${line}" fill="none" stroke="${opts.color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
       <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${opts.color}"/>
-      <text x="${W - PAD.r}" y="12" text-anchor="end" font-size="11" fill="#9ba3ad">峰值 ${max}</text>
-    `);
+      <text class="note" x="${W - PAD.r}" y="12" text-anchor="end">峰值 ${max}</text>
+      ${crosshair(box)}
+    `, opts.label);
   }
 
-  function barChart(series, accessors, defs) {
+  function barChart(series, accessors, defs, box) {
+    const W = box.w, H = box.h;
     const n = series.length;
-    const max = Math.max(1, ...series.flatMap((s, i) => accessors.map((a) => a(s))));
-    const slot = (W - PAD.l - PAD.r) / n;
+    const max = Math.max(1, ...series.flatMap((s) => accessors.map((a) => a(s))));
+    const slot = (W - PAD.l - PAD.r) / Math.max(1, n);
     const bw = Math.max(1.5, (slot * 0.62) / accessors.length);
     const cx = (i) => PAD.l + i * slot + slot / 2;
     let bars = '';
@@ -210,19 +275,21 @@
       });
     }
     const legend = defs
-      .map((s, i) => `<rect x="${PAD.l + i * 62}" y="2" width="8" height="8" rx="2" fill="${s.color}"/>
-        <text x="${PAD.l + i * 62 + 12}" y="10" font-size="11" fill="#9ba3ad">${esc(s.name)}</text>`)
+      .map((s, i) => `<rect x="${PAD.l + i * 62}" y="3" width="8" height="8" rx="2" fill="${s.color}"/>
+        <text class="legend" x="${PAD.l + i * 62 + 12}" y="11">${esc(s.name)}</text>`)
       .join('');
     const xyBars = series.map((_, i) => [cx(i), 0]);
-    return svgWrap(`
-      <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#e6e8eb" stroke-width="1" vector-effect="non-scaling-stroke"/>
-      ${bars}${legend}${xAxis(series, xyBars, false)}
-      <text x="${W - PAD.r}" y="10" text-anchor="end" font-size="11" fill="#9ba3ad">峰值 ${fmtNum(max)}</text>
-    `);
+    return svgWrap(box, `
+      <line class="baseline" x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" vector-effect="non-scaling-stroke"/>
+      ${bars}${legend}${xAxis(series, xyBars, box)}
+      <text class="note" x="${W - PAD.r}" y="11" text-anchor="end">峰值 ${fmtNum(max)}</text>
+      ${crosshair(box)}
+    `, 'Token 消耗趋势');
   }
 
   // xAxis 在时间轴底部绘制「-30m / -15m / 现在」这类相对标签。
-  function xAxis(series, xy, withBaseline) {
+  function xAxis(series, xy, box) {
+    const H = box.h;
     const n = series.length;
     if (!n) return '';
     const lastMin = series[n - 1].minute;
@@ -231,9 +298,139 @@
       const rel = lastMin - series[i].minute;
       const lbl = rel === 0 ? '现在' : '-' + rel + 'm';
       const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-      return `<text x="${xy[i][0].toFixed(1)}" y="${H - 5}" text-anchor="${anchor}" font-size="10" fill="#b6bcc4" font-family="${MONO}">${lbl}</text>`;
+      return `<text class="ax" x="${xy[i][0].toFixed(1)}" y="${H - 5}" text-anchor="${anchor}">${lbl}</text>`;
     }).join('');
   }
+
+  /* ── 图表悬停：十字准线 + 数据气泡 ── */
+
+  // tpsLabel 把一分钟桶的生成量换算成解码速度。
+  // 没有生成耗时/输出 token 时返回「—」而不是 "0.0 tok/s" ——
+  // 旧版指标文件没有 gen_* 字段，显示 0 会是在说谎。
+  function tpsLabel(b) {
+    if (!b.total) return '—';
+    if (!b.gen_ms || !b.gen_tok) return '—';
+    return (b.gen_tok / (b.gen_ms / 1000)).toFixed(1) + ' tok/s';
+  }
+
+  // ensureTooltip 在容器上创建一次气泡节点（不在 SVG 内，故不受重绘影响）。
+  function ensureTooltip(host) {
+    let t = host.querySelector('.chart-tip');
+    if (!t) {
+      t = document.createElement('div');
+      t.className = 'chart-tip';
+      t.setAttribute('aria-hidden', 'true');
+      host.appendChild(t);
+    }
+    return t;
+  }
+
+  function hideTip(host) {
+    const t = host && host.querySelector('.chart-tip');
+    if (t) t.classList.remove('show');
+    const g = host && host.querySelector('.xh');
+    if (g) g.style.display = 'none';
+  }
+
+  // pxToViewBox 把鼠标的页面坐标反投影到 viewBox 坐标。
+  //
+  // 这是 SVG 视口变换的逆运算：viewBox 坐标 vx 会被映射到
+  // r.left + vx * (r.width / box.w)。不能用 ev.offsetX —— 它给的是元素内
+  // 像素偏移，与 viewBox 单位之间差一个缩放因子。
+  function pxToViewBox(host, box, ev) {
+    const r = host.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      vx: ((ev.clientX - r.left) / r.width) * box.w,
+      vy: ((ev.clientY - r.top) / r.height) * box.h,
+    };
+  }
+
+  // nearestIndex 取距离光标最近的桶下标。
+  // 折线图的点落在 slot 边界上（间距均分 n-1），柱状图占满 slot，故取整方式不同。
+  function nearestIndex(box, vx, n, mode) {
+    if (n <= 1) return 0;
+    const inner = box.w - PAD.l - PAD.r;
+    if (mode === 'line') {
+      const step = inner / (n - 1);
+      return Math.min(n - 1, Math.max(0, Math.round((vx - PAD.l) / step)));
+    }
+    const slot = inner / n;
+    return Math.min(n - 1, Math.max(0, Math.floor((vx - PAD.l) / slot)));
+  }
+
+  function tipHTML(b, series) {
+    const lastMin = series[series.length - 1].minute;
+    const rel = lastMin - b.minute;
+    const t = new Date(b.minute * 60000);
+    const hh = String(t.getHours()).padStart(2, '0');
+    const mm = String(t.getMinutes()).padStart(2, '0');
+    const relLabel = rel === 0 ? '现在' : `${rel} 分钟前`;
+    const rows = [
+      ['请求', `${fmtNum(b.total)} 次`],
+      ['输入', fmtNum(b.input_tokens)],
+      ['输出', fmtNum(b.output_tokens)],
+      ['TPS', tpsLabel(b)],
+    ];
+    return `<div class="tip-time">${esc(relLabel)} · ${hh}:${mm}</div>` +
+      rows.map(([k, v]) => `<div class="tip-row"><span class="tip-k">${esc(k)}</span><span class="tip-v">${esc(v)}</span></div>`).join('');
+  }
+
+  function onChartMove(host, ev) {
+    const d = chartData[host.id];
+    if (!d || !d.series || !d.series.length) return;
+    const v = pxToViewBox(host, d.box, ev);
+    if (!v) return;
+
+    const idx = nearestIndex(d.box, v.vx, d.series.length, d.mode);
+    const b = d.series[idx];
+    if (!b) return;
+
+    // 准线：整层平移，线本身跨满高度，圆点单独定位。
+    const inner = d.box.w - PAD.l - PAD.r;
+    const xView = d.mode === 'line'
+      ? (d.series.length > 1 ? PAD.l + ((idx * inner) / (d.series.length - 1)) : d.box.w / 2)
+      : PAD.l + (idx + 0.5) * (inner / d.series.length);
+
+    const g = host.querySelector('.xh');
+    if (g) {
+      g.style.display = '';
+      const line = g.querySelector('.xh-line');
+      const dot = g.querySelector('.xh-dot');
+      if (line) { line.setAttribute('x1', xView.toFixed(1)); line.setAttribute('x2', xView.toFixed(1)); }
+      if (dot) {
+        const maxV = d.mode === 'line'
+          ? Math.max(1, ...d.series.map(d.accessor))
+          : Math.max(1, ...d.series.flatMap((s) => [s.input_tokens, s.output_tokens]));
+        const val = d.mode === 'line' ? d.accessor(b) : (b.input_tokens + b.output_tokens);
+        const y = d.box.h - PAD.b - (val / maxV) * (d.box.h - PAD.t - PAD.b);
+        dot.setAttribute('cx', xView.toFixed(1));
+        dot.setAttribute('cy', y.toFixed(1));
+      }
+    }
+
+    const tip = ensureTooltip(host);
+    tip.innerHTML = tipHTML(b, d.series);
+    tip.classList.add('show');
+
+    // 气泡位置用像素坐标：默认在光标右上，右/上越界时翻转并夹紧。
+    const r = host.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    let left = px + 14;
+    if (left + tip.offsetWidth > r.width) left = px - tip.offsetWidth - 14;
+    let top = py - tip.offsetHeight - 12;
+    if (top < 0) top = py + 16;
+    tip.style.left = Math.max(0, Math.min(left, Math.max(0, r.width - tip.offsetWidth))) + 'px';
+    tip.style.top = Math.max(0, Math.min(top, Math.max(0, r.height - tip.offsetHeight))) + 'px';
+  }
+
+  // 监听挂在容器上（一次性），因此图表每 5s 重绘也不会丢交互。
+  ['chartReq', 'chartTok'].forEach((id) => {
+    const host = $(id);
+    if (!host) return;
+    host.addEventListener('pointermove', (ev) => onChartMove(host, ev));
+    host.addEventListener('pointerleave', () => hideTip(host));
+  });
 
   /* ────────────────── 平台 ────────────────── */
 
@@ -401,10 +598,14 @@
     } catch (err) { showBanner('获取模型列表失败：' + err.message); }
   }
 
+  let bannerTimer = null;
+
   function showBanner(msg) {
     el.banner.textContent = msg;
     el.banner.classList.add('show');
-    setTimeout(() => el.banner.classList.remove('show'), 6000);
+    // 清掉上一次的定时器，否则连续两条提示时会被前一个提前收起。
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { el.banner.classList.remove('show'); bannerTimer = null; }, 6000);
   }
 
   function autoResize() {
@@ -418,8 +619,10 @@
     if (!text) return;
     hideEmpty();
     el.banner.classList.remove('show');
-    history.push({ role: 'user', content: text });
-    addUser(text);
+    // 同一个对象既进 history 也挂在 DOM 节点上，删除时可按引用精确摘除。
+    const hist = { role: 'user', content: text };
+    history.push(hist);
+    addUser(text, hist);
     el.input.value = ''; autoResize();
     await streamChat();
   }
@@ -503,6 +706,7 @@
         }));
       }
       history.push(am);
+      msg.bindHist(am); // 让「删除」按钮能按引用把这条从 history 摘掉
     } catch (err) {
       if (err.name === 'AbortError') { msg.finish(); el.status.textContent = '已停止'; }
       else {
@@ -525,14 +729,51 @@
     setDot(v ? 'busy' : 'ok');
   }
 
-  function hideEmpty() { if ($('empty') && $('empty').parentNode) $('empty').remove(); }
+  // clearChat 就地清空对话页：中止在途请求、清 history 与 DOM、恢复空状态。
+  //
+  // 与 location.reload() 的关键区别是**不重载页面**：重载会把 state.page 重置为
+  // overview（见文件末尾的启动流程），于是用户点「清空」却被弹回概览页。
+  function clearChat() {
+    // 1) 先中止在途流。顺序重要：abort 触发的 catch 在微任务里跑，
+    //    此时 history 已被清空，它的 pop() 会因为 length 检查而成为空操作；
+    //    若反过来先清 history，catch 可能操作到语义已失效的数组。
+    if (controller) { controller.abort(); controller = null; }
 
-  function addUser(text) {
+    // 2) 移除所有消息节点，但保留 #empty（它只会被隐藏，见 hideEmpty）。
+    Array.from(el.messages.querySelectorAll('.msg')).forEach((n) => n.remove());
+
+    // 3) 重置会话状态与界面状态
+    history.length = 0;
+    busy = false;
+    setBusy(false);
+    el.status.textContent = '';
+    el.banner.classList.remove('show');
+
+    // 4) 恢复空状态并回到顶部
+    showEmpty();
+    el.messages.scrollTop = 0;
+    el.input.focus();
+
+    // 注意：不动 #model 与各采样参数 —— 那是用户显式设置项，清空对话不该重置它们。
+  }
+
+  // 空状态占位只能「隐藏」，不能 remove()。
+  //
+  // #empty 里的 .suggestions 按钮处理器是启动时一次性绑定（非事件委托），
+  // 节点一旦被摘掉就无法安全重建 —— 重新 innerHTML 出来的是死按钮。
+  // 因此清空对话要能把空状态原样复活，这里就必须只切 display。
+  function hideEmpty() { const e = $('empty'); if (e) e.style.display = 'none'; }
+  function showEmpty() { const e = $('empty'); if (e) e.style.display = ''; }
+
+  // addUser 把历史对象挂到节点上（w._hist），使「删除」能精确地从 history 里摘掉它。
+  // 用对象引用而非下标：下标在 splice 后需要重排，引用不需要。
+  function addUser(text, hist) {
     const w = document.createElement('div');
     w.className = 'msg user';
     w.innerHTML = '<div class="msg-role">你</div><div class="msg-body"></div>' +
       '<div class="msg-actions"><button data-act="del">删除</button></div>';
     w.querySelector('.msg-body').textContent = text;
+    w._hist = hist || null;
     el.messages.appendChild(w);
     bindMsgActions(w);
     el.messages.scrollTop = el.messages.scrollHeight;
@@ -562,7 +803,12 @@
         if (!textEl) { textEl = document.createElement('div'); textEl.className = 'md'; contentEl.appendChild(textEl); }
         raw = t;
         textEl.dataset.md = t;
+        mdSource.set(textEl, t);
         textEl.innerHTML = renderMarkdown(t) + '<span class="cursor"></span>';
+        // KaTeX 尚未就绪时登记本节点，待其加载完成后统一升级；
+        // 已就绪则确保它不在待升级集合里（幂等）。
+        if (katexState !== 'ready' && window.katex === undefined) pendingMath.add(textEl);
+        else pendingMath.delete(textEl);
       },
       setTools(calls) {
         if (!toolsEl) { toolsEl = document.createElement('div'); contentEl.appendChild(toolsEl); }
@@ -572,6 +818,9 @@
       setDone() {
         if (thinkEl) thinkEl.querySelector('summary').textContent = '思考过程';
       },
+      // bindHist 在 assistant 的历史对象构造完成后调用，把引用挂到消息节点上，
+      // 使「删除」按钮能精确地从 history 中移除这一条。
+      bindHist(h) { w._hist = h; },
       finish() {
         const c = contentEl.querySelector('.cursor'); if (c) c.remove();
         if (thinkEl) thinkEl.querySelector('summary').textContent = '思考过程';
@@ -592,8 +841,15 @@
     w.querySelectorAll('.msg-actions button').forEach((b) => {
       b.addEventListener('click', async () => {
         if (b.dataset.act === 'del') {
+          // 删除必须同时把消息从 history 摘掉，否则模型下一轮仍「记得」它。
+          // 按对象引用查而不是按下标：splice 之后无需重排任何下标。
+          if (w._hist) {
+            const i = history.indexOf(w._hist);
+            if (i >= 0) history.splice(i, 1);
+          }
           w.remove();
-          if (!el.messages.querySelector('.msg')) location.reload();
+          // 删光后恢复空状态（旧实现是 location.reload()，会把用户弹回概览页）。
+          if (!el.messages.querySelector('.msg')) { showEmpty(); el.messages.scrollTop = 0; }
         } else if (b.dataset.act === 'copy' && getText) {
           try {
             await navigator.clipboard.writeText(getText());
@@ -671,27 +927,62 @@
   }
 
   /* ── 数学公式渲染：KaTeX 按需懒加载，加载失败/离线时回退为等宽原文 ── */
+
   let katexState = ''; // '' | 'loading' | 'ready' | 'failed'
+  let katexRetryAt = 0; // 'failed' 后的退避截止时间戳（ms）
+  const KATEX_RETRY_MS = 30000;
+  const KATEX_VERSION = '0.16.11';
+
+  // pendingMath 登记「公式还没升级成功」的 .md 节点（升级后即移除）。
+  // mdSource 保存每个节点的最新原始 Markdown。
+  //
+  // 为什么按节点身份登记，而不是 KaTeX 就绪时扫一遍 document.querySelectorAll：
+  // 流式渲染的 setContent 每次增量都会重写 innerHTML，但复用的是同一个 textEl 节点，
+  // 所以节点身份在整条流里是稳定的 —— 登记不会因为重写 innerHTML 而失效。
+  // 早期实现靠一次性扫描 DOM，只要扫描时机与节点创建/替换的微任务错开就会漏掉，
+  // 漏掉的那条消息的公式就永远停在等宽原文。
+  const pendingMath = new Set();
+  const mdSource = new WeakMap();
 
   function ensureKatex() {
-    if (katexState || window.katex) return;
+    if (katexState === 'loading' || katexState === 'ready') return;
+    // 'failed' 允许重试（CDN 抖动/短暂离线是可恢复的），但要退避，
+    // 否则离线状态下每渲染一段含公式的内容都会插一个注定失败的 script，形成请求风暴。
+    if (katexState === 'failed' && Date.now() < katexRetryAt) return;
+
     katexState = 'loading';
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
-    document.head.appendChild(css);
+    if (!document.getElementById('katex-css')) {
+      const css = document.createElement('link');
+      css.id = 'katex-css';
+      css.rel = 'stylesheet';
+      css.href = `https://cdn.jsdelivr.net/npm/katex@${KATEX_VERSION}/dist/katex.min.css`;
+      document.head.appendChild(css);
+    }
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+    s.src = `https://cdn.jsdelivr.net/npm/katex@${KATEX_VERSION}/dist/katex.min.js`;
     s.onload = () => {
       katexState = 'ready';
-      // KaTeX 是异步加载的，就绪后重渲页面上已有的消息（保留流式光标）
-      document.querySelectorAll('.md[data-md]').forEach((n) => {
-        const hasCursor = !!n.querySelector('.cursor');
-        n.innerHTML = renderMarkdown(n.dataset.md) + (hasCursor ? '<span class="cursor"></span>' : '');
-      });
+      flushPendingMath();
     };
-    s.onerror = () => { katexState = 'failed'; };
+    s.onerror = () => {
+      katexState = 'failed';
+      katexRetryAt = Date.now() + KATEX_RETRY_MS;
+    };
     document.head.appendChild(s);
+  }
+
+  // flushPendingMath 只重渲登记在册、且仍在文档中的节点。
+  // 每个节点只会被升级一次（渲染后立刻从集合移除），
+  // 否则会退化成「每次渲染都重登记」的 O(增量 × 节点)。
+  function flushPendingMath() {
+    pendingMath.forEach((n) => {
+      if (!n.isConnected) { pendingMath.delete(n); return; } // 消息已被删除/清空
+      const src = mdSource.get(n);
+      if (src === undefined) { pendingMath.delete(n); return; }
+      const hasCursor = !!n.querySelector('.cursor');
+      n.innerHTML = renderMarkdown(src) + (hasCursor ? '<span class="cursor"></span>' : '');
+      pendingMath.delete(n);
+    });
   }
 
   function mathHTML(tex, display) {
@@ -729,7 +1020,7 @@
   $('modelFilter').addEventListener('input', (e) => { state.modelsFilter = e.target.value; renderModels(); });
 
   $('btnChatSettings').addEventListener('click', () => $('chatParams').classList.toggle('show'));
-  $('btnClear').addEventListener('click', () => location.reload());
+  $('btnClear').addEventListener('click', clearChat);
   el.send.addEventListener('click', send);
   el.stop.addEventListener('click', () => { if (controller) controller.abort(); });
   el.input.addEventListener('input', autoResize);

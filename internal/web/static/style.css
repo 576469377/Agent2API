@@ -19,6 +19,11 @@
   --radius: 12px;
   --radius-sm: 8px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* 正文字体栈。JS 侧绘制 SVG 时通过 getComputedStyle 读取它，
+     避免在 JS 里再抄一份字体常量（两份定义必然漂移）。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Source Han Sans SC", "Source Han Sans CN", "WenQuanYi Micro Hei", sans-serif;
   --sidebar-w: 212px;
 }
 
@@ -34,9 +39,7 @@
 html, body { height: 100%; margin: 0; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
-    "Source Han Sans SC", "Source Han Sans CN", "WenQuanYi Micro Hei", sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
   color: var(--text);
@@ -145,10 +148,10 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 12px 14px;
 }
-.stat .k { font-size: 11.5px; color: var(--text-faint); letter-spacing: .02em; }
+.stat .k { font-size: 11.5px; color: var(--text-faint); letter-spacing: .02em; font-variant-numeric: tabular-nums; }
 .stat .v { font-size: 21px; font-weight: 650; letter-spacing: -.02em; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .stat .v.sm { font-size: 15px; font-weight: 600; }
-.stat .sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.stat .sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; font-variant-numeric: tabular-nums; }
 .stat.ok .v { color: var(--ok); }
 .stat.err .v { color: var(--err); }
 
@@ -166,8 +169,35 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 .panel-head h2 { margin: 0; font-size: 13.5px; font-weight: 650; }
 .panel-note { font-size: 11.5px; color: var(--text-faint); }
 
-.chart { height: 148px; }
+.chart { height: 148px; position: relative; }
 .chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* 图表内文字统一由 CSS 提供字体与颜色，JS 只负责几何。
+   这样避免了「JS 常量 vs CSS 变量」两份定义漂移。 */
+.chart svg { font-family: var(--font-sans); }
+.chart svg .ax { font-family: var(--mono); font-size: 10px; fill: var(--text-faint); }
+.chart svg .note { font-size: 11px; fill: var(--text-faint); }
+.chart svg .legend { font-size: 11px; fill: var(--text-faint); }
+.chart svg .grid { stroke: var(--border); stroke-width: 1; }
+.chart svg .baseline { stroke: var(--border-strong); stroke-width: 1; }
+.chart svg .xh-line { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart svg .xh-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+
+/* 悬停数据气泡：挂在 .chart 容器上（不在 SVG 内），因此不会被图表重绘销毁。 */
+.chart-tip {
+  position: absolute; left: 0; top: 0; z-index: 5;
+  pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: rgba(23, 26, 31, .93); color: #fff;
+  border-radius: var(--radius-sm); padding: 6px 9px;
+  font-size: 12px; line-height: 1.5; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+.chart-tip.show { opacity: 1; }
+.chart-tip .tip-time { color: #b6bcc4; font-size: 11px; margin-bottom: 3px; font-family: var(--mono); }
+.chart-tip .tip-row { display: flex; justify-content: space-between; gap: 16px; }
+.chart-tip .tip-k { color: #b6bcc4; }
+.chart-tip .tip-v { font-weight: 600; }
 
 .rank { display: flex; flex-direction: column; gap: 9px; }
 .rank-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
@@ -268,7 +298,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 .msg { margin-bottom: 24px; }
 .msg-role { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 5px; }
 .msg.user .msg-body { background: var(--user-bg); border: 1px solid #dde6fb; border-radius: var(--radius); padding: 10px 14px; white-space: pre-wrap; word-break: break-word; }
-.msg.assistant .msg-body { padding: 2px 0; word-break: break-word; }
+/* 助手消息的容器由 addAssistant 生成，类名是 .content（不是 .msg-body）。 */
+.msg.assistant .content { padding: 2px 0; word-break: break-word; }
 
 .thinking { border: 1px solid var(--thinking-border); background: var(--thinking-bg); border-radius: var(--radius-sm); margin-bottom: 10px; overflow: hidden; }
 .thinking summary { cursor: pointer; padding: 7px 12px; font-size: 12.5px; color: #92660f; user-select: none; display: flex; align-items: center; gap: 7px; }
