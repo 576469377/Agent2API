@@ -123,6 +123,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/status", a.withAuth(a.apiStatus))
 	mux.HandleFunc("/api/metrics", a.withAuth(a.apiMetrics))
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
+	mux.HandleFunc("/api/accounts", a.withAuth(a.apiAccounts))
 	mux.HandleFunc("/api/models", a.withAuth(a.apiModels))
 	mux.HandleFunc("/api/config", a.withAuth(a.apiConfig))
 

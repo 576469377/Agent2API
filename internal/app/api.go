@@ -90,6 +90,37 @@ func (a *App) apiPlatforms(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// accountStatusLister 是号池可选实现的接口。
+//
+// 与控制台既有的 adapter.Describer 同一模式：用可选接口而不是往
+// adapter.Adapter 里加方法，避免为了一个展示需求波及所有平台的适配器实现。
+type accountStatusLister interface {
+	Statuses() []adapter.AccountStatus
+}
+
+// apiAccounts 暴露号池里每个账号的运行状态（供控制台号池可视化）。
+//
+// 单账号模式下返回空数组而非 404，让前端只有一条代码路径。
+func (a *App) apiAccounts(w http.ResponseWriter, r *http.Request) {
+	type resp struct {
+		Accounts []adapter.AccountStatus `json:"accounts"`
+		Total    int                     `json:"total"`
+		Healthy  int                     `json:"healthy"`
+	}
+	out := resp{Accounts: []adapter.AccountStatus{}}
+	if lister, ok := a.adapter.(accountStatusLister); ok {
+		sts := lister.Statuses()
+		out.Accounts = sts
+		out.Total = len(sts)
+		for _, st := range sts {
+			if st.Healthy {
+				out.Healthy++
+			}
+		}
+	}
+	writeJSON(w, out)
+}
+
 // describePlatform 读取当前平台的运行时描述；适配器未实现 Describer 时给出兜底信息。
 func (a *App) describePlatform() adapter.Description {
 	if d, ok := a.adapter.(adapter.Describer); ok {

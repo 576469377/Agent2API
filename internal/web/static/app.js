@@ -18,6 +18,10 @@
     config: null,
     modelsFilter: '',
     reqFilter: '',
+    reqLoading: false,
+    reqError: '',
+    modelsLoading: false,
+    modelsError: '',
   };
 
   let timer = null;
@@ -67,7 +71,7 @@
       verified = r.ok;
     } catch { verified = false; }
     if (!verified) {
-      showBanner('密钥未通过验证（网络异常或密钥错误），未保存');
+      toast('密钥未通过验证（网络异常或密钥错误），未保存', 'error');
       return false;
     }
     saveKey(key);
@@ -77,12 +81,24 @@
 
   /* ────────────────── 路由 ────────────────── */
 
+  // 页面元信息：面包屑与标题。
+  const PAGES = {
+    overview: { group: '运营', title: '概览' },
+    requests: { group: '运营', title: '调用日志' },
+    platforms: { group: '上游', title: '平台' },
+    models: { group: '上游', title: '模型' },
+    chat: { group: '工具', title: '对话' },
+    settings: { group: '工具', title: '设置' },
+  };
+
   function switchPage(name) {
     state.page = name;
     document.querySelectorAll('.nav-item').forEach((b) =>
       b.classList.toggle('active', b.dataset.page === name));
     document.querySelectorAll('.page').forEach((p) =>
       p.classList.toggle('active', p.id === 'page-' + name));
+
+    renderCrumb(name);
 
     stopAutoRefresh();
     if (name === 'overview') { loadOverview(); startAutoRefresh(); }
@@ -92,9 +108,53 @@
     if (name === 'settings') loadSettings();
   }
 
-  function startAutoRefresh() {
-    timer = setInterval(() => { if (state.page === 'overview') loadOverview(true); }, 5000);
+  // renderCrumb 用 textContent 拼面包屑，不引入新的转义面。
+  function renderCrumb(name) {
+    const meta = PAGES[name];
+    if (!meta) return;
+    const el = document.querySelector('#page-' + name + ' [data-crumb]');
+    if (!el) return;
+    el.textContent = '';
+    const g = document.createElement('span');
+    g.textContent = meta.group;
+    const sep = document.createElement('i');
+    sep.textContent = '/';
+    const t = document.createElement('strong');
+    t.textContent = meta.title;
+    el.append(g, sep, t);
   }
+
+  // 自动刷新：1s tick 驱动 5s 周期。三个要点：
+  //  · 倒计时让用户知道页面在自己更新；
+  //  · 页面切到后台就不打接口（省电、省上游额度）；
+  //  · 401 无视 silent —— 否则密钥失效时自动刷新静默失败，页面永远停在旧数据。
+  let tick = 5;
+  let lastUpdated = '';
+  let ovFetching = false;
+  let silentFails = 0;
+
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    tick = 5;
+    timer = setInterval(() => {
+      if (document.hidden) return;
+      if (state.page !== 'overview') return;
+      if (tick > 1) {
+        tick--;
+        renderLive();
+        return;
+      }
+      tick = 5;
+      if (ovFetching) return;
+      ovFetching = true;
+      loadOverview(true).finally(() => { ovFetching = false; });
+    }, 1000);
+  }
+
+  function renderLive() {
+    if (lastUpdated) $('ovLive').textContent = `更新于 ${lastUpdated} · ${tick}s 后刷新`;
+  }
+
   function stopAutoRefresh() { if (timer) { clearInterval(timer); timer = null; } }
 
   /* ────────────────── 概览 ────────────────── */
@@ -109,9 +169,17 @@
       renderCharts(mt);
       renderRanks(mt);
       renderRecentShort(mt);
-      $('ovLive').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
+      silentFails = 0;
+      lastUpdated = new Date().toLocaleTimeString('zh-CN');
+      tick = 5;
+      $('ovLive').textContent = '更新于 ' + lastUpdated;
     } catch (err) {
-      if (!silent) showHealth(err.message, err);
+      // 401 必须立刻提示（可能是密钥失效），不能因为 silent 就吞掉。
+      if (err.status === 401) { showHealth(err.message, err); return; }
+      if (!silent) { showHealth(err.message, err); return; }
+      // 静默轮询连续失败两次才打扰用户：偶发抖动不该弹提示。
+      silentFails++;
+      if (silentFails >= 2) toast('数据刷新失败：' + err.message, 'error');
     }
   }
 
@@ -482,9 +550,53 @@
 
   async function loadPlatforms() {
     try {
-      state.platforms = await get('/api/platforms');
-      renderPlatforms(state.platforms);
+      // 平台与号池并行拉取：号池是这一页的第一层级信息。
+      const [d, acc] = await Promise.all([
+        get('/api/platforms'),
+        get('/api/accounts').catch(() => null),
+      ]);
+      state.platforms = d;
+      renderAccounts(acc);
+      renderPlatforms(d);
     } catch (err) { showHealth(err.message, err); }
+  }
+
+  // renderAccounts 渲染号池里的每个账号。
+  //
+  // 号池自上一版起就是核心能力，但数据一直只出现在 CLI 启动横幅里——
+  // 控制台完全看不到。这里把它搬进浏览器：状态、冷却倒计时、「下一个用谁」。
+  function renderAccounts(d) {
+    const host = $('accountPool');
+    const list = (d && d.accounts) || [];
+    if (!list.length) {
+      // 单账号模式：不占版面，直接隐藏整块。
+      host.innerHTML = '';
+      return;
+    }
+    const head = `<h3 class="sec-title">账号号池
+      <span class="panel-note" style="margin-left:8px;font-weight:400">
+        ${d.healthy}/${d.total} 可用 · 严格轮询${list.some((a) => a.is_next) ? ' · ▸ 为下一个使用' : ''}
+      </span></h3>`;
+    host.innerHTML = head + `<div class="acct-grid">${list.map(accountCard).join('')}</div>`;
+  }
+
+  function accountCard(st) {
+    const lv = st.healthy ? 'ok' : (st.reason === 'rate_limited' ? 'warn' : 'err');
+    const label = st.healthy ? '正常'
+      : st.reason === 'rate_limited' ? '限流中'
+      : st.reason === 'unauthorized' ? '鉴权失效' : '不可用';
+    const cool = st.cooldown_secs > 0 ? fmtCountdown(st.cooldown_secs) : '—';
+    return `<div class="acct" data-level="${lv}"${st.is_next ? ' data-next' : ''}>
+      <div class="acct-top">
+        <span class="acct-name" title="${esc(st.label)}">${st.is_next ? '▸ ' : ''}${esc(st.label)}</span>
+        <span class="badge ${lv}">${label}</span>
+      </div>
+      <dl class="acct-kv">
+        <dt>状态</dt><dd>${esc(st.state || (st.healthy ? 'ready' : 'cooldown'))}</dd>
+        <dt>剩余冷却</dt><dd>${cool}</dd>
+        ${st.last_error ? `<dt>最近错误</dt><dd title="${esc(st.last_error)}">${esc(st.last_error)}</dd>` : ''}
+      </dl>
+    </div>`;
   }
 
   function renderPlatforms(d) {
@@ -526,10 +638,18 @@
   /* ────────────────── 模型 ────────────────── */
 
   async function loadModels() {
+    state.modelsLoading = true;
+    if (state.page === 'models') renderModels();
     try {
       state.models = await get('/api/models');
-      renderModels();
-    } catch (err) { showHealth(err.message, err); }
+      state.modelsError = '';
+    } catch (err) {
+      state.modelsError = err.message;
+      showHealth(err.message, err);
+    } finally {
+      state.modelsLoading = false;
+    }
+    renderModels();
   }
 
   function renderModels() {
@@ -543,7 +663,15 @@
         <th>模型 ID</th><th>名称</th><th class="num">上下文</th><th class="num">最大输出</th>
         <th>能力</th>
       </tr></thead>
-      <tbody>${rows.map((m) => `
+      <tbody>${modelsBody(rows, all, q)}</tbody>`;
+  }
+
+  function modelsBody(rows, all, q) {
+    if (state.modelsLoading && !all.length) return skeletonRows(5, 7);
+    if (state.modelsError && !all.length) return emptyRow(5, '模型清单加载失败', state.modelsError);
+    if (!all.length) return emptyRow(5, '上游未返回任何模型', '检查上游地址与凭证，或点「刷新」重试');
+    if (!rows.length) return emptyRow(5, `没有匹配「${q}」的模型`, '换个关键词试试');
+    return rows.map((m) => `
         <tr>
           <td class="mono">${esc(m.id)}</td>
           <td>${esc(m.display_name || '-')}</td>
@@ -555,16 +683,49 @@
             ${m.supports_images ? '<span class="tag on">视觉</span>' : ''}
             ${m.is_default ? '<span class="tag">默认</span>' : ''}
           </td>
-        </tr>`).join('')}</tbody>`;
+        </tr>`).join('');
+  }
+
+  // tableState 生成「加载中 / 空 / 错误」三态之一的行。
+  //
+  // 「加载中」与「真的没数据」必须可区分：原实现把两者写成同一句
+  //「暂无记录」，而每 5s 静默轮询会让表格反复闪这句。错误态原本
+  // 只落到侧栏灰字，表格区毫无反馈。
+  function skeletonRows(cols, n) {
+    const widths = [46, 34, 52, 40, 30, 38, 30, 30, 80];
+    let out = '';
+    for (let i = 0; i < n; i++) {
+      out += '<tr>';
+      for (let c = 0; c < cols; c++) {
+        out += `<td><span class="sk" style="width:${widths[c % widths.length]}%"></span></td>`;
+      }
+      out += '</tr>';
+    }
+    return out;
+  }
+
+  function emptyRow(cols, title, desc) {
+    return `<tr><td colspan="${cols}" style="text-align:center;padding:30px 14px">
+      <div style="color:var(--text-dim);font-size:13.5px;font-weight:600">${esc(title)}</div>
+      ${desc ? `<div style="color:var(--text-faint);font-size:12.5px;margin-top:3px">${esc(desc)}</div>` : ''}
+    </td></tr>`;
   }
 
   /* ────────────────── 调用日志 ────────────────── */
 
   async function loadRequests() {
+    state.reqLoading = true;
+    if (state.page === 'requests') renderRequests();
     try {
       state.metrics = await get('/api/metrics');
-      renderRequests();
-    } catch (err) { showHealth(err.message, err); }
+      state.reqError = '';
+    } catch (err) {
+      state.reqError = err.message;
+      showHealth(err.message, err);
+    } finally {
+      state.reqLoading = false;
+    }
+    renderRequests();
   }
 
   function renderRequests() {
@@ -577,18 +738,29 @@
         <th>时间</th><th>状态</th><th>协议</th><th>模型</th><th>方式</th>
         <th class="num">耗时</th><th class="num">输入</th><th class="num">输出</th><th>错误</th>
       </tr></thead>
-      <tbody>${rows.length ? rows.map((r) => `
-        <tr${r.ok ? '' : ' class="row-err"'}>
-          <td class="mono">${esc(new Date(r.time).toLocaleString('zh-CN'))}</td>
-          <td><span class="badge ${r.ok ? 'ok' : 'err'}">${r.ok ? '成功' : (r.status || '失败')}</span></td>
-          <td>${esc(r.protocol)}</td>
-          <td class="mono">${esc(r.model || '-')}</td>
-          <td>${r.stream ? '流式' : '非流式'}</td>
-          <td class="num">${fmtMs(r.duration_ms)}</td>
-          <td class="num">${r.input_tokens || '-'}</td>
-          <td class="num">${r.output_tokens || '-'}</td>
-          <td class="err-msg" title="${esc(r.error || '')}">${esc(r.error || '')}</td>
-        </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-faint);padding:22px">暂无记录</td></tr>'}</tbody>`;
+      <tbody>${reqBody(rows)}</tbody>`;
+  }
+
+  function reqBody(rows) {
+    if (state.reqLoading && !rows.length) return skeletonRows(9, 6);
+    if (state.reqError && !rows.length) return emptyRow(9, '加载失败', state.reqError);
+    if (!rows.length) {
+      const filtered = state.reqFilter;
+      return emptyRow(9, filtered ? '没有符合筛选条件的记录' : '还没有请求记录',
+        filtered ? '试试切回「全部」' : '通过 /v1/* 接口发起一次请求后，这里会出现明细');
+    }
+    return rows.map((r) => `
+      <tr${r.ok ? '' : ' class="row-err"'}>
+        <td class="mono">${esc(new Date(r.time).toLocaleString('zh-CN'))}</td>
+        <td><span class="badge ${r.ok ? 'ok' : 'err'}">${r.ok ? '成功' : (r.status || '失败')}</span></td>
+        <td>${esc(r.protocol)}</td>
+        <td class="mono">${esc(r.model || '-')}</td>
+        <td>${r.stream ? '流式' : '非流式'}</td>
+        <td class="num">${fmtMs(r.duration_ms)}</td>
+        <td class="num">${r.input_tokens || '-'}</td>
+        <td class="num">${r.output_tokens || '-'}</td>
+        <td class="err-msg" title="${esc(r.error || '')}">${esc(r.error || '')}</td>
+      </tr>`).join('');
   }
 
   /* ────────────────── 设置 ────────────────── */
@@ -657,6 +829,51 @@
   function autoResize() {
     el.input.style.height = 'auto';
     el.input.style.height = Math.min(el.input.scrollHeight, 220) + 'px';
+  }
+
+  /* ────────────────── Toast 通知 ──────────────────
+     设置页等非对话页的错误原本写进 #banner —— 那个节点只存在于对话页的
+     DOM 里，用户在设置页保存失败时什么都看不到。Toast 是全局层，与当前页无关。 */
+
+  let toastHost = null;
+
+  function toast(msg, type = 'info', durMs) {
+    if (!toastHost) {
+      toastHost = document.createElement('div');
+      toastHost.className = 'toast-host';
+      toastHost.setAttribute('aria-live', 'polite');
+      toastHost.setAttribute('aria-atomic', 'true');
+      document.body.appendChild(toastHost);
+    }
+    // 按类型分时长：错误多看一会儿。
+    const dur = durMs || (type === 'error' ? 5000 : type === 'warning' ? 4000 : 3000);
+    const t = document.createElement('div');
+    t.className = 'toast ' + type;
+    const body = document.createElement('div');
+    body.className = 'toast-msg';
+    body.textContent = msg;           // textContent：不引入转义面
+    const bar = document.createElement('div');
+    bar.className = 'toast-bar';
+    bar.style.animationDuration = dur + 'ms';
+    t.append(body, bar);
+
+    let done = false;
+    const dismiss = () => {
+      if (done) return;
+      done = true;
+      t.classList.add('out');
+      setTimeout(() => t.remove(), 220);
+    };
+    t.addEventListener('click', dismiss);
+    toastHost.appendChild(t);
+    setTimeout(dismiss, dur);
+  }
+
+  function fmtCountdown(sec) {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    if (s < 60) return s + ' 秒';
+    if (s < 3600) return Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒';
+    return (s / 3600).toFixed(1) + ' 小时';
   }
 
   async function send() {
@@ -907,7 +1124,7 @@
           try {
             await navigator.clipboard.writeText(getText());
             b.textContent = '已复制'; setTimeout(() => (b.textContent = '复制'), 1500);
-          } catch { showBanner('复制失败'); }
+          } catch { toast('复制失败', 'error'); }
         }
       });
     });
@@ -943,6 +1160,8 @@
       showAuthPrompt(err).finally(() => { showAuthPrompt._pending = false; });
     }
     $('healthText').textContent = msg; setDot('err');
+    // 侧栏那行 12.5px 灰字太隐蔽——重要错误同时弹 Toast。
+    toast(msg, 'error');
   }
 
   function renderMarkdown(src) {
@@ -1086,7 +1305,7 @@
     try {
       await navigator.clipboard.writeText(decodeURIComponent(b.dataset.code));
       b.textContent = '已复制'; setTimeout(() => (b.textContent = '复制'), 1500);
-    } catch { showBanner('复制失败'); }
+    } catch { toast('复制失败', 'error'); }
   });
 
   /* ────────────────── 事件绑定 ────────────────── */
@@ -1119,18 +1338,18 @@
     try {
       const r = await post('/api/config', { sanitize: e.target.checked });
       renderSettings(r.config);
-      $('healthText').textContent = '设置已生效';
+      toast('设置已生效', 'success');
     } catch (err) {
       e.target.checked = !e.target.checked;
-      showBanner('保存失败：' + err.message);
+      toast('保存失败：' + err.message, 'error');
     }
   });
   $('btnRefreshModels').addEventListener('click', async () => {
     try {
       await post('/api/config', { refresh_models: true });
       await loadModels();
-      $('healthText').textContent = '模型清单已刷新';
-    } catch (err) { showBanner('刷新失败：' + err.message); }
+      toast('模型清单已刷新', 'success');
+    } catch (err) { toast('刷新失败：' + err.message, 'error'); }
   });
 
   // 设置页：网关访问密钥的管理入口。
@@ -1138,14 +1357,14 @@
   $('btnSaveKey').addEventListener('click', () => {
     saveKey($('apiKeyInput').value.trim());
     const hasKey = !!$('apiKeyInput').value.trim();
-    $('healthText').textContent = hasKey ? '密钥已保存' : '密钥已清除';
+    toast(hasKey ? '密钥已保存' : '密钥已清除', 'success');
     // 立即用新密钥验证当前页面（用户可能停在任意一页，不只概览）。
     switchPage(state.page);
   });
   $('btnClearKey').addEventListener('click', () => {
     saveKey('');
     $('apiKeyInput').value = '';
-    $('healthText').textContent = '密钥已清除';
+    toast('密钥已清除', 'success');
   });
 
   // 启动时探测网关是否启用了鉴权（/api/auth-hint 刻意不鉴权）：

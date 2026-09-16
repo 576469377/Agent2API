@@ -8,10 +8,12 @@ import (
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
-// fakeAd 是可编程假适配器：Stream 按预设返回错误或成功。
+// fakeAd 是可编程假适配器：Stream 按预设返回错误或按序回放事件。
 type fakeAd struct {
 	name string
 	err  error
+	// events 非空时作为流的回放内容（用于首帧探针测试）。
+	events []llm.ResponseEvent
 	// onStream 在每次 Stream 被调用时执行（用于计数）。
 	onStream func()
 }
@@ -23,19 +25,34 @@ func (f *fakeAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respo
 	if f.err != nil {
 		return nil, f.err
 	}
+	if len(f.events) > 0 {
+		return &fakeStream{events: f.events}, nil
+	}
 	return &fakeStream{}, nil
 }
 
-type fakeStream struct{}
+type fakeStream struct {
+	events []llm.ResponseEvent
+	pos    int
+}
 
 func (s *fakeStream) Recv(context.Context) (llm.ResponseEvent, error) {
-	return llm.ResponseEvent{}, llm.ErrStreamDone
+	if s.pos >= len(s.events) {
+		return llm.ResponseEvent{}, llm.ErrStreamDone
+	}
+	ev := s.events[s.pos]
+	s.pos++
+	return ev, nil
 }
+
+func (s *fakeStream) Close() error { return nil }
 
 func (f *fakeAd) ListModels(context.Context) ([]ModelInfo, error) { return nil, nil }
 func (f *fakeAd) Name() string                                    { return f.name }
 
-func rateLimitedErr(msg string) error {
+func rateLimitedErr(msg string) error { return rateLimitedFailure(msg) }
+
+func rateLimitedFailure(msg string) *llm.Failure {
 	f := llm.NewFailure("rate_limited", msg, nil)
 	f.RateLimited = true
 	return f
@@ -274,5 +291,233 @@ func TestPoolAllCoolingReturns429AndRetryAfter(t *testing.T) {
 	}
 	if f.RetryAfterSeconds <= 0 {
 		t.Fatalf("应携带最长剩余冷却秒数, got %d", f.RetryAfterSeconds)
+	}
+}
+
+// ───────────────── 多账号加固（参考 sub2api / CLIProxyAPI 后新增） ─────────────────
+
+// TestCooldownNeverShortens 是「并发冷却互相缩短」的回归测试。
+// 两个并发请求各自判定出不同时长时，后写者不得砍短已判定的窗口。
+func TestCooldownNeverShortens(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test"})
+	acc := p.accounts[0]
+
+	p.cooldown(acc, 60*time.Second, reasonRateLimited, "long")
+	first := acc.cooldownUntil
+
+	p.cooldown(acc, 5*time.Second, reasonRateLimited, "short")
+	if acc.cooldownUntil.Before(first) {
+		t.Fatalf("冷却被缩短了：%v → %v", first, acc.cooldownUntil)
+	}
+	// 更长的冷却必须能延长。
+	p.cooldown(acc, 120*time.Second, reasonRateLimited, "longer")
+	if !acc.cooldownUntil.After(first) {
+		t.Fatalf("更长的冷却未生效：%v", acc.cooldownUntil)
+	}
+	// 过期后必须能正常写入新冷却（防「只延长」把过期值锁死）。
+	acc.cooldownUntil = time.Now().Add(-time.Second)
+	p.cooldown(acc, 30*time.Second, reasonRateLimited, "after-expiry")
+	if !acc.cooldownUntil.After(time.Now()) {
+		t.Fatal("过期后新冷却未写入")
+	}
+}
+
+// TestCooldownCapsAtMax 验证上限对所有路径生效（原实现的上限夹取是死代码）。
+func TestCooldownCapsAtMax(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test"})
+	acc := p.accounts[0]
+	p.cooldown(acc, 999*time.Hour, reasonRateLimited, "absurd")
+	if d := time.Until(acc.cooldownUntil); d > maxCooldown+time.Minute {
+		t.Fatalf("冷却未受上限约束: %v", d)
+	}
+}
+
+// TestProbeFirstEventDetectsInBandError 是「HTTP 200 但流内首发即报错」的回归测试。
+// 这是 HTTP 状态层拒绝与流内失败之间的真实缺口：没有首帧探针，这种失败
+// 拿不到换号机会。
+func TestProbeFirstEventDetectsInBandError(t *testing.T) {
+	// 首帧即错误 → 探测失败，池应换号。
+	// 注意生产侧必须显式置 RateLimited（httpError 就是这么做的）；
+	// 只靠消息文本匹配不到 "quota" 这类词，分类会落空。
+	bad := &fakeAd{name: "test", events: []llm.ResponseEvent{
+		{Type: llm.EventError, Error: rateLimitedFailure("quota exceeded")},
+	}}
+	good := &fakeAd{name: "test", events: []llm.ResponseEvent{
+		{Type: llm.EventTextDelta, ContentIndex: 0, Delta: "ok"},
+	}}
+	p := NewPool("test", nil)
+	p.Add("bad", bad)
+	p.Add("good", good)
+
+	s, err := p.Stream(context.Background(), llm.RequestMessages{})
+	if err != nil {
+		t.Fatalf("应换到健康账号: %v", err)
+	}
+	defer func() { _ = closeStream(s) }()
+	// 限流账号被冷却 → 只剩 1 个健康账号。
+	if got := p.HealthyCount(); got != 1 {
+		t.Fatalf("限流账号应被冷却, healthy=%d（want 1）", got)
+	}
+	// 被冷却的账号应带上限流原因，供控制台展示。
+	for _, st := range p.Statuses() {
+		if st.Label == "bad" {
+			if st.State != "cooldown" || st.Reason != "rate_limited" {
+				t.Fatalf("冷却状态/原因不符: %+v", st)
+			}
+		}
+	}
+}
+
+// TestProbeFirstEventPreservesContent 是首帧探针的关键防回归用例：
+// 探测读到的事件必须原样透传给上层，绝不能吞掉。
+func TestProbeFirstEventPreservesContent(t *testing.T) {
+	inner := &fakeAd{name: "test", events: []llm.ResponseEvent{
+		{Type: llm.EventTextDelta, ContentIndex: 0, Delta: "第一帧"},
+		{Type: llm.EventTextDelta, ContentIndex: 0, Delta: "第二帧"},
+	}}
+	s, err := inner.Stream(context.Background(), llm.RequestMessages{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs, err := probeFirstEvent(context.Background(), s)
+	if err != nil {
+		t.Fatalf("正常流不应探测失败: %v", err)
+	}
+	// 首帧必须还在。
+	ev, err := bs.Recv(context.Background())
+	if err != nil || ev.Delta != "第一帧" {
+		t.Fatalf("首帧被吞: ev=%+v err=%v", ev, err)
+	}
+	ev2, err := bs.Recv(context.Background())
+	if err != nil || ev2.Delta != "第二帧" {
+		t.Fatalf("后续帧异常: ev=%+v err=%v", ev2, err)
+	}
+}
+
+// TestAllBlockedReturnsUnauthorized 是「全池 401」的回归测试：
+// 全部账号鉴权失效是终态失败，必须返回 401 而非 429——
+// 返回 429 会让客户端无限重试一个永远不可能成功的请求。
+func TestAllBlockedReturnsUnauthorized(t *testing.T) {
+	unauth := llm.NewFailure("unauthorized", "token expired", nil)
+	unauth.Unauthorized = true
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", err: unauth})
+	p.Add("b", &fakeAd{name: "test", err: unauth})
+
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{}) // 触发双 blocked
+	_, err := p.Stream(context.Background(), llm.RequestMessages{})
+	f := llm.Wrap(err)
+	if f.Code != "all_accounts_blocked" {
+		t.Fatalf("code=%s, want all_accounts_blocked", f.Code)
+	}
+	if f.RateLimited {
+		t.Fatal("全池鉴权失效不应标为 RateLimited")
+	}
+	if f.HTTPStatus() != 401 {
+		t.Fatalf("HTTPStatus=%d, want 401", f.HTTPStatus())
+	}
+}
+
+// TestAllCoolingUsesEarliestReset 验证全冷却时透传的是**最早**解冻秒数：
+// 用最晚值会让客户端一直等到最后一个账号恢复，白等已有的可用容量。
+func TestAllCoolingUsesEarliestReset(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", events: nil})
+	p.Add("b", &fakeAd{name: "test", events: nil})
+	p.mu.Lock()
+	p.accounts[0].state = stateCooldown
+	p.accounts[0].cooldownUntil = time.Now().Add(300 * time.Second) // 5 分钟
+	p.accounts[1].state = stateCooldown
+	p.accounts[1].cooldownUntil = time.Now().Add(30 * time.Second) // 30 秒
+	p.mu.Unlock()
+
+	_, err := p.Stream(context.Background(), llm.RequestMessages{})
+	f := llm.Wrap(err)
+	if !f.RateLimited || f.HTTPStatus() != 429 {
+		t.Fatalf("全冷却应返回 429 语义: %+v", f)
+	}
+	if f.RetryAfterSeconds > 60 {
+		t.Fatalf("应取最早解冻（≈30s），实际 %ds（取成了最晚）", f.RetryAfterSeconds)
+	}
+	if f.RetryAfterSeconds <= 0 {
+		t.Fatalf("RetryAfterSeconds=%d，应为正数", f.RetryAfterSeconds)
+	}
+}
+
+// TestRateLimitBackoffEscalates 验证无上游重置时刻时的指数退避与成功清零。
+func TestRateLimitBackoffEscalates(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test"})
+	acc := p.accounts[0]
+
+	d1 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
+	p.cooldown(acc, d1, reasonRateLimited, "x")
+	// 窗口未关：不升级。
+	d2 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
+	if d2 != d1 {
+		t.Fatalf("冷却窗口未关时不应升级: %v → %v", d1, d2)
+	}
+	// 窗口过期后再失败：升级。
+	acc.cooldownUntil = time.Now().Add(-time.Second)
+	d3 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
+	if d3 <= d1 {
+		t.Fatalf("窗口过期后应升级: %v → %v", d1, d3)
+	}
+	// 上游给了精确时刻：完全信任，不动等级。
+	before := acc.backoffLevel
+	withRA := llm.NewFailure("rate_limited", "x", nil)
+	withRA.RetryAfterSeconds = 42
+	if got := p.nextRateLimitBackoff(acc, withRA); got != 42*time.Second {
+		t.Fatalf("应信任上游 Retry-After, got %v", got)
+	}
+	if acc.backoffLevel != before {
+		t.Fatal("上游给了精确时刻时不应推进退避等级")
+	}
+	// 成功清零。
+	p.succeed(0)
+	if acc.backoffLevel != 0 {
+		t.Fatalf("成功后应清零, got %d", acc.backoffLevel)
+	}
+}
+
+// TestStatusesExposeStateAndNext 验证状态快照含 state/reason/is_next
+// （控制台号池可视化依赖这三个字段）。
+func TestStatusesExposeStateAndNext(t *testing.T) {
+	unauth := llm.NewFailure("unauthorized", "bad", nil)
+	unauth.Unauthorized = true
+	p := NewPool("test", nil)
+	p.Add("a.json", &fakeAd{name: "test", err: rateLimitedErr("quota")})
+	p.Add("b.json", &fakeAd{name: "test", err: unauth})
+	p.Add("c.json", &fakeAd{name: "test"})
+
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{})
+	sts := p.Statuses()
+	if len(sts) != 3 {
+		t.Fatalf("应有 3 条, got %d", len(sts))
+	}
+	byLabel := map[string]AccountStatus{}
+	for _, st := range sts {
+		byLabel[st.Label] = st
+	}
+	if byLabel["a.json"].State != "cooldown" || byLabel["a.json"].Reason != "rate_limited" {
+		t.Fatalf("限流账号状态错误: %+v", byLabel["a.json"])
+	}
+	if byLabel["b.json"].State != "blocked" || byLabel["b.json"].Reason != "unauthorized" {
+		t.Fatalf("鉴权失效账号状态错误: %+v", byLabel["b.json"])
+	}
+	if !byLabel["c.json"].Healthy {
+		t.Fatalf("健康账号状态错误: %+v", byLabel["c.json"])
+	}
+	// 恰有一个 is_next。
+	nextCount := 0
+	for _, st := range sts {
+		if st.IsNext {
+			nextCount++
+		}
+	}
+	if nextCount != 1 {
+		t.Fatalf("is_next 应恰为 1 个, got %d", nextCount)
 	}
 }

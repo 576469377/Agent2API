@@ -134,14 +134,29 @@ body {
 .brand-text small { font-size: 11.5px; color: var(--text-faint); }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-group {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-faint); padding: 14px 11px 5px;
+}
+.nav-group:first-child { padding-top: 2px; }
 .nav-item {
   font: inherit; font-size: 13.5px; text-align: left;
-  padding: 8px 11px; border: none; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 11px; border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--text-dim); cursor: pointer;
   transition: background .12s, color .12s;
 }
+.nav-item .ic { width: 16px; height: 16px; fill: currentColor; flex-shrink: 0; opacity: .85; }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
 .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item.active .ic { opacity: 1; }
+
+/* 键盘可达性：Tab 经过按钮/导航时必须可见。
+   输入框的焦点样式走无条件规则（见下），因为它们需要持续提示焦点位置。 */
+.btn:focus-visible, .nav-item:focus-visible, .link:focus-visible,
+.suggestions button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
 
 .side-foot { margin-top: auto; padding: 10px 6px 0; border-top: 1px solid var(--border); }
 .health { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); }
@@ -268,9 +283,32 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 /* ───────────── 表格 ───────────── */
 
 .table-wrap { padding: 0 24px 24px; }
-.table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* 表格滚动容器：200 行日志滚到中间时表头必须还在。
+   圆角与 overflow 从 .table 搬到这里 —— 留在 .table 上会在窄屏
+   把 9 列静默裁掉（比撑破页面更隐蔽）。 */
+.table-scroll {
+  max-height: calc(100vh - 216px);
+  overflow: auto;
+  scrollbar-gutter: stable;                 /* 滚动条出现时表格不横向跳动 */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.table { width: 100%; border-collapse: collapse; background: var(--surface); }
 .table th, .table td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border); font-size: 12.8px; }
-.table th { background: var(--surface-2); color: var(--text-dim); font-weight: 600; font-size: 12px; }
+.table th {
+  background: var(--surface-2); color: var(--text-dim); font-weight: 600; font-size: 12px;
+  position: sticky; top: 0; z-index: 2;
+  /* 用 inset 阴影而非 border：sticky 元素的 border 会在滚动时跟着走。 */
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+.table tbody tr { transition: background .12s; }
+.table tbody tr:hover { background: var(--surface-2); }
+
+/* 骨架屏：加载态与「真的没数据」必须可区分。 */
+.sk { display: block; height: 12px; border-radius: 4px; background: var(--border); animation: skPulse 1.4s ease-in-out infinite; }
+@keyframes skPulse { 0%, 100% { opacity: 1 } 50% { opacity: .42 } }
+.table td .sk { min-width: 46px; }
 .table tr:last-child td { border-bottom: none; }
 .table td.mono { font-family: var(--mono); font-size: 12px; }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -437,4 +475,82 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
   .stat-grid, .panel, .table-wrap, .page-head, .platform-grid { padding-left: 14px; padding-right: 14px; }
   .panel { margin-left: 14px; margin-right: 14px; }
   .panel-row { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ───────────── 面包屑 ───────────── */
+
+.crumb { font-size: 12px; color: var(--text-faint); margin-bottom: 3px; }
+.crumb i { font-style: normal; margin: 0 5px; opacity: .55; }
+.crumb strong { color: var(--text-dim); font-weight: 600; }
+
+/* ───────────── Toast 通知 ─────────────
+   设置页等非对话页的错误原来写进 #banner（只存在于对话页 DOM），
+   等于用户永远看不到。Toast 是全局层，与当前页无关。 */
+
+.toast-host {
+  position: fixed; top: 16px; right: 16px; z-index: 9999;
+  display: flex; flex-direction: column; gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto; cursor: pointer; overflow: hidden;
+  min-width: 300px; max-width: 420px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+  animation: toastIn .3s ease-out;
+}
+.toast.out { animation: toastOut .2s ease-in forwards; }
+.toast.success { border-left-color: var(--ok); }
+.toast.error { border-left-color: var(--err); }
+.toast.warning { border-left-color: var(--warn); }
+.toast-msg { padding: 10px 13px 11px; font-size: 13px; line-height: 1.5; word-break: break-word; }
+.toast-bar { height: 3px; background: var(--accent); animation-name: toastBar; animation-timing-function: linear; animation-fill-mode: forwards; }
+.toast.success .toast-bar { background: var(--ok); }
+.toast.error .toast-bar { background: var(--err); }
+.toast.warning .toast-bar { background: var(--warn); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(28px) } to { opacity: 1; transform: none } }
+@keyframes toastOut { to { opacity: 0; transform: translateX(28px) } }
+@keyframes toastBar { from { width: 100% } to { width: 0 } }
+
+/* ───────────── 号池账号卡片 ───────────── */
+
+.acct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; padding: 0 24px; }
+.acct {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 13px 15px;
+  border-left: 3px solid var(--ok);
+}
+.acct[data-level="warn"] { border-left-color: var(--warn); }
+.acct[data-level="err"] { border-left-color: var(--err); }
+/* 「下一个请求将使用该账号」——严格轮询下这个信息是精确的。 */
+.acct[data-next] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.acct-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.acct-name { font-weight: 600; font-size: 13.5px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 0; }
+.acct-kv dt { color: var(--text-faint); }
+.acct-kv dd { margin: 0; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+
+/* ───────────── 滚动条与选中 ───────────── */
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+*:hover::-webkit-scrollbar-thumb { background: var(--scrollbar); background-clip: content-box; }
+*:hover::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ───────────── 无障碍：尊重减弱动效偏好 ───────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .msg, .panel, .stat, .toast, .nav-item, .btn, .suggestions button,
+  .table tbody tr, .sk {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+  .thinking summary::before { transition: none; }
+  /* .cursor 是「流式输出进行中」的唯一视觉信号，且它的 keyframe 终态是
+     visibility:hidden —— 全局压平动画会让光标凭空消失。必须显式保住。 */
+  .cursor { animation: none !important; opacity: 1 !important; visibility: visible !important; }
 }
