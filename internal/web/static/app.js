@@ -24,17 +24,49 @@
 
   /* ────────────────── HTTP ────────────────── */
 
-  async function api(path, options) {
+  // 网关访问密钥。启用鉴权（-api-key）后，控制台也必须携带它才能调用 /api/*。
+  // 存 localStorage：这是本机管理面板，密钥本来就在启动参数/配置文件里躺着，
+  // 不引入 localStorage 只会让用户每次刷新都重输一遍。
+  const KEY_STORE = 'agent2api_key';
+
+  function storedKey() { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } }
+  function saveKey(k) {
+    try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); } catch { /* 隐私模式等 */ }
+  }
+
+  async function api(path, options = {}) {
+    const key = storedKey();
+    if (key) {
+      const h = new Headers(options.headers || {});
+      if (!h.has('X-Api-Key') && !h.has('Authorization')) h.set('X-Api-Key', key);
+      options.headers = h;
+    }
     const res = await fetch(path, options);
     if (!res.ok) {
       const detail = await res.json().catch(() => null);
-      throw new Error((detail && detail.error && detail.error.message) || `HTTP ${res.status}`);
+      const err = new Error((detail && detail.error && detail.error.message) || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     return res.json();
   }
   const get = (p) => api(p);
   const post = (p, body) =>
     api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  // showAuthPrompt 在收到 401 时引导输入密钥。成功后自动重载当前页数据。
+  async function showAuthPrompt(err) {
+    const k = prompt('网关已启用 API Key 鉴权，本次请求被拒绝（' + (err && err.message || '401') + '）。\n请输入访问密钥（与 -api-key 一致）：', storedKey());
+    if (k === null) return false;
+    saveKey(k.trim());
+    // 立即验证：401 则视为输错，清掉避免下次还带着坏 key。
+    try {
+      const r = await fetch('/api/status', { headers: { 'X-Api-Key': k.trim() } });
+      if (r.status === 401) { saveKey(''); showBanner('密钥不正确，已丢弃'); return false; }
+    } catch { /* 网关不可达时交给正常错误通道 */ }
+    location.reload();
+    return true;
+  }
 
   /* ────────────────── 路由 ────────────────── */
 
@@ -72,7 +104,7 @@
       renderRecentShort(mt);
       $('ovLive').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
     } catch (err) {
-      if (!silent) showHealth(err.message);
+      if (!silent) showHealth(err.message, err);
     }
   }
 
@@ -137,13 +169,20 @@
     chartData.chartReq = { series: s, box: reqBox, mode: 'line', accessor: (b) => b.total };
     chartData.chartTok = { series: s, box: tokBox, mode: 'bar', accessor: (b) => b.input_tokens + b.output_tokens };
 
-    reqHost.innerHTML = lineChart(s, (b) => b.total, reqBox, { color: '#2563eb', label: '请求趋势：最近 30 分钟每分钟请求数' });
+    // 系列色从 CSS 变量读取：暗色模式下变量被整体覆盖，图表随之换色，
+    // 无需在 JS 里维护第二套主题色（与 style.css 的「JS 读 CSS 变量」约定一致）。
+    const cs = getComputedStyle(document.documentElement);
+    const chartLine = cs.getPropertyValue('--chart-line').trim() || '#2563eb';
+    const barIn = cs.getPropertyValue('--chart-bar-in').trim() || '#93b4f7';
+    const barOut = cs.getPropertyValue('--chart-bar-out').trim() || '#2563eb';
+
+    reqHost.innerHTML = lineChart(s, (b) => b.total, reqBox, { color: chartLine, label: '请求趋势：最近 30 分钟每分钟请求数' });
     tokHost.innerHTML = barChart(s, [
       (b) => b.input_tokens,
       (b) => b.output_tokens,
     ], [
-      { name: '输入', color: '#93b4f7' },
-      { name: '输出', color: '#2563eb' },
+      { name: '输入', color: barIn },
+      { name: '输出', color: barOut },
     ], tokBox);
 
     // 数据刚刚更新，旧的悬停位置已指向错位的桶 —— 直接收起气泡，
@@ -438,7 +477,7 @@
     try {
       state.platforms = await get('/api/platforms');
       renderPlatforms(state.platforms);
-    } catch (err) { showHealth(err.message); }
+    } catch (err) { showHealth(err.message, err); }
   }
 
   function renderPlatforms(d) {
@@ -461,7 +500,7 @@
   function platformCard(p) {
     const badge = p.status === 'active'
       ? '<span class="badge ok">正常</span>'
-      : p.status === 'degraded' ? '<span class="badge" style="background:#fef3c7;color:#92400e">降级</span>'
+      : p.status === 'degraded' ? '<span class="badge warn">降级</span>'
       : '<span class="badge err">异常</span>';
     return `<div class="platform">
       <div class="platform-top">
@@ -483,7 +522,7 @@
     try {
       state.models = await get('/api/models');
       renderModels();
-    } catch (err) { showHealth(err.message); }
+    } catch (err) { showHealth(err.message, err); }
   }
 
   function renderModels() {
@@ -518,7 +557,7 @@
     try {
       state.metrics = await get('/api/metrics');
       renderRequests();
-    } catch (err) { showHealth(err.message); }
+    } catch (err) { showHealth(err.message, err); }
   }
 
   function renderRequests() {
@@ -532,7 +571,7 @@
         <th class="num">耗时</th><th class="num">输入</th><th class="num">输出</th><th>错误</th>
       </tr></thead>
       <tbody>${rows.length ? rows.map((r) => `
-        <tr>
+        <tr${r.ok ? '' : ' class="row-err"'}>
           <td class="mono">${esc(new Date(r.time).toLocaleString('zh-CN'))}</td>
           <td><span class="badge ${r.ok ? 'ok' : 'err'}">${r.ok ? '成功' : (r.status || '失败')}</span></td>
           <td>${esc(r.protocol)}</td>
@@ -541,7 +580,7 @@
           <td class="num">${fmtMs(r.duration_ms)}</td>
           <td class="num">${r.input_tokens || '-'}</td>
           <td class="num">${r.output_tokens || '-'}</td>
-          <td style="color:var(--err);max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(r.error || '')}</td>
+          <td class="err-msg" title="${esc(r.error || '')}">${esc(r.error || '')}</td>
         </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-faint);padding:22px">暂无记录</td></tr>'}</tbody>`;
   }
 
@@ -558,7 +597,7 @@
         ['Anthropic Messages', `POST http://${esc(st.listen)}/v1/messages`],
         ['模型列表', `GET http://${esc(st.listen)}/v1/models`],
       ]);
-    } catch (err) { showHealth(err.message); }
+    } catch (err) { showHealth(err.message, err); }
   }
 
   function renderSettings(c) {
@@ -827,7 +866,7 @@
       },
       setError(m) {
         const e = document.createElement('div');
-        e.style.cssText = 'color:#991b1b;font-size:13.5px';
+        e.style.cssText = 'color:var(--err-text);font-size:13.5px';
         e.textContent = '出错了：' + m;
         contentEl.appendChild(e);
       },
@@ -883,7 +922,14 @@
     return (s / 86400).toFixed(1) + ' 天';
   }
   function setDot(s) { $('dot').className = 'dot ' + s; }
-  function showHealth(msg) { $('healthText').textContent = msg; setDot('err'); }
+  function showHealth(msg, err) {
+    // 401 = 已启用鉴权但没带/带错密钥：给出可行动的引导，而不是干巴巴的错误文案。
+    if (err && err.status === 401 && !showAuthPrompt._pending) {
+      showAuthPrompt._pending = true;
+      showAuthPrompt(err).finally(() => { showAuthPrompt._pending = false; });
+    }
+    $('healthText').textContent = msg; setDot('err');
+  }
 
   function renderMarkdown(src) {
     const fences = [];
@@ -1071,6 +1117,19 @@
       await loadModels();
       $('healthText').textContent = '模型清单已刷新';
     } catch (err) { showBanner('刷新失败：' + err.message); }
+  });
+
+  // 设置页：网关访问密钥的管理入口。
+  $('apiKeyInput').value = storedKey();
+  $('btnSaveKey').addEventListener('click', () => {
+    saveKey($('apiKeyInput').value.trim());
+    $('healthText').textContent = $('apiKeyInput').value.trim() ? '密钥已保存' : '密钥已清除';
+    loadOverview(); // 立即用新密钥验证
+  });
+  $('btnClearKey').addEventListener('click', () => {
+    saveKey('');
+    $('apiKeyInput').value = '';
+    $('healthText').textContent = '密钥已清除';
   });
 
   /* ────────────────── 启动 ────────────────── */

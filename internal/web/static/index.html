@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- color-scheme 跟随系统：让原生控件（select/input/滚动条）与暗色模式一起切换 -->
+<meta name="color-scheme" content="light dark">
 <title>Agent2API 控制台</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>">
@@ -194,6 +196,17 @@
             <small>立即失效并重建模型缓存，用于上游模型更新后同步。</small>
           </div>
           <button class="btn" id="btnRefreshModels">拉取</button>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <strong>网关访问密钥</strong>
+            <small>网关以 -api-key 启动时，控制台会自动携带这里保存的密钥调用 /api/*。仅保存在本浏览器，不会发送给任何第三方。</small>
+          </div>
+          <div style="display:flex;gap:6px">
+            <input type="password" id="apiKeyInput" placeholder="未设置" style="width:180px" autocomplete="off">
+            <button class="btn" id="btnSaveKey">保存</button>
+            <button class="btn" id="btnClearKey" title="删除已保存的密钥">清除</button>
+          </div>
         </div>
       </div>
 
