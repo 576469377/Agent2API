@@ -46,11 +46,11 @@
 }
 
 /* ───────────── 暗色模式 ─────────────
-   跟随系统（prefers-color-scheme），不设 JS 开关：控制台是低频管理面板，
-   系统级偏好已经覆盖了实际使用场景，加开关反而多一个要维护的状态。
-   只覆盖变量 —— 所有规则都引用变量，因此暗色只需要这一段。 */
+   默认跟随系统（prefers-color-scheme）；顶栏的主题开关可手动指定，
+   以 :root[data-theme="dark"] / "light" 覆盖（见文件末尾的主题覆盖段）。
+   只覆盖变量 —— 所有规则都引用变量，暗色只需要这一段。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #131720;
     --surface: #1a2029;
     --surface-2: #222937;
@@ -586,3 +586,96 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 .table td.mx-cell { text-align: center; width: 1%; padding-left: 8px; padding-right: 8px; }
 .mx-yes { color: var(--ok); font-weight: 700; }
 .mx-no { color: var(--text-faint); opacity: .5; }
+
+
+/* ───────────── 主题手动覆盖 ─────────────
+   顶栏三态开关（跟随系统 / 亮 / 暗）写 data-theme 属性。
+   data-theme="dark" 无条件应用暗色变量；"light" 在系统暗色时反向锁亮。 */
+:root[data-theme="dark"] {
+  --bg: #131720;
+    --surface: #1a2029;
+    --surface-2: #222937;
+    --border: #2a3140;
+    --border-strong: #3a4354;
+    --text: #e6e9ef;
+    --text-dim: #9aa3b2;
+    --text-faint: #6b7484;
+    --accent: #5b8bf7;
+    --accent-hover: #7ba3f9;
+    --accent-soft: #1d2740;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --thinking-bg: #26221a;
+    --thinking-border: #453a20;
+    --thinking-text: #d8b86a;
+    --thinking-head: #e0c078;
+    --user-bg: #1e2940;
+    --user-border: #2c3b5e;
+    --code-bg: #222937;
+    --ok-bg: #14291e;      --ok-text: #5fdc9c;   --ok-border: #1f4230;
+    --err-bg: #2e1a1a;     --err-text: #f19999;  --err-border: #4a2626;
+    --warn-bg: #2d2410;    --warn-text: #e8c268;
+    --row-err-bg: #241a1c;
+    --code-block-bg: #10141b; --code-block-text: #d5dbe6;
+    --tip-bg: rgba(10, 13, 18, .95); --tip-text: #e6e9ef; --tip-dim: #8a93a3;
+    --scrollbar: #333c4c;   --scrollbar-hover: #414c5f;
+    --toggle-track: #3a4354; --toggle-knob: #d5dbe6;
+    --chart-line: #5b8bf7;
+    --chart-bar-in: #33456e;
+    --chart-bar-out: #5b8bf7;
+  
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --border: #e6e8eb;
+  --border-strong: #d5d9de;
+  --text: #171a1f;
+  --text-dim: #646b76;
+  --text-faint: #9ba3ad;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #eef4ff;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+  --thinking-bg: #fdfaf1;
+  --thinking-border: #ecdcb8;
+  --thinking-text: #7a5a14;
+  --thinking-head: #92660f;
+  --user-bg: #f1f5ff;
+  --user-border: #dde6fb;
+  --code-bg: #f2f4f7;
+  /* 语义色块：tag/badge/banner 等成对出现的底+字色 */
+  --ok-bg: #eaf6ee;      --ok-text: #15803d;   --ok-border: #cfe9d8;
+  --err-bg: #fdecec;     --err-text: #b91c1c;  --err-border: #fecaca;
+  --warn-bg: #fef3c7;    --warn-text: #92400e;
+  --row-err-bg: #fdf4f4;                    /* 调用日志失败行底色 */
+  --code-block-bg: #1e2430; --code-block-text: #e6e9ef;  /* 代码块：双主题下都保持深底 */
+  --tip-bg: rgba(23, 26, 31, .93); --tip-text: #fff; --tip-dim: #b6bcc4;
+  --scrollbar: #d8dce1;   --scrollbar-hover: #c4cad2;
+  --toggle-track: #cfd4da; --toggle-knob: #fff;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* 正文字体栈。JS 侧绘制 SVG 时通过 getComputedStyle 读取它，
+     避免在 JS 里再抄一份字体常量（两份定义必然漂移）。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Source Han Sans SC", "Source Han Sans CN", "WenQuanYi Micro Hei", sans-serif;
+  --sidebar-w: 212px;
+  /* 图表系列色：JS 绘制 SVG 时读取（保持「JS 读 CSS 变量」的既有约定）。
+     定义在这里而不是 :root 外，是为了让暗色模式能整体覆盖。 */
+  --chart-line: #2563eb;
+  --chart-bar-in: #93b4f7;
+  --chart-bar-out: #2563eb;
+
+}
+
+/* ───────────── 偏好切换（语言 / 主题） ───────────── */
+
+.pref-row { display: flex; gap: 6px; padding: 12px 6px 4px; }
+.pref-sel { flex: 1; min-width: 0; font-size: 12px; padding: 4px 6px; }

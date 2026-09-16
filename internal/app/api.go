@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -241,12 +242,22 @@ func (a *App) listManagedAccounts(w http.ResponseWriter) {
 func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 	dir := a.cfg.Upstream.AccountsDir
 	if dir == "" {
-		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
-			"error": map[string]string{
-				"message": "未配置 accounts_dir，无法确定新凭证的存放位置。请用 -accounts-dir 或配置文件指定",
-			},
-		})
-		return
+		// 未显式配置号池目录时，兜底到 ~/.workbuddy/（workbuddy 自有凭证的
+		// 默认目录）。直接报错会把一个纯配置问题抛回给用户——「添加账号」
+		// 这个动作本身完全可以在默认位置工作，登录完成后提示用户把该目录
+		// 配成 accounts_dir（或下次启动前建 auths/）即可入池。
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+				"error": map[string]string{
+					"message": "无法确定用户主目录，请用 -accounts-dir 显式指定号池目录",
+				},
+			})
+			return
+		}
+		dir = filepath.Join(home, ".workbuddy")
+		_ = os.MkdirAll(dir, 0o700)
+		a.logins.logf("accounts_dir 未配置，本次登录凭证将写入 %s；把它配成 accounts_dir 后即可入池", dir)
 	}
 	// 新凭证文件名由前端给（默认 account-N）；只接受纯文件名，防目录穿越。
 	name := r.URL.Query().Get("name")
@@ -265,7 +276,13 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
 		return
 	}
-	writeJSON(w, sess)
+	// 把实际落盘位置带回去：前端要在成功提示里告诉用户「凭证在哪、
+	// 怎么让它进号池」。
+	out := struct {
+		*loginSession
+		AccountsDir string `json:"accounts_dir_used"`
+	}{sess, dir}
+	writeJSON(w, out)
 }
 
 // apiLoginStatus 轮询一次登录会话。

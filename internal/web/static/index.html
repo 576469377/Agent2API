@@ -34,16 +34,28 @@
 
     <nav class="nav" id="nav">
       <div class="nav-group">运营</div>
-      <button class="nav-item active" data-page="overview"><svg class="ic"><use href="#i-overview"/></svg>概览</button>
-      <button class="nav-item" data-page="requests"><svg class="ic"><use href="#i-log"/></svg>调用日志</button>
+      <button class="nav-item active" data-page="overview"><svg class="ic"><use href="#i-overview"/></svg><span data-i18n="nav.overview">概览</span></button>
+      <button class="nav-item" data-page="requests"><svg class="ic"><use href="#i-log"/></svg><span data-i18n="nav.requests">调用日志</span></button>
       <div class="nav-group">上游</div>
-      <button class="nav-item" data-page="accounts"><svg class="ic"><use href="#i-account"/></svg>账号</button>
-      <button class="nav-item" data-page="platforms"><svg class="ic"><use href="#i-platform"/></svg>平台</button>
-      <button class="nav-item" data-page="models"><svg class="ic"><use href="#i-model"/></svg>模型</button>
+      <button class="nav-item" data-page="accounts"><svg class="ic"><use href="#i-account"/></svg><span data-i18n="nav.accounts">账号</span></button>
+      <button class="nav-item" data-page="platforms"><svg class="ic"><use href="#i-platform"/></svg><span data-i18n="nav.platforms">平台</span></button>
+      <button class="nav-item" data-page="models"><svg class="ic"><use href="#i-model"/></svg><span data-i18n="nav.models">模型</span></button>
       <div class="nav-group">工具</div>
-      <button class="nav-item" data-page="chat"><svg class="ic"><use href="#i-chat"/></svg>对话</button>
-      <button class="nav-item" data-page="settings"><svg class="ic"><use href="#i-settings"/></svg>设置</button>
+      <button class="nav-item" data-page="chat"><svg class="ic"><use href="#i-chat"/></svg><span data-i18n="nav.chat">对话</span></button>
+      <button class="nav-item" data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span data-i18n="nav.settings">设置</span></button>
     </nav>
+
+    <div class="pref-row">
+      <select id="langSel" class="pref-sel" title="Language / 语言">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+      <select id="themeSel" class="pref-sel" title="主题 / Theme">
+        <option value="auto" data-i18n="theme.auto">跟随系统</option>
+        <option value="light" data-i18n="theme.light">浅色</option>
+        <option value="dark" data-i18n="theme.dark">深色</option>
+      </select>
+    </div>
 
     <div class="side-foot">
       <div class="health" id="health">
@@ -61,13 +73,12 @@
       <header class="page-head">
         <div>
           <div class="crumb" data-crumb></div>
-          <div class="crumb" data-crumb></div>
-          <h1>概览</h1>
-          <p class="sub" id="ovSub">网关运行状况与用量统计</p>
+          <h1 data-i18n="page.overview">概览</h1>
+          <p class="sub" id="ovSub" data-i18n="sub.overview">网关运行状况与用量统计</p>
         </div>
         <div class="page-actions">
           <span class="live" id="ovLive"></span>
-          <button class="btn" id="btnRefresh">刷新</button>
+          <button class="btn" id="btnRefresh" data-i18n="btn.refresh">刷新</button>
         </div>
       </header>
 
@@ -75,35 +86,35 @@
 
       <div class="panel-row">
         <div class="panel">
-          <div class="panel-head"><h2>请求趋势</h2><span class="panel-note">最近 30 分钟</span></div>
+          <div class="panel-head"><h2 data-i18n="chart.req">请求趋势</h2><span class="panel-note" data-i18n="chart.win">最近 30 分钟</span></div>
           <div class="chart" id="chartReq"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>Token 消耗</h2><span class="panel-note">输入 / 输出</span></div>
+          <div class="panel-head"><h2 data-i18n="chart.tok">Token 消耗</h2><span class="panel-note" data-i18n="chart.win">最近 30 分钟</span></div>
           <div class="chart" id="chartTok"></div>
         </div>
       </div>
 
       <div class="panel-row">
         <div class="panel">
-          <div class="panel-head"><h2>协议分布</h2></div>
+          <div class="panel-head"><h2 data-i18n="chart.proto">协议分布</h2></div>
           <div class="rank" id="rankProto"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>模型调用排行</h2></div>
+          <div class="panel-head"><h2 data-i18n="chart.model">模型调用排行</h2></div>
           <div class="rank" id="rankModel"></div>
         </div>
       </div>
 
       <div class="panel-row" id="panelAcctRank" style="display:none">
         <div class="panel">
-          <div class="panel-head"><h2>账号用量排行</h2><span class="panel-note">按请求数</span></div>
+          <div class="panel-head"><h2 data-i18n="chart.acct">账号用量排行</h2><span class="panel-note" data-i18n="chart.byreq">按请求数</span></div>
           <div class="rank" id="rankAccount"></div>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-head"><h2>最近请求</h2><button class="link" data-goto="requests">查看全部</button></div>
+        <div class="panel-head"><h2 data-i18n="chart.recent">最近请求</h2><button class="link" data-goto="requests" data-i18n="chart.viewall">查看全部</button></div>
         <div id="recentShort"></div>
       </div>
     </section>
@@ -112,7 +123,7 @@
     <section class="page" id="page-chat">
       <header class="page-head">
         <div class="crumb" data-crumb></div>
-        <div><h1>对话</h1><p class="sub">直接与网关对话，验证协议与模型表现</p></div>
+        <div><h1 data-i18n="page.chat">对话</h1><p class="sub" data-i18n="sub.chat">直接与网关对话，验证协议与模型表现</p></div>
         <div class="page-actions">
           <select id="model" title="模型"></select>
           <button class="btn" id="btnChatSettings">参数</button>
@@ -162,12 +173,12 @@
       <header class="page-head">
         <div>
           <div class="crumb" data-crumb></div>
-          <h1>账号</h1>
-          <p class="sub" id="acctSub">号池中的上游账号与登录状态</p>
+          <h1 data-i18n="page.accounts">账号</h1>
+          <p class="sub" id="acctSub" data-i18n="sub.accounts">号池中的上游账号与登录状态</p>
         </div>
         <div class="page-actions">
-          <button class="btn" id="btnAddAccount">添加账号</button>
-          <button class="btn" id="btnReloadAccounts">刷新</button>
+          <button class="btn" id="btnAddAccount" data-i18n="btn.add">添加账号</button>
+          <button class="btn" id="btnReloadAccounts" data-i18n="btn.reload">刷新</button>
         </div>
       </header>
       <div id="accountList"></div>
@@ -177,8 +188,8 @@
     <section class="page" id="page-platforms">
       <header class="page-head">
         <div class="crumb" data-crumb></div>
-        <div><h1>平台</h1><p class="sub">已接入的上游平台，以及后续规划</p></div>
-        <div class="page-actions"><button class="btn" id="btnReloadPlatforms">刷新</button></div>
+        <div><h1 data-i18n="page.platforms">平台</h1><p class="sub" data-i18n="sub.platforms">已接入的上游平台，以及后续规划</p></div>
+        <div class="page-actions"><button class="btn" id="btnReloadPlatforms" data-i18n="btn.reload">刷新</button></div>
       </header>
       <div id="accountPool"></div>
       <div id="platformList"></div>
@@ -190,14 +201,14 @@
     <section class="page" id="page-models">
       <header class="page-head">
         <div class="crumb" data-crumb></div>
-        <div><h1>模型</h1><p class="sub" id="modelsSub">当前平台可用模型</p></div>
+        <div><h1 data-i18n="page.models">模型</h1><p class="sub" id="modelsSub" data-i18n="sub.models">当前平台可用模型</p></div>
         <div class="page-actions">
           <input type="text" id="modelFilter" class="filter" placeholder="筛选模型…">
           <select id="modelView" title="视图">
             <option value="list">列表</option>
             <option value="matrix">账号矩阵</option>
           </select>
-          <button class="btn" id="btnReloadModels">刷新</button>
+          <button class="btn" id="btnReloadModels" data-i18n="btn.reload">刷新</button>
         </div>
       </header>
       <div class="table-wrap"><div class="table-scroll"><table class="table" id="modelTable"></table></div></div>
@@ -207,14 +218,14 @@
     <section class="page" id="page-requests">
       <header class="page-head">
         <div class="crumb" data-crumb></div>
-        <div><h1>调用日志</h1><p class="sub">最近 200 条请求</p></div>
+        <div><h1 data-i18n="page.requests">调用日志</h1><p class="sub" data-i18n="sub.requests">最近 200 条请求</p></div>
         <div class="page-actions">
           <select id="reqFilter">
             <option value="">全部</option>
             <option value="fail">仅失败</option>
             <option value="ok">仅成功</option>
           </select>
-          <button class="btn" id="btnReloadReq">刷新</button>
+          <button class="btn" id="btnReloadReq" data-i18n="btn.reload">刷新</button>
         </div>
       </header>
       <div class="table-wrap"><div class="table-scroll"><table class="table" id="reqTable"></table></div></div>
@@ -224,11 +235,11 @@
     <section class="page" id="page-settings">
       <header class="page-head">
         <div class="crumb" data-crumb></div>
-        <div><h1>设置</h1><p class="sub">运行期可调项与当前生效配置</p></div>
+        <div><h1 data-i18n="page.settings">设置</h1><p class="sub" data-i18n="sub.settings">运行期可调项与当前生效配置</p></div>
       </header>
 
       <div class="panel">
-        <div class="panel-head"><h2>运行期开关</h2></div>
+        <div class="panel-head"><h2 data-i18n="set.runtime">运行期开关</h2></div>
         <div class="setting">
           <div class="setting-info">
             <strong>内容脱敏</strong>
@@ -244,7 +255,7 @@
             <strong>重新拉取模型清单</strong>
             <small>立即失效并重建模型缓存，用于上游模型更新后同步。</small>
           </div>
-          <button class="btn" id="btnRefreshModels">拉取</button>
+          <button class="btn" id="btnRefreshModels" data-i18n="btn.pull">拉取</button>
         </div>
         <div class="setting">
           <div class="setting-info">
@@ -253,20 +264,20 @@
           </div>
           <div style="display:flex;gap:6px">
             <input type="password" id="apiKeyInput" placeholder="未设置" style="width:180px" autocomplete="off">
-            <button class="btn" id="btnSaveKey">保存</button>
-            <button class="btn" id="btnClearKey" title="删除已保存的密钥">清除</button>
+            <button class="btn" id="btnSaveKey" data-i18n="btn.save">保存</button>
+            <button class="btn" id="btnClearKey" data-i18n="btn.clearkey">清除</button>
           </div>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-head"><h2>当前生效配置</h2></div>
+        <div class="panel-head"><h2 data-i18n="set.effective">当前生效配置</h2></div>
         <div class="kv" id="configView"></div>
         <p class="note">监听地址、上游地址、超时等需要重启生效，请用配置文件或启动参数修改，控制台不做假动作。</p>
       </div>
 
       <div class="panel">
-        <div class="panel-head"><h2>接入方式</h2></div>
+        <div class="panel-head"><h2 data-i18n="set.access">接入方式</h2></div>
         <div class="kv" id="usageView"></div>
       </div>
     </section>

@@ -136,6 +136,45 @@ export ANTHROPIC_API_KEY=任意值   # 未配置网关密钥时不会校验
 - `/api/platforms` 返回 `{active, planned}`，新增平台无需改前端
 - 指标按**协议**和**模型**两个维度分组，与具体平台无关
 
+第二个平台已经落地：加 `-platform doubao` 就走豆包（详见下节），
+号池、控制台、三种下游协议全部复用，不需要改任何既有代码。
+
+---
+
+## 平台二：豆包 DoubaoWork
+
+复用本机 **DoubaoWork 桌面客户端**的登录态，把豆包网页端转成同样的 OpenAI / Anthropic 接口。
+
+```bash
+# 1. 确认能读到客户端登录态（会自动解密 Chromium 的 Cookie 库）
+./bin/agent2api models -platform doubao
+
+# 2. 启动
+./bin/agent2api -platform doubao            # 默认 127.0.0.1:8787
+
+# 3. 调用（模型名固定为 doubao）
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"doubao","messages":[{"role":"user","content":"你好"}]}'
+```
+
+凭证来源（按优先级）：
+
+| 来源 | 场景 |
+|---|---|
+| DoubaoWork 桌面端 profile（自动探测） | 本机日常使用，装了客户端且登录过即可 |
+| `agent2api login -upstream doubao -out auths/a.json` | 导出成 JSON，供多账号号池 / 无客户端的机器 |
+
+号池照常可用：`-accounts-dir auths`，目录下每个 `*.json` 算一个账号。
+
+> [!NOTE]
+> **豆包与 workbuddy 的能力差异**（接入前请先看）：
+>
+> - 豆包网页端**不支持工具调用**，因此不适合作为 Claude Code / Codex 这类编程智能体的后端
+> - 没有 system 角色：系统提示会折进首条用户消息
+> - 凭证是 Cookie，无 refresh token，到期（实测约 30 天）需重新登录或重新导出
+> - 会话删除接口上游返回成功但列表仍可见，代理流量可能在豆包历史里留下「新对话」
+
 ---
 
 ## 支持的接口
@@ -165,7 +204,7 @@ export ANTHROPIC_API_KEY=任意值   # 未配置网关密钥时不会校验
 | `-api-key` | `AGENT2API_API_KEY` | 网关访问密钥，为空则不鉴权 |
 | `-credential` | `AGENT2API_CREDENTIAL_PATH` | 凭证文件路径，为空时自动探测 |
 | `-base-url` | `AGENT2API_BASE_URL` | 上游地址，默认 [copilot.tencent.com](https://copilot.tencent.com) |
-| `-platform` | — | 上游平台，目前仅支持 `workbuddy` |
+| `-platform` | — | 上游平台：`workbuddy`（默认）或 `doubao` |
 | `-metrics-file` | — | 指标落盘路径 |
 | `-no-persist` | — | 关闭指标落盘（重启后统计清零） |
 | `-no-sanitize` | — | 关闭内容脱敏 |
@@ -281,6 +320,14 @@ go test ./... -race
 - **多账号**：已支持同平台多账号轮询与限流冷却（见[多账号号池](#多账号号池)）；尚未实现熔断与额度查询
 - **额度查询端点未实现**：上游该路由需企业版权限，返回 403
 - **DSML 文本态工具调用兜底未实现**：实测上游走原生 `tool_calls` 通道，如遇回退需补上
+
+### 豆包平台的限制
+
+- **不支持工具调用**：豆包网页端没有 function calling 通道，`/v1/models` 里 `supports_tools=false`。作为 Claude Code / Codex 的后端会失败——它适合对话与文本生成类负载
+- **模型不可枚举**：上游没有公开的模型清单接口（`/samantha/model/list` 等均 404），只暴露一个入口 `doubao`。不编造模型名
+- **每次请求新建一个会话**：`conversation_id` 必填且必须真实存在，因此拨号前先建会话、流结束后尽力删除（上游删除接口返回成功但列表仍可见，可能最终一致有延迟）
+- **凭证不可刷新**：Cookie 到期只能重新登录客户端或重新导出，适配器没有 Refresh 通路
+- **采样参数不透传**：`temperature` / `max_tokens` 等未证实有对应上游字段，暂不透传（宁可静默忽略，也不伪装成生效）
 
 ### 多账号号池
 

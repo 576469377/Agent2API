@@ -9,6 +9,148 @@
 
   const $ = (id) => document.getElementById(id);
 
+  /* ────────────────── i18n 与主题 ──────────────────
+     静态文本走 data-i18n 声明式替换；JS 拼接的动态文案走 t(key)。
+     两者共用同一本字典；偏好存 localStorage，切换即时生效。 */
+
+  const I18N = {
+    en: {
+      'nav.overview': 'Overview', 'nav.requests': 'Logs', 'nav.accounts': 'Accounts',
+      'nav.platforms': 'Platforms', 'nav.models': 'Models', 'nav.chat': 'Chat', 'nav.settings': 'Settings',
+      'page.overview': 'Overview', 'page.requests': 'Request Logs', 'page.accounts': 'Accounts',
+      'page.platforms': 'Platforms', 'page.models': 'Models', 'page.chat': 'Chat', 'page.settings': 'Settings',
+      'sub.overview': 'Gateway health and usage statistics',
+      'sub.chat': 'Chat with the gateway directly to verify protocol behavior',
+      'sub.accounts': 'Upstream accounts in the pool and their login state',
+      'sub.platforms': 'Connected upstream platforms, and what is planned',
+      'sub.models': 'Models available on the current platform',
+      'sub.requests': 'Last 200 requests',
+      'sub.settings': 'Runtime options and effective configuration',
+      'theme.auto': 'System', 'theme.light': 'Light', 'theme.dark': 'Dark',
+      'group.ops': 'Operations', 'group.upstream': 'Upstream', 'group.tools': 'Tools',
+      'stat.total': 'Requests', 'stat.success': 'Success rate', 'stat.latency': 'Avg latency',
+      'stat.tps': 'Decode speed', 'stat.inflight': 'In flight', 'stat.in': 'Input tokens',
+      'stat.out': 'Output tokens', 'stat.failed': 'failed', 'stat.rpm': 'last 1 min',
+      'stat.all': 'all requests', 'stat.now': 'current concurrency',
+      'stat.nogen': 'no generation data', 'stat.based': 'based on', 'stat.gen': 'generations',
+      'stat.think': 'thinking', 'chart.req': 'Request trend', 'chart.tok': 'Token usage',
+      'chart.win': 'last 30 min', 'chart.in': 'Input', 'chart.out': 'Output',
+      'chart.proto': 'By protocol', 'chart.model': 'By model', 'chart.acct': 'Account usage',
+      'chart.recent': 'Recent requests', 'chart.viewall': 'View all', 'chart.byreq': 'by requests',
+      'btn.refresh': 'Refresh', 'btn.add': 'Add account', 'btn.reload': 'Reload', 'btn.pull': 'Pull',
+      'btn.save': 'Save', 'btn.clearkey': 'Clear', 'btn.send': 'Send', 'btn.stop': 'Stop',
+      'btn.clear': 'Clear', 'btn.params': 'Params',
+      'acct.next': 'next up', 'acct.ok': 'OK', 'acct.ratelimited': 'Rate limited',
+      'acct.unauthorized': 'Auth failed', 'acct.disabled': 'Disabled',
+      'acct.relogin': 'Re-login', 'acct.disable': 'Disable', 'acct.enable': 'Enable',
+      'acct.reset': 'Reset cooldown', 'acct.state': 'State', 'acct.cool': 'Cooldown left',
+      'acct.usage': 'Usage', 'acct.success': 'Success rate', 'acct.lasterr': 'Last error',
+      'acct.src': 'Source', 'acct.srcdesktop': 'Desktop client', 'acct.srcfile': 'Pool file',
+      'login.ok': 'valid until', 'login.expiring': 'expiring soon (auto-refresh)',
+      'login.dead': 'Login expired, re-login required',
+      'req.time': 'Time', 'req.status': 'Status', 'req.proto': 'Protocol', 'req.model': 'Model',
+      'req.acct': 'Account', 'req.mode': 'Mode', 'req.dur': 'Duration', 'req.err': 'Error',
+      'req.stream': 'stream', 'req.nostream': 'final', 'req.none': 'No records yet',
+      'req.loading': 'Loading', 'req.loadfail': 'Failed to load', 'req.nofilter': 'No records match the filter',
+      'req.tryall': 'Try switching back to "All"',
+      'mdl.id': 'Model ID', 'mdl.name': 'Name', 'mdl.ctx': 'Context', 'mdl.maxout': 'Max output',
+      'mdl.cap': 'Capabilities', 'mdl.tools': 'tools', 'mdl.think': 'thinking', 'mdl.vision': 'vision',
+      'mdl.default': 'default', 'mdl.nomodel': 'No models returned by upstream',
+      'set.runtime': 'Runtime switches', 'set.effective': 'Effective configuration',
+      'set.access': 'Access endpoints', 'set.note': 'Listen address, upstream URL and timeouts require a restart — the console does not fake it.',
+      'toast.saved': 'Settings saved', 'toast.keyrefreshed': 'Model list refreshed',
+      'toast.keysaved': 'Key saved', 'toast.keycleared': 'Key cleared',
+      'time.now': 'now', 'time.ago': (m) => `-${m}m`,
+    },
+    zh: {
+      'nav.overview': '概览', 'nav.requests': '调用日志', 'nav.accounts': '账号',
+      'nav.platforms': '平台', 'nav.models': '模型', 'nav.chat': '对话', 'nav.settings': '设置',
+      'page.overview': '概览', 'page.requests': '调用日志', 'page.accounts': '账号',
+      'page.platforms': '平台', 'page.models': '模型', 'page.chat': '对话', 'page.settings': '设置',
+      'sub.overview': '网关运行状况与用量统计',
+      'sub.chat': '直接与网关对话，验证协议与模型表现',
+      'sub.accounts': '号池中的上游账号与登录状态',
+      'sub.platforms': '已接入的上游平台，以及后续规划',
+      'sub.models': '当前平台可用模型',
+      'sub.requests': '最近 200 条请求',
+      'sub.settings': '运行期可调项与当前生效配置',
+      'theme.auto': '跟随系统', 'theme.light': '浅色', 'theme.dark': '深色',
+      'group.ops': '运营', 'group.upstream': '上游', 'group.tools': '工具',
+      'stat.total': '请求总数', 'stat.success': '成功率', 'stat.latency': '平均延迟',
+      'stat.tps': '解码速度', 'stat.inflight': '进行中', 'stat.in': '输入 Token',
+      'stat.out': '输出 Token', 'stat.failed': '失败', 'stat.rpm': '近 1 分钟',
+      'stat.all': '全部请求', 'stat.now': '当前并发',
+      'stat.nogen': '暂无生成数据', 'stat.based': '基于', 'stat.gen': '次生成',
+      'stat.think': '思考', 'chart.req': '请求趋势', 'chart.tok': 'Token 消耗',
+      'chart.win': '最近 30 分钟', 'chart.in': '输入', 'chart.out': '输出',
+      'chart.proto': '协议分布', 'chart.model': '模型调用排行', 'chart.acct': '账号用量排行',
+      'chart.recent': '最近请求', 'chart.viewall': '查看全部', 'chart.byreq': '按请求数',
+      'btn.refresh': '刷新', 'btn.add': '添加账号', 'btn.reload': '刷新', 'btn.pull': '拉取',
+      'btn.save': '保存', 'btn.clearkey': '清除', 'btn.send': '发送', 'btn.stop': '停止',
+      'btn.clear': '清空', 'btn.params': '参数',
+      'acct.next': '下一个使用', 'acct.ok': '正常', 'acct.ratelimited': '限流中',
+      'acct.unauthorized': '鉴权失效', 'acct.disabled': '已停用',
+      'acct.relogin': '重新登录', 'acct.disable': '停用', 'acct.enable': '启用',
+      'acct.reset': '清除冷却', 'acct.state': '状态', 'acct.cool': '剩余冷却',
+      'acct.usage': '用量', 'acct.success': '成功率', 'acct.lasterr': '最近错误',
+      'acct.src': '来源', 'acct.srcdesktop': '桌面客户端', 'acct.srcfile': '号池文件',
+      'login.ok': '有效至', 'login.expiring': '凭证即将过期（网关会自动刷新）',
+      'login.dead': '登录已失效，需重新登录',
+      'req.time': '时间', 'req.status': '状态', 'req.proto': '协议', 'req.model': '模型',
+      'req.acct': '账号', 'req.mode': '方式', 'req.dur': '耗时', 'req.err': '错误',
+      'req.stream': '流式', 'req.nostream': '非流式', 'req.none': '还没有请求记录',
+      'req.loading': '加载中', 'req.loadfail': '加载失败', 'req.nofilter': '没有符合筛选条件的记录',
+      'req.tryall': '试试切回「全部」',
+      'mdl.id': '模型 ID', 'mdl.name': '名称', 'mdl.ctx': '上下文', 'mdl.maxout': '最大输出',
+      'mdl.cap': '能力', 'mdl.tools': '工具', 'mdl.think': '思考', 'mdl.vision': '视觉',
+      'mdl.default': '默认', 'mdl.nomodel': '上游未返回任何模型',
+      'set.runtime': '运行期开关', 'set.effective': '当前生效配置',
+      'set.access': '接入方式', 'set.note': '监听地址、上游地址、超时等需要重启生效，请用配置文件或启动参数修改，控制台不做假动作。',
+      'toast.saved': '设置已生效', 'toast.keyrefreshed': '模型清单已刷新',
+      'toast.keysaved': '密钥已保存', 'toast.keycleared': '密钥已清除',
+      'time.now': '现在', 'time.ago': (m) => `-${m}m`,
+    },
+  };
+
+  let LANG = localStorage.getItem('agent2api_lang') || 'zh';
+  const THEME_KEY = 'agent2api_theme';
+
+  // t 取当前语言的文案；函数型词条支持参数；缺键回落中文原文。
+  function t(key, ...args) {
+    const v = (I18N[LANG] && I18N[LANG][key]) ?? I18N.zh[key];
+    return typeof v === 'function' ? v(...args) : (v ?? key);
+  }
+
+  function applyLang() {
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const v = I18N[LANG] && I18N[LANG][el.dataset.i18n];
+      if (typeof v === 'string') el.textContent = v;
+    });
+    // 导航分组是中文写死的静态锚点，双语值都在字典里。
+    const groupMap = { '运营': 'group.ops', '上游': 'group.upstream', '工具': 'group.tools',
+      'Operations': 'group.ops', 'Upstream': 'group.upstream', 'Tools': 'group.tools' };
+    document.querySelectorAll('.nav-group').forEach((el) => {
+      const key = groupMap[el.textContent.trim()];
+      if (key) el.textContent = t(key);
+    });
+    document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+    // 当前页面的动态内容同样换语言。
+    if (state.page === 'overview' && state.metrics) { renderStats(state.metrics); renderRanks(state.metrics); }
+    if (state.page === 'accounts' && state.accounts) renderAccountsPage(state.accounts, state.metrics);
+    if (state.page === 'models') renderModels();
+    if (state.page === 'requests') renderRequests();
+  }
+
+  function applyTheme() {
+    const pref = localStorage.getItem(THEME_KEY) || 'auto';
+    document.documentElement.removeAttribute('data-theme');
+    if (pref === 'dark' || pref === 'light') {
+      document.documentElement.setAttribute('data-theme', pref);
+    }
+    // 图表系列色随主题变化，重画当前图表。
+    if (state.page === 'overview' && state.metrics) renderCharts(state.metrics);
+  }
+
   const state = {
     page: 'overview',
     status: null,
@@ -200,20 +342,20 @@
   // fmtTPS 渲染解码速度。tps_samples 为 0 表示从未测到生成耗时
   // （例如刚重启且指标文件是旧格式），此时显示「—」而不是 "0.0 tok/s"。
   function fmtTPS(m) {
-    if (!m.tps_samples) return { v: '—', sub: '暂无生成数据' };
-    return { v: Number(m.avg_tps || 0).toFixed(1) + ' tok/s', sub: `基于 ${m.tps_samples} 次生成` };
+    if (!m.tps_samples) return { v: '—', sub: t('stat.nogen') };
+    return { v: Number(m.avg_tps || 0).toFixed(1) + ' tok/s', sub: `${t('stat.based')} ${m.tps_samples} ${t('stat.gen')}` };
   }
 
   function renderStats(m) {
     const tps = fmtTPS(m);
     const cards = [
-      { k: '请求总数', v: fmtNum(m.total), sub: `近 1 分钟 ${m.last_minute_rpm}` },
-      { k: '成功率', v: (m.success_rate * 100).toFixed(1) + '%', sub: `失败 ${m.failed} 次`, cls: m.failed ? 'err' : 'ok' },
-      { k: '平均延迟', v: fmtMs(m.avg_latency_ms), sub: '全部请求' },
-      { k: '解码速度', v: tps.v, sub: tps.sub },
-      { k: '进行中', v: m.in_flight, sub: '当前并发' },
-      { k: '输入 Token', v: fmtNum(m.input_tokens), sub: '' },
-      { k: '输出 Token', v: fmtNum(m.output_tokens), sub: m.reasoning_tokens ? `思考 ${fmtNum(m.reasoning_tokens)}` : '' },
+      { k: t('stat.total'), v: fmtNum(m.total), sub: `${t('stat.rpm')} ${m.last_minute_rpm}` },
+      { k: t('stat.success'), v: (m.success_rate * 100).toFixed(1) + '%', sub: `${t('stat.failed')} ${m.failed}`, cls: m.failed ? 'err' : 'ok' },
+      { k: t('stat.latency'), v: fmtMs(m.avg_latency_ms), sub: t('stat.all') },
+      { k: t('stat.tps'), v: tps.v, sub: tps.sub },
+      { k: t('stat.inflight'), v: m.in_flight, sub: t('stat.now') },
+      { k: t('stat.in'), v: fmtNum(m.input_tokens), sub: '' },
+      { k: t('stat.out'), v: fmtNum(m.output_tokens), sub: m.reasoning_tokens ? `${t('stat.think')} ${fmtNum(m.reasoning_tokens)}` : '' },
     ];
     $('statGrid').innerHTML = cards
       .map((c) => `<div class="stat ${c.cls || ''}">
@@ -638,8 +780,8 @@
     const usage = usageByAccount(m);
 
     if (!list.length) {
-      host.innerHTML = emptyPanel('还没有可用账号',
-        '把凭证文件放进号池目录，或用下方「添加账号」走设备码登录。');
+      host.innerHTML = emptyPanel(t('acct.next') === '下一个使用' ? '还没有可用账号' : 'No accounts yet',
+        t('acct.next') === '下一个使用' ? '把凭证文件放进号池目录，或点「添加账号」走设备码登录。' : 'Put credential files into the pool directory, or use "Add account" for device-code login.');
       $('acctSub').textContent = '号池为空';
       return;
     }
@@ -657,19 +799,23 @@
     const id = a.identity || {};
     const lv = a.healthy ? 'ok' : (a.reason === 'rate_limited' ? 'warn'
       : a.reason === 'disabled' ? 'off' : 'err');
-    const stateTxt = a.healthy ? '正常'
-      : a.reason === 'rate_limited' ? `限流中 · ${fmtCountdown(a.cooldown_secs)}`
-      : a.reason === 'unauthorized' ? '鉴权失效'
-      : a.reason === 'disabled' ? '已停用' : '不可用';
+    const stateTxt = a.healthy ? t('acct.ok')
+      : a.reason === 'rate_limited' ? `${t('acct.ratelimited')} · ${fmtCountdown(a.cooldown_secs)}`
+      : a.reason === 'unauthorized' ? t('acct.unauthorized')
+      : a.reason === 'disabled' ? t('acct.disabled') : t('acct.ratelimited');
 
     // 登录状态：refreshToken 过期是终态（必须重新登录）；access 过期网关会自查。
-    let loginTxt = '未知', loginLv = '';
-    if (id.refresh_expired) { loginTxt = '登录已失效，需重新登录'; loginLv = 'err'; }
-    else if (id.needs_refresh) { loginTxt = '凭证即将过期（网关会自动刷新）'; loginLv = 'warn'; }
-    else if (id.expires_at) { loginTxt = '有效至 ' + new Date(id.expires_at).toLocaleString('zh-CN'); }
-    else { loginTxt = '有效'; }
+    let loginTxt = t('login.unknown'), loginLv = '';
+    if (id.refresh_expired) { loginTxt = t('login.dead'); loginLv = 'err'; }
+    else if (id.needs_refresh) { loginTxt = t('login.expiring'); loginLv = 'warn'; }
+    else if (id.expires_at) { loginTxt = `${t('login.ok')} ${new Date(id.expires_at).toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN')}`; }
 
     const name = id.nickname || id.uid || a.label;
+    // 来源徽标：桌面客户端凭证 vs 号池文件。桌面凭证的「重新登录」会
+    // 覆盖桌面端登录态，必须让用户在点击前就知道。
+    const srcBadge = id.source === 'desktop'
+      ? `<span class="tag" title="${esc(t('acct.srcdesktop'))}">${esc(t('acct.srcdesktop'))}</span>`
+      : `<span class="tag" title="${esc(t('acct.srcfile'))}">${esc(t('acct.srcfile'))}</span>`;
     const usageRow = u
       ? `<dt>用量</dt><dd>${fmtNum(u.total)} 次 · ${fmtNum(u.output_tokens)} tok 出</dd>
          <dt>成功率</dt><dd>${(u.success_rate * 100).toFixed(1)}%</dd>`
@@ -685,7 +831,10 @@
     if (!a.healthy && a.reason === 'rate_limited') {
       acts.push(`<button class="btn btn-xs" data-acct="reset" data-label="${esc(a.label)}">清除冷却</button>`);
     }
-    acts.push(`<button class="btn btn-xs" data-acct="relogin" data-label="${esc(a.label)}" data-path="${esc(id.credential_path || '')}">重新登录</button>`);
+    const reloginTip = id.source === 'desktop'
+      ? t('acct.srcdesktop')
+      : t('acct.srcfile');
+    acts.push(`<button class="btn btn-xs" data-acct="relogin" data-label="${esc(a.label)}" data-path="${esc(id.credential_path || '')}" title="${esc(reloginTip)}">重新登录</button>`);
 
     return `<div class="acct acct-manage" data-level="${lv}"${a.is_next ? ' data-next' : ''}>
       <div class="acct-top">
@@ -693,7 +842,7 @@
         <span class="badge ${lv}">${stateTxt}</span>
       </div>
       <dl class="acct-kv">
-        <dt>凭证</dt><dd title="${esc(id.credential_path || '')}">${esc(a.label)}</dd>
+        <dt>来源</dt><dd>${srcBadge}</dd>
         <dt>登录</dt><dd class="${loginLv ? 'kv-' + loginLv : ''}" title="${esc(loginTxt)}">${esc(loginTxt)}</dd>
         ${usageRow}
         ${a.last_error ? `<dt>最近错误</dt><dd title="${esc(a.last_error)}">${esc(a.last_error)}</dd>` : ''}
@@ -765,7 +914,12 @@
         if (s.status === 'pending') { $('loginState').textContent = '等待授权中…'; continue; }
         if (s.status === 'success') {
           $('loginState').textContent = '登录成功' + (s.account ? '：' + s.account : '');
-          toast('账号已添加' + (s.account ? '：' + s.account : ''), 'success');
+          // 凭证写到了哪里、怎么进号池——不提示这句话，新凭证就是「登录成功但没生效」。
+          if (s.accounts_dir_used) {
+            toast(`凭证已写入 ${s.accounts_dir_used}。把它配为 accounts_dir（或下次启动前在工作目录建 auths/ 并复制进去）即可参与轮询`, 'success', 9000);
+          } else {
+            toast('账号已添加' + (s.account ? '：' + s.account : ''), 'success');
+          }
           setTimeout(() => dlg.close(), 1200);
           await loadAccounts();
           if (state.page === 'platforms') loadPlatforms();
@@ -843,8 +997,8 @@
     $('modelsSub').textContent = `当前平台可用模型 · 共 ${all.length} 个`;
     $('modelTable').innerHTML = `
       <thead><tr>
-        <th>模型 ID</th><th>名称</th><th class="num">上下文</th><th class="num">最大输出</th>
-        <th>能力</th>
+        <th>${t('mdl.id')}</th><th>${t('mdl.name')}</th><th class="num">${t('mdl.ctx')}</th><th class="num">${t('mdl.maxout')}</th>
+        <th>${t('mdl.cap')}</th>
       </tr></thead>
       <tbody>${modelsBody(rows, all, q)}</tbody>`;
   }
@@ -881,8 +1035,8 @@
   function modelsBody(rows, all, q) {
     if (state.modelsLoading && !all.length) return skeletonRows(5, 7);
     if (state.modelsError && !all.length) return emptyRow(5, '模型清单加载失败', state.modelsError);
-    if (!all.length) return emptyRow(5, '上游未返回任何模型', '检查上游地址与凭证，或点「刷新」重试');
-    if (!rows.length) return emptyRow(5, `没有匹配「${q}」的模型`, '换个关键词试试');
+    if (!all.length) return emptyRow(5, t('mdl.nomodel'), t('btn.reload'));
+    if (!rows.length) return emptyRow(5, t('mdl.nomatch')(q), '');
     return rows.map((m) => `
         <tr>
           <td class="mono">${esc(m.id)}</td>
@@ -890,10 +1044,10 @@
           <td class="num">${m.context_tokens ? fmtNum(m.context_tokens) : '-'}</td>
           <td class="num">${m.max_output_tokens ? fmtNum(m.max_output_tokens) : '-'}</td>
           <td>
-            ${m.supports_tools ? '<span class="tag on">工具</span>' : ''}
-            ${m.supports_thinking ? '<span class="tag on">思考</span>' : ''}
-            ${m.supports_images ? '<span class="tag on">视觉</span>' : ''}
-            ${m.is_default ? '<span class="tag">默认</span>' : ''}
+            ${m.supports_tools ? `<span class="tag on">${esc(t('mdl.tools'))}</span>` : ''}
+            ${m.supports_thinking ? `<span class="tag on">${esc(t('mdl.think'))}</span>` : ''}
+            ${m.supports_images ? `<span class="tag on">${esc(t('mdl.vision'))}</span>` : ''}
+            ${m.is_default ? `<span class="tag">${esc(t('mdl.default'))}</span>` : ''}
           </td>
         </tr>`).join('');
   }
@@ -947,19 +1101,19 @@
     if (state.reqFilter === 'ok') rows = rows.filter((r) => r.ok);
     $('reqTable').innerHTML = `
       <thead><tr>
-        <th>时间</th><th>状态</th><th>协议</th><th>模型</th><th>账号</th><th>方式</th>
-        <th class="num">耗时</th><th class="num">输入</th><th class="num">输出</th><th>错误</th>
+        <th>${t('req.time')}</th><th>${t('req.status')}</th><th>${t('req.proto')}</th><th>${t('req.model')}</th><th>${t('req.acct')}</th><th>${t('req.mode')}</th>
+        <th class="num">${t('req.dur')}</th><th class="num">${t('stat.in')}</th><th class="num">${t('stat.out')}</th><th>${t('req.err')}</th>
       </tr></thead>
       <tbody>${reqBody(rows)}</tbody>`;
   }
 
   function reqBody(rows) {
     if (state.reqLoading && !rows.length) return skeletonRows(10, 6);
-    if (state.reqError && !rows.length) return emptyRow(10, '加载失败', state.reqError);
+    if (state.reqError && !rows.length) return emptyRow(10, t('req.loadfail'), state.reqError);
     if (!rows.length) {
       const filtered = state.reqFilter;
-      return emptyRow(10, filtered ? '没有符合筛选条件的记录' : '还没有请求记录',
-        filtered ? '试试切回「全部」' : '通过 /v1/* 接口发起一次请求后，这里会出现明细');
+      return emptyRow(10, filtered ? t('req.nofilter') : t('req.none'),
+        filtered ? t('req.tryall') : '');
     }
     return rows.map((r) => `
       <tr${r.ok ? '' : ' class="row-err"'}>
@@ -968,7 +1122,7 @@
         <td>${esc(r.protocol)}</td>
         <td class="mono">${esc(r.model || '-')}</td>
         <td class="mono">${esc(r.account || '—')}</td>
-        <td>${r.stream ? '流式' : '非流式'}</td>
+        <td>${r.stream ? t('req.stream') : t('req.nostream')}</td>
         <td class="num">${fmtMs(r.duration_ms)}</td>
         <td class="num">${r.input_tokens || '-'}</td>
         <td class="num">${r.output_tokens || '-'}</td>
@@ -1350,6 +1504,14 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function fmtNum(n) {
+    // 英文语境用 K/M/B/T；中文用万/亿。数字单位是本地化的一部分。
+    if (LANG === 'en') {
+      if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+      if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(n);
+    }
     if (n >= 1e8) return (n / 1e8).toFixed(1) + '亿';
     if (n >= 1e4) return (n / 1e4).toFixed(1) + '万';
     return String(n);
@@ -1605,6 +1767,22 @@
   }).catch(() => {});
 
   /* ────────────────── 启动 ────────────────── */
+
+  // 偏好初始化：先恢复主题与语言，再渲染页面。
+  $('themeSel').value = localStorage.getItem(THEME_KEY) || 'auto';
+  $('langSel').value = LANG;
+  $('themeSel').addEventListener('change', (e) => {
+    localStorage.setItem(THEME_KEY, e.target.value);
+    applyTheme();
+  });
+  $('langSel').addEventListener('change', (e) => {
+    LANG = e.target.value;
+    localStorage.setItem('agent2api_lang', LANG);
+    applyLang();
+    applyTheme(); // 主题选项的文字也要翻译
+  });
+  applyLang();
+  applyTheme();
 
   loadChatModels();
   switchPage('overview');
