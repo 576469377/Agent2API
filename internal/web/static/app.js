@@ -914,9 +914,34 @@
     text = text.replace(/(^|\n)((?:[-*]\s+.+\n?)+)/g, (_, pre, block) =>
       pre + '<ul>' + block.trim().split('\n').map((li) =>
         '<li>' + li.replace(/^[-*]\s+/, '') + '</li>').join('') + '</ul>');
+    // GFM 表格：表头 | ... | + 分隔行 |---|---| + 数据行。
+    // 必须在段落切分之前；此时文本已 esc()，单元格内的 | 不存在歧义，
+    // 行内格式（code/strong）已在前面转换，所以单元格直接沿用即可。
+    text = text.replace(/(^|\n)((?:\|[^\n]*\|\s*\n)\|?\s*:?-{2,}[-|:\s]*\n(?:\|[^\n]*\|\s*)+)/g,
+      (_, pre, tbl) => {
+        const rows = tbl.trim().split('\n').map((r) => r.trim()).filter(Boolean);
+        if (rows.length < 2) return _;
+        const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+        const head = cells(rows[0]);
+        // 第二行是分隔行（形如 |---|---| 或 | --- | --- |），跳过
+        const bodyRows = rows.slice(1).filter((r, i) => !(i === 0 && /^:?-+:?$/.test(r.replace(/[|\s:]/g, ''))));
+        const mk = (c, tag) => '<' + tag + '>' + c + '</' + tag + '>';
+        const out = ['<div class="tbl-wrap"><table class="md-table">'];
+        out.push('<thead><tr>' + head.map((c) => mk(c, 'th')).join('') + '</tr></thead>');
+        if (bodyRows.length) {
+          out.push('<tbody>' + bodyRows.map((r) => {
+            const cs = cells(r);
+            // 列数对齐：缺的补空单元格，多的截断
+            while (cs.length < head.length) cs.push('');
+            return '<tr>' + cs.slice(0, head.length).map((c) => mk(c, 'td')).join('') + '</tr>';
+          }).join('') + '</tbody>');
+        }
+        out.push('</table></div>');
+        return pre + out.join('');
+      });
     text = text.split(/\n{2,}/).map((b) => {
       if (!b.trim()) return '';
-      if (/^\s*<(h\d|ul|ol|blockquote|pre)/.test(b)) return b;
+      if (/^\s*<(h\d|ul|ol|blockquote|pre|div class="tbl-wrap")/.test(b)) return b;
       return '<p>' + b.replace(/\n/g, '<br>') + '</p>';
     }).join('');
     return text
