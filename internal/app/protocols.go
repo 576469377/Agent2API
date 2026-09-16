@@ -1,11 +1,11 @@
 package app
 
 import (
-	"agent2api/internal/api/anthropic/messages"
-	"agent2api/internal/api/common"
-	"agent2api/internal/api/openai/chat"
-	"agent2api/internal/api/openai/responses"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/api/anthropic/messages"
+	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/api/openai/chat"
+	"github.com/576469377/Agent2API/internal/api/openai/responses"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // 本文件把三个具体协议包适配到 app 的 Protocol 接口。

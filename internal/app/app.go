@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"agent2api/internal/adapter"
-	"agent2api/internal/api/common"
-	"agent2api/internal/config"
-	"agent2api/internal/llm"
-	"agent2api/internal/obs"
-	"agent2api/internal/web"
+	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/config"
+	"github.com/576469377/Agent2API/internal/llm"
+	"github.com/576469377/Agent2API/internal/obs"
+	"github.com/576469377/Agent2API/internal/web"
 )
 
 // maxBodyBytes 限制请求体大小，防止恶意大 body 打爆内存。
@@ -297,7 +297,10 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 		}
 	}()
 
+	// 生成耗时只计聚合上游流这一段，不含建连与写回；它是 TPS 的分母。
+	genStart := time.Now()
 	msg, err := aggregate(ctx, stream)
+	genMs := time.Since(genStart).Milliseconds()
 	if err != nil {
 		a.fail(rec, err)
 		common.WriteError(w, llm.Wrap(err))
@@ -306,6 +309,10 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	rec.InputTokens = int64(msg.Usage.InputTokens)
 	rec.OutputTokens = int64(msg.Usage.OutputTokens)
 	rec.ReasoningTokens = int64(msg.Usage.ReasoningTokens)
+	// 未产出 token 或耗时不足 1ms 的请求不计入 TPS，避免污染分母。
+	if rec.OutputTokens > 0 && genMs > 0 {
+		rec.GenMs = genMs
+	}
 
 	payload, err := proto.EncodeFinal(msg, req.Model)
 	if err != nil {
@@ -348,6 +355,10 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 	flusher, canFlush := w.(http.Flusher)
 	committed := false
 	dst := make([]byte, 0, 4096)
+	// 解码循环的起点，用作 TPS 的分母起点。
+	// 注意：这段区间含客户端背压时间（w.Write / Flush 阻塞），慢客户端会低估 TPS。
+	// 这是有意的——真实慢消费就是解码停顿，不额外补偿。
+	genStart := time.Now()
 
 	for {
 		ev, err := stream.Recv(r.Context())
@@ -380,6 +391,10 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 			rec.InputTokens = int64(ev.Usage.InputTokens)
 			rec.OutputTokens = int64(ev.Usage.OutputTokens)
 			rec.ReasoningTokens = int64(ev.Usage.ReasoningTokens)
+			// 用法事件到达即视为生成结束；未产出 token 或不足 1ms 的不计入 TPS。
+			if ms := time.Since(genStart).Milliseconds(); rec.OutputTokens > 0 && ms > 0 {
+				rec.GenMs = ms
+			}
 		}
 
 		events, err := enc.Encode(ev)

@@ -3,7 +3,7 @@ package workbuddy
 import (
 	"encoding/json"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // upstreamMessage 是上游 chat/completions 的消息格式。

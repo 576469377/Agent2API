@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // chunk 是上游流式响应的一帧。

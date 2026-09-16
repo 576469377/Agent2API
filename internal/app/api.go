@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"agent2api/internal/adapter"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // Version 是网关版本。

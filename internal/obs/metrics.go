@@ -40,6 +40,12 @@ type Record struct {
 	OutputTokens    int64     `json:"output_tokens,omitempty"`
 	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
 	Error           string    `json:"error,omitempty"`
+
+	// GenMs 是本次请求的「生成耗时」（毫秒）：从上游开始产出算起，到流结束或被中断为止。
+	// 它是 TPS 的分母，与 DurationMs（含建连、解码、写回）语义不同。
+	// 0 表示**未测量**（失败请求、未产出 token、或来自无该字段的旧指标文件），
+	// 因此取值时必须把 0 当作「无数据」而不是「0 毫秒」——否则会算出 +Inf。
+	GenMs int64 `json:"gen_ms,omitempty"`
 }
 
 // groupCounter 是按某个维度（模型、协议）聚合的计数器。
@@ -60,6 +66,12 @@ type minuteBucket struct {
 	Failed       int64 `json:"failed"`
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
+
+	// GenMs / GenTok 是该分钟内「测到生成耗时」的那批请求的生成毫秒数与输出 token 数。
+	// 二者一起构成该分钟的 TPS 分子分母；无数据的分钟两者均为 0，
+	// 消费方必须据此显示「无数据」而非 0 tok/s。
+	GenMs  int64 `json:"gen_ms"`
+	GenTok int64 `json:"gen_tok"`
 }
 
 // Metrics 采集网关运行指标。
@@ -75,6 +87,15 @@ type Metrics struct {
 	outputTok atomic.Int64
 	reasonTok atomic.Int64
 	durSum    atomic.Int64
+
+	// 解码速度（TPS）的三元组，只累加「测到生成耗时」的请求。
+	//
+	// 分子刻意用 genTokSum 而不是上面的 outputTok：这样分子与分母必然来自
+	// 同一批请求。分母用 genCount 而不是 total，因为失败请求与未测到耗时的请求
+	// 不该摊薄平均速度（对照 AvgLatencyMs 用 total 做分母，语义不同）。
+	genMsSum  atomic.Int64
+	genTokSum atomic.Int64
+	genCount  atomic.Int64
 
 	mu      sync.Mutex
 	byModel map[string]*groupCounter
@@ -120,6 +141,15 @@ func (m *Metrics) Record(r Record) {
 	m.outputTok.Add(r.OutputTokens)
 	m.reasonTok.Add(r.ReasoningTokens)
 	m.durSum.Add(r.DurationMs)
+	// GenMs > 0 才计入 TPS 三元组：0 表示未测量（未产出 token / 旧数据）。
+	//
+	// 刻意**不**按 OK 过滤：一个中途失败但已产出若干 token 的流，那段解码是
+	// 真实发生过的算力，属于有效速度样本。过滤掉它会让 TPS 系统性偏高。
+	if r.GenMs > 0 {
+		m.genMsSum.Add(r.GenMs)
+		m.genTokSum.Add(r.OutputTokens)
+		m.genCount.Add(1)
+	}
 
 	minute := r.Time.Unix() / 60
 
@@ -146,6 +176,10 @@ func (m *Metrics) Record(r Record) {
 	b.Total++
 	b.InputTokens += r.InputTokens
 	b.OutputTokens += r.OutputTokens
+	if r.GenMs > 0 {
+		b.GenMs += r.GenMs
+		b.GenTok += r.OutputTokens
+	}
 	if r.OK {
 		b.OK++
 	} else {
@@ -187,21 +221,28 @@ type GroupStat struct {
 
 // Snapshot 是指标快照，直接序列化给控制台。
 type Snapshot struct {
-	UptimeSec       int64          `json:"uptime_sec"`
-	InFlight        int64          `json:"in_flight"`
-	Total           int64          `json:"total"`
-	OK              int64          `json:"ok"`
-	Failed          int64          `json:"failed"`
-	SuccessRate     float64        `json:"success_rate"`
-	AvgLatencyMs    float64        `json:"avg_latency_ms"`
-	InputTokens     int64          `json:"input_tokens"`
-	OutputTokens    int64          `json:"output_tokens"`
-	ReasoningTokens int64          `json:"reasoning_tokens"`
-	LastMinuteRPM   int64          `json:"last_minute_rpm"`
-	ByModel         []GroupStat    `json:"by_model"`
-	ByProtocol      []GroupStat    `json:"by_protocol"`
-	Series          []minuteBucket `json:"series"`
-	Recent          []Record       `json:"recent"`
+	UptimeSec       int64   `json:"uptime_sec"`
+	InFlight        int64   `json:"in_flight"`
+	Total           int64   `json:"total"`
+	OK              int64   `json:"ok"`
+	Failed          int64   `json:"failed"`
+	SuccessRate     float64 `json:"success_rate"`
+	AvgLatencyMs    float64 `json:"avg_latency_ms"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	ReasoningTokens int64   `json:"reasoning_tokens"`
+	LastMinuteRPM   int64   `json:"last_minute_rpm"`
+
+	// AvgTPS 是平均解码速度：输出 token ÷ 生成秒数（加权平均）。
+	// TPSSamples 是参与计算的请求数——为 0 时表示**无可用数据**，
+	// 前端必须显示「—」而不是 "0.0 tok/s"（0 与「没测过」是两回事）。
+	AvgTPS     float64 `json:"avg_tps"`
+	TPSSamples int64   `json:"tps_samples"`
+
+	ByModel    []GroupStat    `json:"by_model"`
+	ByProtocol []GroupStat    `json:"by_protocol"`
+	Series     []minuteBucket `json:"series"`
+	Recent     []Record       `json:"recent"`
 }
 
 // Snapshot 生成当前快照。
@@ -213,6 +254,19 @@ func (m *Metrics) Snapshot() Snapshot {
 	avg := 0.0
 	if total > 0 {
 		avg = float64(m.durSum.Load()) / float64(total)
+	}
+
+	// 解码速度：分子分母都取自「测到生成耗时」的那批请求。
+	//
+	// 守卫 genMs > 0 是必须的，不是防御性冗余：旧版指标文件没有 gen_* 字段，
+	// 重启加载后 genMsSum 为 0 而 output_tokens 是个大数，直接相除会得到 +Inf；
+	// encoding/json 无法序列化 +Inf（Marshal 直接报错返回空），
+	// 结果就是 /api/metrics 返回 500、控制台概览与调用日志两页同时空掉。
+	genMs := m.genMsSum.Load()
+	genN := m.genCount.Load()
+	tps := 0.0
+	if genMs > 0 && genN > 0 {
+		tps = float64(m.genTokSum.Load()) / (float64(genMs) / 1000.0)
 	}
 
 	m.mu.Lock()
@@ -244,6 +298,8 @@ func (m *Metrics) Snapshot() Snapshot {
 		OutputTokens:    m.outputTok.Load(),
 		ReasoningTokens: m.reasonTok.Load(),
 		LastMinuteRPM:   rpm,
+		AvgTPS:          tps,
+		TPSSamples:      genN,
 		ByModel:         byModel,
 		ByProtocol:      byProto,
 		Series:          series,
@@ -323,6 +379,11 @@ type persistCounter struct {
 }
 
 // persisted 是落盘后的指标快照形态，足以重建内存态。
+//
+// 注意：新增字段必须同时出现在本结构、Save 的字面量与 Load 的 Store 三处，
+// 漏掉任何一处都会静默丢数据（旧文件缺键即零值，无需版本迁移）。
+// TPS 三元组只做顶层持久化，不进 persistCounter —— 分组维度的 TPS 当前无人消费，
+// 而 groupCounter/persistCounter 是逐字段手写拷贝，每加一个字段就多一处漏改风险。
 type persisted struct {
 	Total     int64                     `json:"total"`
 	OK        int64                     `json:"ok"`
@@ -331,6 +392,9 @@ type persisted struct {
 	OutputTok int64                     `json:"output_tokens"`
 	ReasonTok int64                     `json:"reasoning_tokens"`
 	DurSum    int64                     `json:"duration_sum"`
+	GenMsSum  int64                     `json:"gen_ms_sum,omitempty"`
+	GenTokSum int64                     `json:"gen_tok_sum,omitempty"`
+	GenCount  int64                     `json:"gen_count,omitempty"`
 	ByModel   map[string]persistCounter `json:"by_model"`
 	ByProto   map[string]persistCounter `json:"by_proto"`
 	Recent    []Record                  `json:"recent"`
@@ -355,6 +419,9 @@ func (m *Metrics) Save(path string) error {
 		OutputTok: m.outputTok.Load(),
 		ReasonTok: m.reasonTok.Load(),
 		DurSum:    m.durSum.Load(),
+		GenMsSum:  m.genMsSum.Load(),
+		GenTokSum: m.genTokSum.Load(),
+		GenCount:  m.genCount.Load(),
 		ByModel:   cloneCounters(m.byModel),
 		ByProto:   cloneCounters(m.byProto),
 		Recent:    append([]Record(nil), m.recent...),
@@ -395,6 +462,9 @@ func (m *Metrics) Load(path string) error {
 	m.outputTok.Store(p.OutputTok)
 	m.reasonTok.Store(p.ReasonTok)
 	m.durSum.Store(p.DurSum)
+	m.genMsSum.Store(p.GenMsSum)
+	m.genTokSum.Store(p.GenTokSum)
+	m.genCount.Store(p.GenCount)
 	m.mu.Lock()
 	m.byModel = rebuildCounters(p.ByModel)
 	m.byProto = rebuildCounters(p.ByProto)

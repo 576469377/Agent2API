@@ -7,7 +7,7 @@ package adapter
 import (
 	"context"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // ModelInfo 是平台无关的模型能力目录。

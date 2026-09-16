@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // TestNormalizeToolChoice 覆盖上游最反直觉的一条约束：

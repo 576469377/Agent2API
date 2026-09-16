@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"agent2api/internal/api/common"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // fakeStream 按顺序回放给定的 IR 事件，用于离线测试协议编码。

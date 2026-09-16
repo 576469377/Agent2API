@@ -20,9 +20,9 @@ import (
 	"syscall"
 	"time"
 
-	"agent2api/internal/adapter/workbuddy"
-	"agent2api/internal/app"
-	"agent2api/internal/config"
+	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
+	"github.com/576469377/Agent2API/internal/app"
+	"github.com/576469377/Agent2API/internal/config"
 )
 
 func main() {

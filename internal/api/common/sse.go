@@ -8,7 +8,7 @@ import (
 	"errors"
 	"net/http"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // SSEEvent 是一条待写出的 SSE 帧。

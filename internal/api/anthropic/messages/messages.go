@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"sort"
 
-	"agent2api/internal/api/common"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // Protocol 是 Anthropic Messages 协议实现。

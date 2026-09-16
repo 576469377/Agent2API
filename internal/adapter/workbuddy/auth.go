@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // 本机桌面客户端已登录凭证的默认位置。

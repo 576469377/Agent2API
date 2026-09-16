@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"agent2api/internal/api/common"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // Protocol 是 Chat Completions 协议实现。

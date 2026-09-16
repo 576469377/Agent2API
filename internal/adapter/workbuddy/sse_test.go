@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // replayFixture 把录制的真实上游 SSE 回放成 IR 事件序列。

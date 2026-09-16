@@ -1,7 +1,7 @@
 package responses
 
 import (
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 	"encoding/json"
 	"testing"
 )

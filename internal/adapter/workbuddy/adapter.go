@@ -17,8 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agent2api/internal/adapter"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // Config 是 WorkBuddy 适配器配置。

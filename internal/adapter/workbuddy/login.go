@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // 设备码登录流程（参考同类实现，本机未端到端验证——本机已有凭证无需登录）：

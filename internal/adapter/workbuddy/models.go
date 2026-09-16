@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"agent2api/internal/adapter"
-	"agent2api/internal/llm"
+	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // defaultModel 是未指定模型时使用的上游 id。
