@@ -7,6 +7,26 @@
 
 ---
 
+## 零、项目定位：学习与技术研究
+
+0.1. 本项目是一个**个人学习与技术研究项目**。它的主要目的，是研究与实践以下技术课题：
+
+- 私有协议逆向（WorkBuddy / CodeBuddy 上游协议的探测、记录与验证）
+- IR 分层架构（用零依赖中间表示把「N 平台 × M 协议」降为 N+M）
+- 流式协议转换（SSE 双向映射、内容块生命周期、工具调用分片重组）
+- Go 并发与超时控制（长连接流的多层保护、context 传播）
+
+0.2. **本项目不是为生产环境设计的，也不是为了对外提供服务。** 代码以「把原理讲清楚」为优先，而非「扛住线上流量」。已知缺陷清单见 README 的「已知限制」章节。
+
+0.3. 作者**不鼓励、也不支持**将本项目用于以下用途：
+- 商业用途或对外提供服务；
+- 作为任何形式的付费 API 服务的基础设施；
+- 规避上游平台的用量限制、计费或权限控制。
+
+0.4. 本文档以下条款（一、二）是对**使用边界**与**风险承担**的约定。请以学习参考为目的阅读与使用本项目的代码。
+
+---
+
 ## 一、合规使用边界
 
 ### 1. 仅限你本人已授权的账号
@@ -103,6 +123,7 @@
 
 Agent2API is a **local-only** reverse proxy that reuses the credential of the WorkBuddy / CodeBuddy desktop client already logged in on your own machine.
 
+- **This is a personal learning / research project.** It is **not designed for production** and is **not intended to be offered as a service**. The author does not encourage or support commercial use, running it as a paid API service, or using it to bypass upstream usage limits or billing.
 - **Use it only with accounts you are authorized to use**, and **only on your own machine or a private deployment you control.** Do not expose it publicly, do not use it as a multi-tenant service, and do not use it to bypass access controls or billing.
 - **Its operation may conflict with the upstream platform's Terms of Service.** You are responsible for reading and complying with those terms and with your local law.
 - It must not be used for unauthorized access, account pooling, or commercial resale.

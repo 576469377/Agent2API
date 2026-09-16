@@ -10,8 +10,17 @@
 
 > ## ⚠️ 使用前必读
 >
-> 本项目仅供**本人已授权账号**在**本机或私有环境**中自用，**风险自担**。
+> ### 本项目的定位：**学习与技术研究**
 >
+> 这是一个**个人学习项目**，主要目的是研究与实践：协议逆向、IR 分层架构、SSE 流式协议转换、Go 并发与超时控制。
+>
+> **它不是为生产环境设计的，也不是为了对外提供服务。** 代码以「讲清楚原理」为优先，而非「扛住线上流量」。
+>
+> 作者**不鼓励、也不支持**将本项目用于商业用途或对外提供服务。请以**学习参考**为目的阅读代码。
+>
+> ### 使用边界
+>
+> - 仅供**本人已授权账号**在**本机或私有环境**中自用，**风险自担**
 > - 它读取你本机桌面客户端已登录的**凭证**（凭证 = 你的账号，切勿外传）
 > - 它的运作方式**可能不符合**上游平台的服务条款
 > - 上游为私有协议，**可能随时变更**导致失效
@@ -54,6 +63,25 @@ Claude Code / Codex / 任意 OpenAI 客户端
 
 ---
 
+## 这个项目适合用来学习什么
+
+如果你是想了解「协议转换网关怎么写」的开发者，以下部分值得一读（按推荐顺序）：
+
+| 主题 | 位置 | 看点 |
+|---|---|---|
+| **IR 分层架构** | `internal/llm/` + `internal/adapter/adapter.go` | 如何用**零依赖中间表示** + **2 个极小接缝接口**，把「N 平台 × M 协议」的复杂度从 N×M 降为 N+M。加第二个平台时三个下游协议一行都不用改 |
+| **流式协议转换** | `internal/api/*/`、`internal/adapter/workbuddy/sse.go` | 三种下游 SSE 方言（`data:` 行 / `event:` 行 / `[DONE]` 终止）与上游私有流之间的双向映射。**Anthropic 的内容块 start/stop 配对**是流式协议里最容易埋雷的地方，代码里有详细注释 |
+| **金帧回放测试** | `fixtures/` + `internal/adapter/workbuddy/sse_test.go` | 把真实上游响应存成样本，测试时逐帧喂给解析器，**断言 IR 事件序列而非字节**。这样协议转换可以完全离线验证，不需要真实账号，也不会因上游抖动而 flaky |
+| **结构化错误分类** | `internal/llm/failure.go` | 错误在产生处**一次分类**成结构体（`ClientFixable` / `UpstreamFault` / `Timeout` / `RateLimited`），全程携带，呈现层不做正则反推 |
+| **多层超时控制** | `internal/adapter/workbuddy/sse.go` | 长连接流式的三重保护：空闲数据看门狗 + 总时长上限 + 调用方 context。以及为什么**不能用 `http.Client.Timeout`**（它会作用于整个响应体读取，必然误杀长流） |
+| **SSE 批合并写出** | `internal/app/app.go` 的 `writeStream` | 一个上游帧产出的多个事件合并成**一次 Write + 一次 Flush** 下发；以及「首字节已写出后错误只能降级为流内事件」这个 HTTP 语义约束 |
+| **协议逆商的工程方法** | `docs/research/` | 如何用**证据等级标注**（🟢 实测 / 🟡 源码推断 / ⚪ 未确认）组织逆向结论，让结论可被后续验证 |
+| **指标与聚合** | `internal/obs/metrics.go` | 原子计数器 + 单锁保护聚合结构；TPS 的分母该用哪些请求（这是个常被算错的地方） |
+
+**反例也值得看**：README 的[已知限制](#已知限制)如实列出了 7 项**已确认但未修复**的缺陷，以及 7 个 0 覆盖率的包。这些是「一个能跑的原型」与「可上生产的系统」之间的真实差距，比只看成功案例更有参考价值。
+
+---
+
 ## 与同类项目的关系
 
 本项目的协议细节与架构设计参考了以下开源实现，在此致谢：
@@ -76,21 +104,19 @@ Claude Code / Codex / 任意 OpenAI 客户端
 ## 快速开始
 
 ```bash
-# 1. 获取源码
-git clone <你的仓库地址> && cd Agent2API
+# 方式一：直接安装（需 Go 1.23+）
+go install github.com/576469377/Agent2API/cmd/agent2api@latest
 
-# 2. 编译到 bin/agent2api
-make build
+# 方式二：从源码构建
+git clone https://github.com/576469377/Agent2API && cd Agent2API
+make build                     # 产出 bin/agent2api
 
-# 3. 验证凭证（自动复用桌面客户端已登录的凭证，无需重新登录）
-./bin/agent2api models
+# 验证凭证（自动复用桌面客户端已登录的凭证，无需重新登录）
+agent2api models               # 或 ./bin/agent2api models
 
-# 4. 启动（默认 127.0.0.1:8787）
-./bin/agent2api
+# 启动（默认 127.0.0.1:8787）
+agent2api                      # 或 ./bin/agent2api
 ```
-
-> **注意**：`go.mod` 的 module path 是 `agent2api`，不是可解析的仓库路径，因此**不支持 `go install`**，请用 `make build` 或 `go build -o bin/agent2api ./cmd/agent2api`。
-> 若你 fork 到自己的仓库，建议改成自己的路径，见[下方说明](#fork-后建议修改-module-path)。
 
 启动后命令行会直接打印控制台地址和全部接口：
 
@@ -321,7 +347,6 @@ go test ./... -race
 ### 其他已知行为
 
 - **指标持久化默认开启**：无配置文件时会写到**当前工作目录**的 `agent2api-metrics.json`（含你的调用统计）。该文件已在 `.gitignore` 中，但**打包发布（zip/tar）时必须手动排除**。
-- **`go install` 不可用**：见[快速开始](#快速开始)的说明。
 
 ---
 
@@ -354,26 +379,10 @@ go test ./... -race
 
 ---
 
-## Fork 后建议修改 module path
-
-`go.mod` 当前为 `module agent2api`（不是可解析的导入路径）。若你 fork 到自己的仓库，建议改成真实路径以启用 `go install` 与 pkg.go.dev 文档：
-
-```bash
-# 1. 批量替换 import（约 20 个文件 / 38 处）
-grep -rl '"agent2api/' --include='*.go' . \
-  | xargs perl -pi -e 's{"agent2api/}{"github.com/<你的用户名>/Agent2API/}g'
-
-# 2. 修改 go.mod 第一行
-sed -i '' '1s|.*|module github.com/<你的用户名>/Agent2API|' go.mod
-
-# 3. 验证
-go mod tidy && go build ./... && go test ./...
-```
-
----
-
 ## 合规与免责
 
-本项目仅供**本人已授权账号**在**本机或私有环境**中自用，**风险自担**。使用前请阅读 **[DISCLAIMER.md](DISCLAIMER.md)**。
+本项目为**个人学习与技术研究项目**，仅供**本人已授权账号**在**本机或私有环境**中自用，**风险自担**。
 
-相关文档：[SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md)
+作者**不鼓励、也不支持**将其用于商业用途或对外提供服务。完整条款见 **[DISCLAIMER.md](DISCLAIMER.md)**。
+
+相关文档：[DISCLAIMER.md](DISCLAIMER.md) · [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md)

@@ -10,8 +10,17 @@ Currently implements the **WorkBuddy / CodeBuddy** platform, exposing three stan
 
 > ## ⚠️ Read This First
 >
-> This project is for use with **accounts you are authorized to use**, on **your own machine or a private deployment**, entirely **at your own risk**.
+> ### This is a **learning / research project**
 >
+> It exists to study and practice: protocol reverse-engineering, IR-layered architecture, SSE streaming protocol translation, and Go concurrency and timeout control.
+>
+> **It is not designed for production, nor intended to be run as a service for others.** The code prioritizes *explaining the mechanism* over *surviving production traffic*.
+>
+> The author **does not encourage or support** commercial use or offering it as a service. Please read the code for **learning purposes**.
+>
+> ### Usage boundaries
+>
+> - For **accounts you are authorized to use**, on **your own machine or a private deployment**, entirely **at your own risk**
 > - It reads the **credential** your local desktop client has already logged in with (credential = your account; never share it)
 > - Its operation **may conflict with** the upstream platform's Terms of Service
 > - The upstream protocol is private and **may change without notice**, breaking this tool
@@ -69,21 +78,19 @@ Protocol details and architecture were informed by these open-source implementat
 ## Quick Start
 
 ```bash
-# 1. Get the source
-git clone <your-repo-url> && cd Agent2API
+# Option 1: install directly (requires Go 1.23+)
+go install github.com/576469377/Agent2API/cmd/agent2api@latest
 
-# 2. Build to bin/agent2api
-make build
+# Option 2: build from source
+git clone https://github.com/576469377/Agent2API && cd Agent2API
+make build                     # produces bin/agent2api
 
-# 3. Verify credentials (reuses the desktop client's session; no re-login)
-./bin/agent2api models
+# Verify credentials (reuses the desktop client's session; no re-login)
+agent2api models               # or ./bin/agent2api models
 
-# 4. Start (defaults to 127.0.0.1:8787)
-./bin/agent2api
+# Start (defaults to 127.0.0.1:8787)
+agent2api                      # or ./bin/agent2api
 ```
-
-> **Note:** `go.mod`'s module path is `agent2api`, which is not a resolvable import path, so **`go install` is not supported**. Use `make build` or `go build -o bin/agent2api ./cmd/agent2api`.
-> If you fork this to your own repo, consider renaming the module path — see the Chinese README's "Fork 后建议修改 module path" section.
 
 On startup the console URL and all endpoints are printed:
 
@@ -295,7 +302,6 @@ Confirmed by code review and testing, ordered by impact:
 ### Other known behavior
 
 - **Metrics persistence is on by default** — with no config file it writes `agent2api-metrics.json` to the **current working directory** (containing your usage stats). This is in `.gitignore`, but you **must exclude it manually when packaging (zip/tar)**.
-- **`go install` is unavailable** — see [Quick Start](#quick-start).
 
 ---
 
