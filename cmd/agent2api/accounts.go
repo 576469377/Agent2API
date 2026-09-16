@@ -8,10 +8,19 @@ import (
 	"strings"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/doubao"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/config"
 	"github.com/576469377/Agent2API/internal/llm"
 )
+
+// platformDefaultPaths 返回平台各自的默认凭证位置。
+func platformDefaultPaths(platform string) []string {
+	if platform == "doubao" {
+		return doubao.DefaultCredentialPaths()
+	}
+	return workbuddy.DefaultCredentialPaths()
+}
 
 // buildAdapter 按配置装配上游：单账号返回普通适配器；
 // 配置了 accounts_dir 且目录里有多个凭证时返回号池（轮询 + 冷却）。
@@ -22,26 +31,12 @@ import (
 func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) }) (adapter.Adapter, *adapter.Pool, error) {
 	paths := collectCredentialPaths(cfg)
 
-	base := workbuddy.Config{
-		BaseURL:            cfg.Upstream.BaseURL,
-		Sanitize:           cfg.Upstream.Sanitize,
-		RequestTimeout:     cfg.RequestTimeout(),
-		StreamIdleTimeout:  cfg.StreamIdleTimeout(),
-		StreamTotalTimeout: cfg.StreamTotalTimeout(),
-		ModelCacheTTL:      cfg.ModelCacheTTL(),
-		Logger: func(format string, args ...any) {
-			logger.Printf(format, args...)
-		},
-	}
-
 	logf := func(format string, args ...any) { logger.Printf(format, args...) }
 	pool := adapter.NewPool(cfg.Upstream.Platform, logf)
 	loaded := 0
 	seenUID := map[string]bool{} // 同一账号不得以两份凭证入池：独立刷新链会互相顶掉会话
 	for _, p := range paths {
-		one := base
-		one.CredentialPath = p
-		adp, err := workbuddy.New(one)
+		adp, err := newPlatformAdapter(cfg, p, logf)
 		if err != nil {
 			// 单账号加载失败不阻断：凭证损坏/过期文件跳过，其余照常入池。
 			logf("跳过凭证 %s: %v", filepath.Base(p), err)
@@ -49,7 +44,13 @@ func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) })
 		}
 		// 同一账号不得以两份凭证入池：两条独立刷新链会互相顶掉会话
 		//（若上游 refresh token 是一次轮换型）。uid 是稳定唯一标识。
-		if uid := adp.AccountUID(); uid != "" {
+		// 用可选接口断言而不是塞进 adapter.Adapter：这是「装配期」的关注点，
+		// 不该污染运行期接缝。
+		uid := ""
+		if u, ok := adp.(interface{ AccountUID() string }); ok {
+			uid = u.AccountUID()
+		}
+		if uid != "" {
 			if seenUID[uid] {
 				logf("跳过凭证 %s: 与已加载账号重复（uid=%s），同一账号多份凭证会互相顶掉会话",
 					filepath.Base(p), uid)
@@ -76,6 +77,45 @@ func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) })
 	}
 }
 
+// newPlatformAdapter 按配置的平台构造一个账号适配器。
+//
+// 平台差异全部收在这个工厂里：号池与下游协议都只依赖 adapter.Adapter 接口，
+// 新增平台时只需在这里加一个分支。
+func newPlatformAdapter(cfg config.Config, credPath string, logf func(string, ...any)) (adapter.Adapter, error) {
+	switch cfg.Upstream.Platform {
+	case "doubao":
+		adp, err := doubao.New(doubao.Config{
+			BaseURL:            cfg.Upstream.BaseURL,
+			CredentialPath:     credPath,
+			Sanitize:           cfg.Upstream.Sanitize,
+			RequestTimeout:     cfg.RequestTimeout(),
+			StreamIdleTimeout:  cfg.StreamIdleTimeout(),
+			StreamTotalTimeout: cfg.StreamTotalTimeout(),
+			ModelCacheTTL:      cfg.ModelCacheTTL(),
+			Logger:             logf,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return adp, nil
+	default:
+		adp, err := workbuddy.New(workbuddy.Config{
+			BaseURL:            cfg.Upstream.BaseURL,
+			CredentialPath:     credPath,
+			Sanitize:           cfg.Upstream.Sanitize,
+			RequestTimeout:     cfg.RequestTimeout(),
+			StreamIdleTimeout:  cfg.StreamIdleTimeout(),
+			StreamTotalTimeout: cfg.StreamTotalTimeout(),
+			ModelCacheTTL:      cfg.ModelCacheTTL(),
+			Logger:             logf,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return adp, nil
+	}
+}
+
 // collectCredentialPaths 汇总候选凭证文件：
 // 显式 CredentialPath 优先，其次 accounts_dir 目录下全部 *.json（按文件名排序保证稳定）。
 // 单账号的自动探测路径（桌面客户端凭证等）在 CredentialPath 为空时也参与。
@@ -98,7 +138,9 @@ func collectCredentialPaths(cfg config.Config) []string {
 	if cfg.Upstream.CredentialPath != "" {
 		add(cfg.Upstream.CredentialPath)
 	} else {
-		for _, p := range workbuddy.DefaultCredentialPaths() {
+		// 自动探测要按平台取各自的默认位置：豆包在 DoubaoWork 的
+		// Chromium profile 里，workbuddy 在 CodeBuddy 的凭证文件里。
+		for _, p := range platformDefaultPaths(cfg.Upstream.Platform) {
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
 				add(p)
 			}

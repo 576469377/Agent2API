@@ -27,6 +27,7 @@
 | `workbuddy-stream-toolcall.jsonl` | 工具调用流式响应，含分片 `arguments` |
 | `workbuddy-stream-text-then-toolcall.jsonl` | ⭐ 文本 + 工具调用**并存**，用于回归「工具调用被文本吞掉」的下标冲突 bug |
 | `workbuddy-v3-config.sample.json` | `/v3/config` 响应样本（模型清单 / 分级 / 阈值），目前仅作归档，无测试引用 |
+| `doubao_sse_stream.txt` | 豆包 `/samantha/chat/completion` 的一次完整流式响应（8 帧：2002 开始 / 2001 增量×5 / 2003 结束） |
 
 ## ⚠️ 贡献提醒
 

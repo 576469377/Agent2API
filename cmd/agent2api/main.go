@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/doubao"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
@@ -167,8 +168,10 @@ func runServer(args []string) {
 		}
 	}
 
-	if cfg.Upstream.Platform != "workbuddy" {
-		log.Fatalf("暂不支持的平台: %s（当前仅实现 workbuddy）", cfg.Upstream.Platform)
+	switch cfg.Upstream.Platform {
+	case "workbuddy", "doubao":
+	default:
+		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / doubao）", cfg.Upstream.Platform)
 	}
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
@@ -177,7 +180,8 @@ func runServer(args []string) {
 	if err != nil {
 		logger.Fatalf("初始化上游适配器失败: %v", err)
 	}
-	logger.Printf("上游平台=%s 账号=%s", adp.Name(), summarizeAccounts(adp, pool))
+	// 注意：这里刻意**不**打印「上游平台=… 账号=…」——那些信息在下面的横幅里
+	// 有更可读的呈现，重复一行带时间戳前缀的日志只会干扰阅读。
 
 	application := app.New(cfg, adp, logger)
 	application.StartMetricsPersistence(30 * time.Second)
@@ -243,7 +247,11 @@ func platformSummary(adp adapter.Adapter, pool *adapter.Pool) string {
 	return fmt.Sprintf("%s · %d 个模型", base, len(models))
 }
 
-// printBanner 打印启动横幅，把控制台地址放在最显眼的位置。
+// printBanner 打印启动横幅。
+//
+// 版式原则：一眼两个信息——控制台地址、账号状态；其余按重要度降级。
+// 接口列表只保留三个客户端真正会调的 v1 端点（models/health 在控制台
+// 与文档里都有，不值得占黄金位置）。
 func printBanner(cfg config.Config, adp adapter.Adapter, pool *adapter.Pool) {
 	base := baseURL(cfg)
 	line := strings.Repeat("─", 62)
@@ -251,14 +259,17 @@ func printBanner(cfg config.Config, adp adapter.Adapter, pool *adapter.Pool) {
 	fmt.Println()
 	fmt.Println(line)
 	fmt.Printf("  Agent2API 控制台    %s/\n", base)
-	fmt.Println()
 	fmt.Printf("  %s\n", platformSummary(adp, pool))
+
 	// 多账号时逐个列出账号状态，让「谁在冷却」一眼可见。
 	if pool != nil && pool.Len() > 1 {
 		for _, st := range pool.Statuses() {
 			flag := "✓"
 			detail := ""
-			if !st.Healthy {
+			if st.State == "disabled" {
+				flag = "⏸"
+				detail = " · 已停用"
+			} else if !st.Healthy {
 				flag = "⏳"
 				detail = fmt.Sprintf(" · 冷却 %ds · %s", st.CooldownSecs, truncate(st.LastError, 40))
 			}
@@ -270,37 +281,39 @@ func printBanner(cfg config.Config, adp adapter.Adapter, pool *adapter.Pool) {
 	fmt.Printf("    POST  %s/v1/chat/completions   OpenAI Chat Completions\n", base)
 	fmt.Printf("    POST  %s/v1/responses          OpenAI Responses\n", base)
 	fmt.Printf("    POST  %s/v1/messages           Anthropic Messages\n", base)
-	fmt.Printf("    GET   %s/v1/models             模型清单\n", base)
-	fmt.Printf("    GET   %s/health                健康检查\n", base)
 	fmt.Println(line)
 
+	// 提示区：只放需要用户行动或知晓的事，按重要度排序。
+	var tips []string
 	if cfg.Auth.APIKey == "" {
-		fmt.Println("  提示  未配置 API Key，网关对本机可访问者开放（启动时加 -api-key 设置）")
+		tips = append(tips, "未配置 API Key，网关对本机可访问者开放（启动时加 -api-key 设置）")
 	} else {
-		fmt.Println("  提示  访问鉴权已启用")
+		tips = append(tips, "访问鉴权已启用")
+	}
+	if cfg.Upstream.AccountsDir == "" {
+		tips = append(tips, "未配置号池目录：在控制台「添加账号」的凭证会写入 ~/.workbuddy；"+
+			"配置 -accounts-dir（或建 auths/）后新凭证自动入池")
 	}
 	if cfg.MetricsFile != "" {
-		fmt.Printf("        指标持久化已开启（%s），重启不丢失统计\n", cfg.MetricsFile)
+		tips = append(tips, fmt.Sprintf("指标持久化已开启（%s）", cfg.MetricsFile))
 	} else {
-		fmt.Println("        指标持久化已关闭（重启后统计清零，加 -metrics-file 启用）")
+		tips = append(tips, "指标持久化已关闭（重启后统计清零，加 -metrics-file 启用）")
+	}
+	for i, tip := range tips {
+		if i == 0 {
+			fmt.Printf("  提示  %s\n", tip)
+		} else {
+			fmt.Printf("        %s\n", tip)
+		}
 	}
 	fmt.Println("        Ctrl+C 停止服务")
 	fmt.Println()
 }
 
 // newAdapter 构造单账号适配器（models 子命令等简单场景使用）。
-func newAdapter(cfg config.Config, logger *log.Logger) (*workbuddy.Adapter, error) {
-	return workbuddy.New(workbuddy.Config{
-		BaseURL:            cfg.Upstream.BaseURL,
-		CredentialPath:     cfg.Upstream.CredentialPath,
-		Sanitize:           cfg.Upstream.Sanitize,
-		RequestTimeout:     cfg.RequestTimeout(),
-		StreamIdleTimeout:  cfg.StreamIdleTimeout(),
-		StreamTotalTimeout: cfg.StreamTotalTimeout(),
-		ModelCacheTTL:      cfg.ModelCacheTTL(),
-		Logger: func(format string, args ...any) {
-			logger.Printf(format, args...)
-		},
+func newAdapter(cfg config.Config, logger *log.Logger) (adapter.Adapter, error) {
+	return newPlatformAdapter(cfg, cfg.Upstream.CredentialPath, func(format string, args ...any) {
+		logger.Printf(format, args...)
 	})
 }
 
@@ -320,7 +333,14 @@ func runLogin(args []string) {
 	out := fs.String("out", "", "凭证输出路径，默认 ~/.workbuddy/session.json")
 	base := fs.String("base-url", workbuddy.DefaultBaseURL, "上游地址")
 	platform := fs.String("platform", "VSCode", "上报给上游的客户端标识")
+	upstream := fs.String("upstream", "workbuddy", "上游平台：workbuddy / doubao")
 	_ = fs.Parse(args)
+
+	// 豆包没有设备码登录：凭证就是桌面端的 Cookie，直接导出即可。
+	if *upstream == "doubao" {
+		runDoubaoLogin(*out)
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
@@ -345,6 +365,28 @@ func runLogin(args []string) {
 	}
 	fmt.Println("现在可以启动网关: agent2api")
 	fmt.Println("多账号提示: agent2api login -out auths/a.json 可把凭证存入号池目录，多号轮询使用")
+}
+
+// runDoubaoLogin 把本机 DoubaoWork 的登录态导出成 JSON 凭证文件。
+//
+// 用途：多账号号池（导出多份放进 accounts_dir）与无桌面端的机器部署。
+func runDoubaoLogin(out string) {
+	if out == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatalf("取不到用户主目录: %v", err)
+		}
+		out = filepath.Join(home, ".agent2api", "doubao.json")
+	}
+	cred, err := doubao.LoadCredential("")
+	if err != nil {
+		log.Fatalf("读取 DoubaoWork 凭证失败: %v（请先在客户端登录豆包）", err)
+	}
+	if err := doubao.SaveCredential(cred, out); err != nil {
+		log.Fatalf("保存凭证失败: %v", err)
+	}
+	fmt.Printf("已导出豆包凭证: %s（%d 个 Cookie）\n", out, len(cred.Cookies))
+	fmt.Println("把它放进号池目录后启动网关: agent2api -platform doubao -accounts-dir auths")
 }
 
 // ───────────────────────── 模型列表 ─────────────────────────
