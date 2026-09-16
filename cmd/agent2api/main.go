@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
@@ -67,6 +68,7 @@ type serverFlags struct {
 	port           int
 	apiKey         string
 	credentialPath string
+	accountsDir    string
 	baseURL        string
 	noSanitize     bool
 	platform       string
@@ -81,6 +83,7 @@ func addServerFlags(fs *flag.FlagSet) *serverFlags {
 	fs.IntVar(&sf.port, "port", 0, "监听端口，默认 8787")
 	fs.StringVar(&sf.apiKey, "api-key", "", "网关访问密钥；为空则不鉴权")
 	fs.StringVar(&sf.credentialPath, "credential", "", "上游凭证文件路径；为空时自动探测本机已登录凭证")
+	fs.StringVar(&sf.accountsDir, "accounts-dir", "", "多账号号池目录；目录下每个 *.json 视为一个账号（agent2api login -out 攒凭证）")
 	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认 https://copilot.tencent.com")
 	fs.BoolVar(&sf.noSanitize, "no-sanitize", false, "关闭内容脱敏（接入 Claude Code/Codex 时不建议关闭）")
 	fs.StringVar(&sf.platform, "platform", "workbuddy", "上游平台，目前仅支持 workbuddy")
@@ -101,6 +104,9 @@ func (sf *serverFlags) apply(cfg *config.Config) {
 	}
 	if sf.credentialPath != "" {
 		cfg.Upstream.CredentialPath = sf.credentialPath
+	}
+	if sf.accountsDir != "" {
+		cfg.Upstream.AccountsDir = sf.accountsDir
 	}
 	if sf.baseURL != "" {
 		cfg.Upstream.BaseURL = sf.baseURL
@@ -153,6 +159,13 @@ func runServer(args []string) {
 	}
 	sf.apply(&cfg)
 	resolveMetricsFile(sf, &cfg)
+	// 号池目录默认值：配置/参数都没给时，若工作目录存在 auths/ 则自动启用——
+	// 用户把凭证文件拖进去就生效，无需改配置。
+	if cfg.Upstream.AccountsDir == "" {
+		if st, err := os.Stat("auths"); err == nil && st.IsDir() {
+			cfg.Upstream.AccountsDir = "auths"
+		}
+	}
 
 	if cfg.Upstream.Platform != "workbuddy" {
 		log.Fatalf("暂不支持的平台: %s（当前仅实现 workbuddy）", cfg.Upstream.Platform)
@@ -160,11 +173,11 @@ func runServer(args []string) {
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
 
-	adp, err := newAdapter(cfg, logger)
+	adp, pool, err := buildAdapter(cfg, logger)
 	if err != nil {
 		logger.Fatalf("初始化上游适配器失败: %v", err)
 	}
-	logger.Printf("上游平台=%s 账号=%s", adp.Name(), adp.CredentialInfo())
+	logger.Printf("上游平台=%s 账号=%s", adp.Name(), summarizeAccounts(adp, pool))
 
 	application := app.New(cfg, adp, logger)
 	application.StartMetricsPersistence(30 * time.Second)
@@ -183,7 +196,7 @@ func runServer(args []string) {
 	}()
 
 	// 启动横幅直接写 stdout（不经过 logger，避免时间戳前缀干扰阅读与复制）。
-	printBanner(cfg, adp)
+	printBanner(cfg, adp, pool)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -219,8 +232,8 @@ func baseURL(cfg config.Config) string {
 // platformSummary 汇总平台与账号信息，含一次轻量的模型探测。
 //
 // 探测失败不阻断启动，只是不显示模型数量——启动不该强依赖上游可用性。
-func platformSummary(adp *workbuddy.Adapter) string {
-	base := fmt.Sprintf("%s · 账号 %s", adp.Name(), adp.CredentialInfo())
+func platformSummary(adp adapter.Adapter, pool *adapter.Pool) string {
+	base := fmt.Sprintf("%s · 账号 %s", adp.Name(), summarizeAccounts(adp, pool))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	models, err := adp.ListModels(ctx)
@@ -231,7 +244,7 @@ func platformSummary(adp *workbuddy.Adapter) string {
 }
 
 // printBanner 打印启动横幅，把控制台地址放在最显眼的位置。
-func printBanner(cfg config.Config, adp *workbuddy.Adapter) {
+func printBanner(cfg config.Config, adp adapter.Adapter, pool *adapter.Pool) {
 	base := baseURL(cfg)
 	line := strings.Repeat("─", 62)
 
@@ -239,7 +252,19 @@ func printBanner(cfg config.Config, adp *workbuddy.Adapter) {
 	fmt.Println(line)
 	fmt.Printf("  Agent2API 控制台    %s/\n", base)
 	fmt.Println()
-	fmt.Printf("  %s\n", platformSummary(adp))
+	fmt.Printf("  %s\n", platformSummary(adp, pool))
+	// 多账号时逐个列出账号状态，让「谁在冷却」一眼可见。
+	if pool != nil && pool.Len() > 1 {
+		for _, st := range pool.Statuses() {
+			flag := "✓"
+			detail := ""
+			if !st.Healthy {
+				flag = "⏳"
+				detail = fmt.Sprintf(" · 冷却 %ds · %s", st.CooldownSecs, truncate(st.LastError, 40))
+			}
+			fmt.Printf("        %s %s%s\n", flag, st.Label, detail)
+		}
+	}
 	fmt.Println(line)
 	fmt.Println("  接口")
 	fmt.Printf("    POST  %s/v1/chat/completions   OpenAI Chat Completions\n", base)
@@ -263,6 +288,7 @@ func printBanner(cfg config.Config, adp *workbuddy.Adapter) {
 	fmt.Println()
 }
 
+// newAdapter 构造单账号适配器（models 子命令等简单场景使用）。
 func newAdapter(cfg config.Config, logger *log.Logger) (*workbuddy.Adapter, error) {
 	return workbuddy.New(workbuddy.Config{
 		BaseURL:            cfg.Upstream.BaseURL,
@@ -276,6 +302,15 @@ func newAdapter(cfg config.Config, logger *log.Logger) (*workbuddy.Adapter, erro
 			logger.Printf(format, args...)
 		},
 	})
+}
+
+// truncate 按字符截断长文本用于单行展示。
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // ───────────────────────── 登录 ─────────────────────────
@@ -309,6 +344,7 @@ func runLogin(args []string) {
 		fmt.Println("登录成功")
 	}
 	fmt.Println("现在可以启动网关: agent2api")
+	fmt.Println("多账号提示: agent2api login -out auths/a.json 可把凭证存入号池目录，多号轮询使用")
 }
 
 // ───────────────────────── 模型列表 ─────────────────────────

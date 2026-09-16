@@ -122,6 +122,12 @@ func (a *Adapter) CredentialInfo() string {
 	return "unknown"
 }
 
+// AccountUID 返回账号的稳定唯一标识（凭证文件里的 account.uid）。
+// 号池用它做「同一账号不得重复入池」的判定——昵称可重复，uid 不会。
+func (a *Adapter) AccountUID() string {
+	return a.auth.Credential().UID
+}
+
 // retryAttemptLimit 是 dial 的最大尝试次数（含首次）。
 const retryAttemptLimit = 3
 

@@ -263,7 +263,7 @@ Current coverage (measured):
 ### By design
 
 - **Upstream does not support non-streaming requests** — aggregated proxy-side, so TTFB matches streaming
-- **Single account** — no account pool or circuit breaking
+- **Multi-account**: same-platform multi-account rotation with rate-limit cooldown is supported (see the Chinese README section 「多账号号池」); circuit breaking and quota queries are not yet implemented
 - **Quota query endpoint not implemented** — requires enterprise privileges upstream (403)
 - **DSML text-mode tool-call fallback not implemented** — upstream currently uses native `tool_calls`
 
@@ -291,7 +291,8 @@ These used to be open issues; each fix now ships with a regression test (see `CH
 - [x] Wire up retry/backoff (dial backoff + Retry-After + 401-refresh guard)
 - [ ] Second platform adapter (Devin / Cursor)
 - [ ] `cmd/probe` protocol drift detection
-- [ ] Multi-account pool + cooldown + circuit breaking
+- [x] Multi-account pool: rotation + precise rate-limit cooldown + 401 cooldown (2026-09-16)
+- [ ] Pool circuit breaking & quota queries
 
 ---
 

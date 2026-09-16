@@ -233,8 +233,46 @@ func httpError(status int, raw []byte, retryAfter string) error {
 			f.RetryAfterSeconds = secs
 		}
 	}
+	// 上游限流消息自带精确的重置时刻（例：「您的使用量已超出频率限制，
+	// 将在 2026-09-16 23:21:31 UTC+8 重置」）。解析出来填进 RetryAfterSeconds，
+	// 号池就能做「到点解冻」的精确冷却，而不是拍一个固定时长。
+	// 仅在限流且尚无 Retry-After 头时兜底填充。
+	if f.RateLimited && f.RetryAfterSeconds <= 0 {
+		if secs := resetEpochFromMsg(msg); secs > 0 {
+			if d := time.Until(time.Unix(int64(secs), 0)); d > 0 {
+				f.RetryAfterSeconds = int(d.Seconds())
+			}
+		}
+	}
 	f.Classify()
 	return f
+}
+
+// resetEpochFromMsg 从上游限流文案里解析重置时刻的 Unix 秒。
+// 已知形态：「... 将在 2026-09-16 23:21:31 UTC+8 重置 ...」。
+// 解析不出返回 0——文案变了就退化为固定冷却，不影响功能。
+func resetEpochFromMsg(msg string) int {
+	idx := strings.Index(msg, "将在")
+	if idx < 0 {
+		return 0
+	}
+	rest := msg[idx+len("将在"):]
+	end := strings.Index(rest, "重置")
+	if end < 0 {
+		return 0
+	}
+	stamp := strings.TrimSpace(rest[:end])
+	// 戳里带时区后缀（" 2099-01-01 00:00:00 UTC+8"），Go 的时间布局不认识
+	// "UTC+8" 字面量；按已知形态剥掉尾部时区再解析，时区偏移固定 +8。
+	if i := strings.LastIndex(stamp, "UTC"); i >= 0 {
+		stamp = strings.TrimSpace(stamp[:i])
+	}
+	const tzOffset = 8 * 3600
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", stamp, time.FixedZone("UTC+8", tzOffset))
+	if err != nil {
+		return 0
+	}
+	return int(t.Unix())
 }
 
 // decodeBytes 解码上游字节。上游偶发返回非 UTF-8（如 GBK），按 utf8 → GBK → GB18030 → 替换 兜底。

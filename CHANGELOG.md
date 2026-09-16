@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **多账号号池**（解决「一个账号额度不够用」）：
+  - `agent2api login -out auths/a.json` 逐账号攒凭证；网关启动扫描 `auths/`（自动启用）或 `-accounts-dir`/`accounts_dir` 指定的目录
+  - `internal/adapter/pool.go`：通用的 `Pool`——包装 N 个同平台适配器，请求在健康账号间轮询；只依赖 `adapter.Adapter` 接口与 `llm.Failure` 分类字段，对 app 层就是一个普通 Adapter，下游协议零改动
+  - 调度语义：限流→冷却该账号并换号（上游文案自带精确重置时刻，解析为**到点解冻**；解析失败退化 60s 冷却）；刷新后仍 401→冷却 10 分钟；参数错误不换号直接失败；传输错误换号但不冷却
+  - 上游限流文案解析（「将在 YYYY-MM-DD HH:MM:SS UTC+8 重置」→ `RetryAfterSeconds`）
+  - 启动横幅逐账号状态（✓/⏳）；全部冷却时返回语义化的 `all_accounts_cooling`
+  - 回归测试 8 例（轮询均匀性、冷却换号、到期恢复、参数错误快速失败、传输错误不冷却、全冷却、空池、状态快照）
+
 ### 修复
 
 - **全部 7 项已知缺陷已修复**（原列于本节与 README，回归测试全部锁定）：

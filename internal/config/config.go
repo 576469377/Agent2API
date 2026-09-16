@@ -36,6 +36,12 @@ type UpstreamConfig struct {
 	// CredentialPath 为空时自动探测本机已登录凭证。
 	CredentialPath string `json:"credential_path"`
 
+	// AccountsDir 是多账号号池的凭证目录：目录下每个 *.json 视为一个账号。
+	// 非空时与 CredentialPath 并存（CredentialPath 优先作为第一个账号），
+	// 目录不存在或为空时自动退化为单账号模式。
+	// 用法：agent2api login -out auths/a.json 逐个登录后重启网关。
+	AccountsDir string `json:"accounts_dir"`
+
 	// Sanitize 开启内容脱敏。接入 Claude Code / Codex 时必须开启。
 	Sanitize bool `json:"sanitize"`
 

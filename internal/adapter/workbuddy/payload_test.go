@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/576469377/Agent2API/internal/llm"
 )
@@ -231,5 +232,39 @@ func TestConvertToolsSanitizesDescription(t *testing.T) {
 	// 工具名与参数 schema 不受脱敏影响。
 	if on[0].Function.Name != "sec_scan" || off[0].Function.Name != "sec_scan" {
 		t.Fatal("工具名不应被改动")
+	}
+}
+
+// TestResetEpochFromMsg 验证从上游限流文案解析重置时刻。
+// 号池的「到点解冻」冷却依赖这个解析；文案格式变化时退化为 0（固定冷却）。
+func TestResetEpochFromMsg(t *testing.T) {
+	msg := "您的使用量已超出频率限制，将在 2026-09-16 23:21:31 UTC+8 重置，您也可以切换其他模型继续使用。"
+	secs := resetEpochFromMsg(msg)
+	if secs <= 0 {
+		t.Fatalf("应解析出重置时刻, got %d", secs)
+	}
+	// 解析出的时刻换算回 UTC+8 应与原文一致。
+	got := time.Unix(int64(secs), 0).In(time.FixedZone("UTC+8", 8*3600)).Format("2006-01-02 15:04:05")
+	if got != "2026-09-16 23:21:31" {
+		t.Fatalf("重置时刻=%s, want 2026-09-16 23:21:31", got)
+	}
+	if resetEpochFromMsg("some other error") != 0 {
+		t.Fatal("无关文案应返回 0")
+	}
+	if resetEpochFromMsg("将在 不存在的格式") != 0 {
+		t.Fatal("格式损坏应返回 0")
+	}
+}
+
+// TestHttpErrorParsesResetTime 验证 httpError 把重置时刻填进 RetryAfterSeconds。
+func TestHttpErrorParsesResetTime(t *testing.T) {
+	body := []byte(`{"code":429,"msg":"您的使用量已超出频率限制，将在 2099-01-01 00:00:00 UTC+8 重置"}`)
+	err := httpError(429, body, "")
+	f := llm.Wrap(err)
+	if !f.RateLimited {
+		t.Fatalf("429 应置 RateLimited: %+v", f)
+	}
+	if f.RetryAfterSeconds <= 0 {
+		t.Fatalf("应从重置时刻推导冷却秒数, got %d", f.RetryAfterSeconds)
 	}
 }
