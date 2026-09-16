@@ -16,9 +16,11 @@ import (
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
-// 本机桌面客户端已登录凭证的默认位置。
-// 优先直接复用它——用户无需重新登录，这是同类项目都没做的事。
-func defaultCredentialPaths() []string {
+// DefaultCredentialPaths 返回本机桌面客户端已登录凭证的默认位置。
+//
+// 导出给上层：号池需要逐个枚举候选，而不是让适配器挑第一个文件了事——
+// 第一个文件损坏时不该放弃后面的候选。
+func DefaultCredentialPaths() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -84,7 +86,7 @@ type credentialFile struct {
 // loadCredentialFile 从磁盘读取凭证，按候选路径依次尝试。
 func loadCredentialFile(path string) (*Credential, error) {
 	if path == "" {
-		for _, p := range defaultCredentialPaths() {
+		for _, p := range DefaultCredentialPaths() {
 			if _, err := os.Stat(p); err == nil {
 				path = p
 				break

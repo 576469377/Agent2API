@@ -90,11 +90,19 @@ func collectCredentialPaths(cfg config.Config) []string {
 		out = append(out, p)
 	}
 
+	// 空路径是「交给适配器自行探测」的内部哨兵，**不能**塞给 add()——
+	// add 用 p == "" 过滤空值，会把唯一一个自动探测入口直接吃掉，
+	// 导致未显式配置凭证时号池空转、网关报 no_credential。
+	// 这里改为显式枚举本机默认候选（只收存在的），逐个独立尝试：
+	// 第一个文件损坏/过期时还能退到后面的候选。
 	if cfg.Upstream.CredentialPath != "" {
 		add(cfg.Upstream.CredentialPath)
 	} else {
-		// 与原单账号行为一致：让适配器自己探测（桌面客户端凭证等）。
-		add("")
+		for _, p := range workbuddy.DefaultCredentialPaths() {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				add(p)
+			}
+		}
 	}
 
 	if dir := cfg.Upstream.AccountsDir; dir != "" {

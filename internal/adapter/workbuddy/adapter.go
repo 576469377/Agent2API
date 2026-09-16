@@ -87,7 +87,7 @@ func New(cfg Config) (*Adapter, error) {
 	}
 	credPath := cfg.CredentialPath
 	if credPath == "" {
-		for _, p := range defaultCredentialPaths() {
+		for _, p := range DefaultCredentialPaths() {
 			if _, statErr := os.Stat(p); statErr == nil {
 				credPath = p
 				break
