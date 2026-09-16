@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent2API 控制台</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>">
+</head>
+<body>
+<div class="shell">
+
+  <!-- ───────── 侧边栏 ───────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">⚡</span>
+      <div class="brand-text">
+        <strong>Agent2API</strong>
+        <small id="brandSub">控制台</small>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-page="overview">概览</button>
+      <button class="nav-item" data-page="chat">对话</button>
+      <button class="nav-item" data-page="platforms">平台</button>
+      <button class="nav-item" data-page="models">模型</button>
+      <button class="nav-item" data-page="requests">调用日志</button>
+      <button class="nav-item" data-page="settings">设置</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="health" id="health">
+        <span class="dot" id="dot"></span><span id="healthText">连接中…</span>
+      </div>
+      <div class="side-meta" id="sideMeta"></div>
+    </div>
+  </aside>
+
+  <!-- ───────── 主区 ───────── -->
+  <main class="main" id="main">
+
+    <!-- 概览 -->
+    <section class="page active" id="page-overview">
+      <header class="page-head">
+        <div>
+          <h1>概览</h1>
+          <p class="sub" id="ovSub">网关运行状况与用量统计</p>
+        </div>
+        <div class="page-actions">
+          <span class="live" id="ovLive"></span>
+          <button class="btn" id="btnRefresh">刷新</button>
+        </div>
+      </header>
+
+      <div class="stat-grid" id="statGrid"></div>
+
+      <div class="panel-row">
+        <div class="panel">
+          <div class="panel-head"><h2>请求趋势</h2><span class="panel-note">最近 30 分钟</span></div>
+          <div class="chart" id="chartReq"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Token 消耗</h2><span class="panel-note">输入 / 输出</span></div>
+          <div class="chart" id="chartTok"></div>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="panel">
+          <div class="panel-head"><h2>协议分布</h2></div>
+          <div class="rank" id="rankProto"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>模型调用排行</h2></div>
+          <div class="rank" id="rankModel"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>最近请求</h2><button class="link" data-goto="requests">查看全部</button></div>
+        <div id="recentShort"></div>
+      </div>
+    </section>
+
+    <!-- 对话 -->
+    <section class="page" id="page-chat">
+      <header class="page-head">
+        <div><h1>对话</h1><p class="sub">直接与网关对话，验证协议与模型表现</p></div>
+        <div class="page-actions">
+          <select id="model" title="模型"></select>
+          <button class="btn" id="btnChatSettings">参数</button>
+          <button class="btn" id="btnClear">清空</button>
+        </div>
+      </header>
+
+      <div class="chat-params" id="chatParams">
+        <label>温度 <input type="number" id="temperature" step="0.1" min="0" max="2" placeholder="默认"></label>
+        <label>最大输出 <input type="number" id="maxTokens" step="256" min="1" placeholder="默认"></label>
+        <label>思考强度
+          <select id="effort"><option value="">默认</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select>
+        </label>
+        <label>系统提示 <input type="text" id="system" placeholder="可选"></label>
+      </div>
+
+      <div class="banner" id="banner"></div>
+
+      <div class="messages" id="messages">
+        <div class="empty" id="empty">
+          <h2>想聊点什么？</h2>
+          <p>这里直接连到本机运行的 Agent2API 网关，走标准 OpenAI 接口。</p>
+          <div class="suggestions">
+            <button data-prompt="用三句话解释什么是反向代理">解释反向代理</button>
+            <button data-prompt="帮我写一个 Go 函数，判断字符串是否是回文">写个 Go 函数</button>
+            <button data-prompt="给我三个提高代码可读性的建议">代码可读性建议</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="composer-bar">
+            <span class="hint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
+            <div class="spacer"></div>
+            <span class="status" id="status"></span>
+            <button class="btn primary" id="btnSend">发送</button>
+            <button class="btn" id="btnStop" style="display:none">停止</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 平台 -->
+    <section class="page" id="page-platforms">
+      <header class="page-head">
+        <div><h1>平台</h1><p class="sub">已接入的上游平台，以及后续规划</p></div>
+        <div class="page-actions"><button class="btn" id="btnReloadPlatforms">刷新</button></div>
+      </header>
+      <div id="platformList"></div>
+      <h3 class="sec-title">规划中</h3>
+      <div id="plannedList"></div>
+    </section>
+
+    <!-- 模型 -->
+    <section class="page" id="page-models">
+      <header class="page-head">
+        <div><h1>模型</h1><p class="sub" id="modelsSub">当前平台可用模型</p></div>
+        <div class="page-actions">
+          <input type="text" id="modelFilter" class="filter" placeholder="筛选模型…">
+          <button class="btn" id="btnReloadModels">刷新</button>
+        </div>
+      </header>
+      <div class="table-wrap"><table class="table" id="modelTable"></table></div>
+    </section>
+
+    <!-- 日志 -->
+    <section class="page" id="page-requests">
+      <header class="page-head">
+        <div><h1>调用日志</h1><p class="sub">最近 200 条请求</p></div>
+        <div class="page-actions">
+          <select id="reqFilter">
+            <option value="">全部</option>
+            <option value="fail">仅失败</option>
+            <option value="ok">仅成功</option>
+          </select>
+          <button class="btn" id="btnReloadReq">刷新</button>
+        </div>
+      </header>
+      <div class="table-wrap"><table class="table" id="reqTable"></table></div>
+    </section>
+
+    <!-- 设置 -->
+    <section class="page" id="page-settings">
+      <header class="page-head">
+        <div><h1>设置</h1><p class="sub">运行期可调项与当前生效配置</p></div>
+      </header>
+
+      <div class="panel">
+        <div class="panel-head"><h2>运行期开关</h2></div>
+        <div class="setting">
+          <div class="setting-info">
+            <strong>内容脱敏</strong>
+            <small>在敏感词中插入零宽空格，规避上游关键词审核误伤。接入 Claude Code / Codex 时强烈建议开启。</small>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="swSanitize">
+            <span></span>
+          </label>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <strong>重新拉取模型清单</strong>
+            <small>立即失效并重建模型缓存，用于上游模型更新后同步。</small>
+          </div>
+          <button class="btn" id="btnRefreshModels">拉取</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>当前生效配置</h2></div>
+        <div class="kv" id="configView"></div>
+        <p class="note">监听地址、上游地址、超时等需要重启生效，请用配置文件或启动参数修改，控制台不做假动作。</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>接入方式</h2></div>
+        <div class="kv" id="usageView"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

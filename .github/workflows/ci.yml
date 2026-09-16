@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build / vet / test (Go ${{ matrix.go }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # go.mod 声明 go 1.23.0 —— 测声明下限才能真正保证兼容
+        go: ['1.23.x', 'stable']
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: 校验依赖
+        run: go mod verify
+
+      - name: 构建
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: 测试（含竞态检测）
+        run: go test ./... -race -coverprofile=coverage.txt -covermode=atomic
+
+      - name: 覆盖率摘要
+        run: go tool cover -func=coverage.txt | tail -1
+
+  # 单独跑一次不含 -race 的覆盖率，方便本地对比
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - name: 覆盖率明细
+        run: go test ./... -cover

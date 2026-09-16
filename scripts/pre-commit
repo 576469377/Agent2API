@@ -1,0 +1,96 @@
+#!/bin/sh
+# Agent2API pre-commit 钩子：阻止凭证与敏感数据被提交。
+#
+# 安装（在仓库根目录执行一次）：
+#   make hooks           # 或：cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# 设计原则：宁可误报（让你确认），不可漏报（凭证一旦进入历史就很难彻底清除）。
+
+set -e
+
+# 只检查「本次实际要提交的」文件，避免被工作区其他改动干扰
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 自身豁免：本钩子与发布检查清单里含有检测模式字面量（那是「用来找敏感串的串」，
+# 不是敏感数据本身）。若不豁免，它们会拦截自己的提交。
+case "$staged" in
+  *scripts/pre-commit*|*开源发布检查清单*|*release-checklist*)
+    staged=$(printf '%s\n' "$staged" | grep -vE 'scripts/pre-commit|开源发布检查清单|release-checklist' || true)
+    ;;
+esac
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+# ── 1. 明确禁止提交的路径 ──────────────────────────────────
+forbidden=$(printf '%s\n' "$staged" | grep -E \
+  '(^|/)(config\.json|.*\.session\.json|.*\.info|metrics\.json|agent2api-metrics\.json)$|^(auths|\.workbuddy|bin)/' \
+  || true)
+if [ -n "$forbidden" ]; then
+  echo "❌ 提交被阻止：以下文件属于凭证 / 运行数据 / 编译产物，不得提交：" >&2
+  printf '%s\n' "$forbidden" | sed 's/^/     /' >&2
+  echo "    如确属误判，请先用 git reset HEAD <文件> 移出暂存区。" >&2
+  fail=1
+fi
+
+# ── 2. 内容扫描：凭证特征串 ────────────────────────────────
+# 扫描暂存区内容（而非工作区），确保检查的就是即将入库的字节
+scan() {
+  printf '%s\n' "$staged" | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    # 跳过二进制文件
+    if grep -qI . "$f" 2>/dev/null; then
+      grep -nHE \
+        -e 'eyJ[A-Za-z0-9_-]{20,}' \
+        -e 'sk-[A-Za-z0-9]{20,}' \
+        -e 'AKIA[0-9A-Z]{16}' \
+        -e '"access_token"[[:space:]]*:[[:space:]]*"[^"]{20,}' \
+        -e '"refresh_token"[[:space:]]*:[[:space:]]*"[^"]{20,}' \
+        "$f" 2>/dev/null || true
+    fi
+  done
+}
+hits=$(scan || true)
+if [ -n "$hits" ]; then
+  echo "❌ 提交被阻止：检测到疑似凭证特征串：" >&2
+  printf '%s\n' "$hits" | sed 's/^/     /' >&2
+  echo "    请确认不是真实凭证；若是，改用占位值，并轮换该凭证。" >&2
+  fail=1
+fi
+
+# ── 3. 内容扫描：个人标识（本仓库曾出现过的具体值）──────────
+personal=$(printf '%s\n' "$staged" | while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  if grep -qI . "$f" 2>/dev/null; then
+    grep -nHE -e '<你的账号昵称>' -e '/Users/<你的用户名>' "$f" 2>/dev/null || true
+  fi
+done || true)
+if [ -n "$personal" ]; then
+  echo "❌ 提交被阻止：检测到个人标识（账号昵称 / 本机绝对路径）：" >&2
+  printf '%s\n' "$personal" | sed 's/^/     /' >&2
+  echo "    请改为占位符，如 <本机登录账号>。" >&2
+  fail=1
+fi
+
+# ── 4. fixtures 脱敏提醒 ───────────────────────────────────
+fixtures=$(printf '%s\n' "$staged" | grep -E '^fixtures/.*\.(jsonl|json)$' || true)
+if [ -n "$fixtures" ]; then
+  leak=$(printf '%s\n' "$fixtures" | while IFS= read -r f; do
+    grep -nHE -e '"created":[[:space:]]*17[89][0-9]{8}' -e 'cmb-[0-9a-f]{32}' -e '"requestId":[[:space:]]*"[0-9a-f]{8}-' "$f" 2>/dev/null || true
+  done || true)
+  if [ -n "$leak" ]; then
+    echo "⚠️  提醒：fixtures/ 中检测到疑似未脱敏的真实上游值：" >&2
+    printf '%s\n' "$leak" | sed 's/^/     /' >&2
+    echo "    真实 ID / 时间戳请替换为占位值（见 fixtures/README.md）。" >&2
+    echo "    如确为已脱敏的占位值，可忽略本提醒。" >&2
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "提交已中止。若确需绕过（不推荐）：git commit --no-verify" >&2
+  exit 1
+fi
+
+exit 0

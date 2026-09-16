@@ -1,0 +1,29 @@
+name: Lint
+
+# 刻意设为「建议性」：lint 失败不会阻塞 PR。
+# 本项目现有代码中存在刻意的错误忽略与若干死代码，全量 lint 首版必然报错。
+# 待代码清理到位后再考虑改为阻塞。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golangci:
+    name: golangci-lint（建议性，不阻塞）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          args: --timeout=5m

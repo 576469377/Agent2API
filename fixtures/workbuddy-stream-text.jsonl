@@ -1,0 +1,750 @@
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"1","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":".  **","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"分析","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"请求：**\n    *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户的请求是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“用一句话介绍你自己","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"”。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 这是一个非常直接","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"和常见的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"问题","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n    *   目","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"标是以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"一种有用","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、准确","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"且引人","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"入胜的方式在一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"简洁","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的句子中","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"总结","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我的本质","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"    *   关","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"键要素","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"：\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"        *   “","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"一句话”：","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"这是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"最","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"严格的限制。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我需要","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"简","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"短","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n        *   “","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"介绍你自己”：我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"需要解释","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"*是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"*什么以及","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"*做","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"*什么。\n        *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语境：我是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"大型","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言模型。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我的主要","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"功能是处理","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"和","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"生成文本。我应该","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"提及我的目的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助用户）。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我应该","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"避免过于技术","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"化或过于拟","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"人化。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我不应该说","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“我是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"人”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"或类似","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的东西。\n\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"2.  **初步","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"构思与","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"关键词联想","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"：**\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 我是什么？大型","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言模型、人工智能","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、AI","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、聊天机器人、计算机","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"程序、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"软件。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"由","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"谁创造","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"？Z","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":".ai（这是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"关键","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"事实，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"增加可信","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"度和","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"背景）。\n    *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   我做什么","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"？处理","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"信息、生成","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"文本、回答问题、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"翻译语言","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、写","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"不同","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"类型的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"创意内容、提供","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"解释","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、进行","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"对话、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"提供","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 我的目的是什么？帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户、协助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"提供信息、创造","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"连接","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n    *   我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的关键特征是什么","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"？多功能","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、知识","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"渊博（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"基于训练数据","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"）、有创意","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、快速","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"3.  **起草","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" -","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 第一","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"轮（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"过于","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"简化","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"）：**\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" “我是一个聊天","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"机器人。” -","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 太普通","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"了。没有","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"抓住","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我的范围","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"    *   “我是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"人工智能。” - 太","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"模糊了。每个人","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"工","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"智能都是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"一个人","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"工智能。\n    *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   “我是一个由","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Z.ai创建的聊天","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"机器人。” - 更","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"好，但仍然","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"有点乏","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"味。没有","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"提及","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我的*","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"能力","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"*。\n\n4. ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" **起草 - 第二轮","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"（整合","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"关键","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"要素）：**\n    *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们结合","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是什么”、“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"谁创造","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"了我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"”和“我做什么","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"”。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" “我是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"由Z.ai训练","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，旨在","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户。”-","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 不错，很","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"准确","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"让我们","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"让它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"更具","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"描述","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"性。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" “我是一个由Z.ai","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"创建","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"回答问题、生成","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"文本并","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"协助完成","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"各种任务。”- 这","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"更","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"具体","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"它列","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"出了我的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"功能。它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"相当","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"有力","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"让我们看看","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是否","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"可以使其更流畅","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"或更引人","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"入胜。\n\n5.","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"  **起草 - 第三","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"轮（润","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"色以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"增加流畅","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"性和影响力","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"）：**\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" “我是一个大型","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言模型，由","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Z.ai训练，","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"旨在通过处理","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"和","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"生成人类","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言来","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户。”- 这","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"很好","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"具体","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"准确","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"，并","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"使用","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"了一些","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"稍微","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"更","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"正式的语言（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“旨在","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"”、“处理和生成”）","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n    *   让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们尝试使其","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"对","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户更友好、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"更直接。\n    *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   “我是一个由","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Z.ai开发","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"理解","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"、","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"生成和处理","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"人类","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言，以帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"您完成各种任务。”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"- 这非常","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户为中心（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"您”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"）。它很清晰","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"    *   让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们再","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"尝试一个，","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"稍微","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"不那么","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"正式","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"，但仍然信息","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"丰富。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" “我是一个由Z.ai","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"创建","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，我的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"目标是理解和","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"生成人类","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言，以帮助您","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"完成任务","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。”- ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"也很","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"不错。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们回到","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"基础","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"，并","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"使其非常","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"有力。\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"    *   “我是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"由Z.ai训练的大型","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"语言模型，旨在帮助","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"您。”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"- 这很简洁","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"也许*","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"太*","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"简洁了。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"它没有提及“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"如何","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n    *   让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们回到包含","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"如何”的版本。“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我是一个由Z.ai训练","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"处理","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"和生成文本","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助用户","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。”- 这非常","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"有力","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。它涵盖了","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"：\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"        *   **","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是什么：**一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"大型语言模型。\n       ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   **谁创造","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"了我：**由","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Z.ai训练。\n       ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   **我做什么","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"（","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"能力）：**处理和","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"生成文本。\n        *","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   **我的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"目的：","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"**帮助用户。\n\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"6.  **最终","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"选择","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"与","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"审查","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"：**\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"起草：“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我是一个由Z.ai训练","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"处理和生成文本以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"帮助用户。”\n   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"审查：\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"        *   它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"句子吗？是的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n        *   它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"准确吗？是的。\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"        *   它简洁","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"吗？是的。\n       ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   它是否","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"避免了","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"过于技术化？是的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n        *   它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是否避免了过于拟人","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"化？是的。\n       ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   它是否","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"回答","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"了用户的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"请求？是的。\n   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"看起来","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"棒","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"极了。这是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我将","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"提供的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"最终","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"句子","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"它","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"完美的","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"平衡","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"。\n\n","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"   ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" *   让","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我们再准备","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"一个备","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"选方案，以防","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"用户","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"想要更多","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"细节","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"，但","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"主要","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"是一个","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"句子。\n    *  ","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" 最终","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"答案是","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"：“","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"我是一个由Z.ai训练","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"的大型语言模型，可以","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"处理和生成文本","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"以帮助用户。”","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"我是一个由Z.ai训练","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"的大型语言模型，旨在","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"理解和","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"生成人类语言，","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"以便帮助用户","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"完成","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"各种任务。","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000001","model":"glm-5.3","object":"chat.completion.chunk","created":1700000001,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"","function_call":{"name":"","arguments":""},"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":16,"completion_tokens":997,"total_tokens":1013,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":973,"rejected_prediction_tokens":0,"cached_tokens":0},"prompt_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0,"cached_tokens":0},"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":16,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"prompt_cache_write_tokens":0,"completion_thinking_tokens":973,"credit":0.56,"cached_tokens":0}}
+
+data: [DONE]
+

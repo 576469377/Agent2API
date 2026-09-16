@@ -1,0 +1,32 @@
+# golangci-lint 配置
+#
+# 刻意保持保守：本项目现有代码中存在刻意的错误忽略（`_ =`）与若干待清理的死代码，
+# 若开启 errcheck 全量，首版就会产生大量噪音。待代码清理到位后再逐步收紧。
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet         # 标准检查
+    - staticcheck   # 静态分析
+    - ineffassign   # 无效赋值
+    - unused        # 未使用的标识符（能发现死代码，如 SanitizeToolDescription）
+    - misspell      # 拼写
+
+issues:
+  exclude-rules:
+    # 测试文件里允许未使用的辅助函数与宽松断言
+    - path: _test\.go
+      linters:
+        - unused
+        - staticcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# 已知会报出的死代码（README「已知限制」已披露，待修复）：
+#   - SanitizeToolDescription (internal/adapter/workbuddy/sanitize.go)
+#   - isRetryableTransportError (internal/adapter/workbuddy/client.go)
+#   - parseRetryAfter (internal/adapter/workbuddy/sse.go)

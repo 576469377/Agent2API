@@ -1,0 +1,40 @@
+# ── 编译产物 ──────────────────────────────────────────────
+/agent2api
+/agent2api.exe
+/dist/
+/bin/
+
+# ── 本地配置与凭证【切勿提交】────────────────────────────────
+# config.json 里可能有 api_key，凭证文件里是账号的 access/refresh token。
+# 泄露凭证 = 泄露账号。详见 README「安全须知」。
+config.json
+*.session.json
+auths/
+*.info
+.env
+*.env.local
+
+# ── 指标落盘（运行期自动生成，含真实调用统计）────────────────
+metrics.json
+agent2api-metrics.json
+*.metrics.json.tmp
+
+# ── 内部开发记录（不随开源发布）─────────────────────────────
+.workbuddy/
+
+# ── Go ────────────────────────────────────────────────────
+*.test
+*.out
+coverage.txt
+coverage.out
+
+# ── 编辑器 / IDE ───────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── 系统 ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

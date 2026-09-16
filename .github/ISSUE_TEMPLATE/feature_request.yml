@@ -1,0 +1,47 @@
+name: 功能建议
+description: 提出一个新功能或改进建议
+title: "[Feature] "
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提建议。请先看 README 的[路线图](https://github.com/)与[已知限制](https://github.com/)，
+        部分想法可能已在计划中。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题？
+      description: 描述使用场景与痛点，而不是直接给方案 —— 这样更容易找到合适的做法
+      placeholder: '我在接入 XXX 客户端时，遇到 ...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你希望的方案
+      description: 如果你已经有想法，描述一下
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及范围
+      options:
+        - 新增上游平台适配器
+        - 下游协议兼容性
+        - 网页控制台
+        - 配置 / 运维
+        - 测试 / 工程质量
+        - 文档
+        - 其他
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意提交 PR 实现这个功能

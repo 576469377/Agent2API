@@ -1,0 +1,137 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ 提交前请确认
+        **请勿粘贴真实凭证、token、账号昵称、上游请求 ID 或完整的 system 提示词。**
+        如需展示，请用占位值替换。
+
+        也请先查看 README 的[已知限制](https://github.com/)章节 —— 部分问题已被记录。
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认本报告中**不包含**任何真实凭证、token、账号昵称或上游请求 ID
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: '运行 `./bin/agent2api` 看启动横幅，或访问 `/api/status` 的 version 字段'
+      placeholder: '0.2.0'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Windows
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go 版本（若从源码构建）
+      placeholder: '输出 `go version` 的结果'
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: 涉及的协议
+      options:
+        - OpenAI Chat Completions (/v1/chat/completions)
+        - OpenAI Responses (/v1/responses)
+        - Anthropic Messages (/v1/messages)
+        - 网页控制台
+        - 其他 / 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: 使用的客户端
+      options:
+        - Claude Code
+        - Codex CLI
+        - curl / 直接 HTTP
+        - 网页控制台
+        - 其他 SDK
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sanitize
+    attributes:
+      label: 是否开启了内容脱敏？
+      description: 默认开启。若用 `-no-sanitize` 启动则选「已关闭」
+      options:
+        - 已开启（默认）
+        - 已关闭（-no-sanitize）
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 实际行为
+      description: 发生了什么？如果有错误信息，请粘贴（注意先脱敏）
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你认为应该发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: |
+        最小复现步骤。若涉及协议问题，请提供脱敏后的请求体（用占位值替换敏感内容）。
+      placeholder: |
+        1. 用 `./bin/agent2api -port 8799` 启动
+        2. 发送请求：curl ... -d '{"model":"...","messages":[...]}'
+        3. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志片段
+      description: 服务端日志（注意先脱敏：删除凭证、token、账号昵称、system 提示词）
+      render: shell
+
+  - type: input
+    id: upstream-code
+    attributes:
+      label: 上游错误码（若适用）
+      description: |
+        若错误来自上游，响应体中常有 `code` 字段（如 `11101` 表示非流式不支持、`12403` 表示 UA 校验失败）。
+      placeholder: '例如 11101'
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 其他可能有帮助的信息（如是否为多轮对话、是否含工具调用、是否含图片）

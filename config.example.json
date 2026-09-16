@@ -1,0 +1,26 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "read_timeout_sec": 60,
+    "write_timeout_sec": 0
+  },
+  "upstream": {
+    "platform": "workbuddy",
+    "base_url": "https://copilot.tencent.com",
+    "credential_path": "",
+    "sanitize": true,
+    "stream_idle_timeout_sec": 120,
+    "stream_total_timeout_sec": 1800,
+    "request_timeout_sec": 60,
+    "model_cache_ttl_sec": 1800
+  },
+  "auth": {
+    "api_key": ""
+  },
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+  "metrics_file": "metrics.json"
+}

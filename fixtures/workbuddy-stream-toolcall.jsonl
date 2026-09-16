@@ -1,0 +1,40 @@
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"The","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" user is asking about","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" the weather in Beijing","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" and explicitly","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" asks","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" me to use a","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" tool.","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" I have","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" a get","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"_weather function available that","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" takes a city parameter","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":". Let me call","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" it with","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":" \"北京\" (","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Beijing).","function_call":null,"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"content":"","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[{"id":"call_0000000000000000000002","type":"function","function":{"name":"get_weather","arguments":""},"index":0}],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"content":"","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[{"type":"function","function":{"name":"","arguments":"{\"city\": \"北京"},"index":0}],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"content":"","reasoning_content":"","function_call":null,"refusal":"","tool_calls":[{"type":"function","function":{"name":"","arguments":"\"}"},"index":0}],"extra_fields":null},"logprobs":null,"finish_reason":""}],"usage":null}
+
+data: {"id":"cmb-00000000000000000000000000000002","model":"glm-5.3","object":"chat.completion.chunk","created":1700000002,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"","function_call":{"name":"","arguments":""},"refusal":"","tool_calls":[],"extra_fields":null},"logprobs":null,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":156,"completion_tokens":55,"total_tokens":211,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":43,"rejected_prediction_tokens":0,"cached_tokens":0},"prompt_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0,"cached_tokens":143},"prompt_cache_hit_tokens":143,"prompt_cache_miss_tokens":13,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"prompt_cache_write_tokens":0,"completion_thinking_tokens":43,"credit":0.04,"cached_tokens":0}}
+
+data: [DONE]
+

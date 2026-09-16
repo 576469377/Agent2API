@@ -1,0 +1,9 @@
+# 默认不应做行尾转换：fixtures/*.jsonl 是逐帧 SSE 样本，
+# 规范化换行会改变回放测试解析的内容。
+* text=auto eol=lf
+
+# 金帧样本一律按二进制处理，禁止任何文本转换
+fixtures/*.jsonl -text -diff
+
+# 编译产物
+*.exe binary
