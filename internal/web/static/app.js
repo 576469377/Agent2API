@@ -54,6 +54,10 @@
       'req.stream': 'stream', 'req.nostream': 'final', 'req.none': 'No records yet',
       'req.loading': 'Loading', 'req.loadfail': 'Failed to load', 'req.nofilter': 'No records match the filter',
       'req.tryall': 'Try switching back to "All"',
+      'mx.title': 'Account × model matrix', 'mx.accounts': 'accounts', 'mx.models': 'models',
+      'mx.cooling': 'rate-limited cells', 'mx.ok': 'supported', 'mx.unsupported': 'not supported',
+      'mx.ratelimited': 'rate limited (cooldown)', 'mx.nodata': 'No matrix data',
+      'mx.nodatahint': 'Requires pool mode; switch back to list view for single-account mode',
       'mdl.id': 'Model ID', 'mdl.name': 'Name', 'mdl.ctx': 'Context', 'mdl.maxout': 'Max output',
       'mdl.cap': 'Capabilities', 'mdl.tools': 'tools', 'mdl.think': 'thinking', 'mdl.vision': 'vision',
       'mdl.default': 'default', 'mdl.nomodel': 'No models returned by upstream',
@@ -103,6 +107,10 @@
       'req.stream': '流式', 'req.nostream': '非流式', 'req.none': '还没有请求记录',
       'req.loading': '加载中', 'req.loadfail': '加载失败', 'req.nofilter': '没有符合筛选条件的记录',
       'req.tryall': '试试切回「全部」',
+      'mx.title': '账号 × 模型矩阵', 'mx.accounts': '个账号', 'mx.models': '个模型',
+      'mx.cooling': '个格子限流中', 'mx.ok': '支持', 'mx.unsupported': '不支持',
+      'mx.ratelimited': '限流冷却中', 'mx.nodata': '暂无矩阵数据',
+      'mx.nodatahint': '需要号池模式；单账号模式请切回列表视图',
       'mdl.id': '模型 ID', 'mdl.name': '名称', 'mdl.ctx': '上下文', 'mdl.maxout': '最大输出',
       'mdl.cap': '能力', 'mdl.tools': '工具', 'mdl.think': '思考', 'mdl.vision': '视觉',
       'mdl.default': '默认', 'mdl.nomodel': '上游未返回任何模型',
@@ -252,7 +260,7 @@
     if (name === 'overview') { loadOverview(); startAutoRefresh(); }
     if (name === 'accounts') loadAccounts();
     if (name === 'platforms') loadPlatforms();
-    if (name === 'models') loadModels();
+    if (name === 'models') { loadModels(); startAutoRefresh(); }
     if (name === 'requests') loadRequests();
     if (name === 'settings') loadSettings();
   }
@@ -287,6 +295,8 @@
     tick = 5;
     timer = setInterval(() => {
       if (document.hidden) return;
+      // 矩阵倒计时独立于概览自动刷新：页面在模型页时也要走。
+      tickMatrixCooldowns();
       if (state.page !== 'overview') return;
       if (tick > 1) {
         tick--;
@@ -1023,30 +1033,73 @@
   //
   // 多账号场景下这个信息很关键——不同账号开放的模型集可能不同，
   // 而 /v1/models 只返回并集，看不出差异。
+  // renderModelMatrix 画「模型 × 账号」矩阵。
+  //
+  // 三种单元格状态：支持 ✓ / 不支持 · / **限流冷却中（带倒计时）**。
+  // 最后一种是关键——限流是「账号 × 模型」维度的，一个格子可能「支持但
+  // 暂时被限」，必须让用户看到还要等多久，否则会以为这个组合坏了。
   function renderModelMatrix() {
     const m = state.matrix;
     const host = $('modelTable');
     if (!m || !m.accounts || !m.accounts.length) {
-      $('modelsSub').textContent = '账号 × 模型矩阵';
-      host.innerHTML = `<tbody>${emptyRow(2, state.modelsLoading ? '加载中…' : '暂无矩阵数据', '需要号池模式；单账号模式请切回列表视图')}</tbody>`;
+      $('modelsSub').textContent = t('mx.title');
+      host.innerHTML = `<tbody>${emptyRow(2, state.modelsLoading ? t('req.loading') : t('mx.nodata'), t('mx.nodatahint'))}</tbody>`;
       return;
     }
     const q = state.modelsFilter.trim().toLowerCase();
     const models = q ? m.models.filter((x) => x.toLowerCase().includes(q)) : m.models;
-    $('modelsSub').textContent = `账号 × 模型矩阵 · ${m.accounts.length} 个账号 / ${m.models.length} 个模型`;
+    const cool = m.cooldowns || {};
+
+    // 统计被限的格子数，写进副标题——一眼看出池子健康度。
+    let coolingCells = 0;
+    for (const a of m.accounts) {
+      for (const k of Object.keys(cool[a] || {})) if (cool[a][k] > 0) coolingCells++;
+    }
+    $('modelsSub').textContent = `${t('mx.title')} · ${m.accounts.length} ${t('mx.accounts')} / ${m.models.length} ${t('mx.models')}`
+      + (coolingCells ? ` · ${coolingCells} ${t('mx.cooling')}` : '');
 
     const has = {};
     for (const acc of m.accounts) has[acc] = new Set(m.matrix[acc] || []);
 
     host.innerHTML = `
-      <thead><tr><th>模型</th>${m.accounts.map((a) => `<th class="mx-acct" title="${esc(a)}">${esc(a)}</th>`).join('')}</tr></thead>
+      <thead><tr><th>${esc(t('mdl.id'))}</th>${m.accounts.map((a) => `<th class="mx-acct" title="${esc(a)}">${esc(a)}</th>`).join('')}</tr></thead>
       <tbody>${models.map((id) => `<tr>
         <td class="mono">${esc(id)}</td>
-        ${m.accounts.map((a) => `<td class="mx-cell">${has[a].has(id)
-          ? '<span class="mx-yes" title="支持">✓</span>'
-          : '<span class="mx-no" title="不支持">·</span>'}</td>`).join('')}
+        ${m.accounts.map((a) => modelCell(a, id, has[a].has(id), (cool[a] || {})[id])).join('')}
       </tr>`).join('')}</tbody>`;
   }
+
+  // modelCell 渲染单个格子。
+  function modelCell(acct, model, supported, coolSecs) {
+    if (!supported) return '<td class="mx-cell"><span class="mx-no" title="' + esc(t('mx.unsupported')) + '">·</span></td>';
+    if (coolSecs > 0) {
+      // data-cool-until 让倒计时能每秒自更新（见 tickMatrixCooldowns）。
+      const until = Date.now() + coolSecs * 1000;
+      return `<td class="mx-cell"><span class="mx-cool" data-cool-until="${until}"
+        title="${esc(t('mx.ratelimited'))}">⏳ <span class="mx-cd">${fmtCountdown(coolSecs)}</span></span></td>`;
+    }
+    return `<td class="mx-cell"><span class="mx-yes" title="${esc(t('mx.ok'))}">✓</span></td>`;
+  }
+
+  // tickMatrixCooldowns 每秒刷新矩阵里的倒计时。
+  //
+  // 不重新拉接口（那会每秒钟打一次上游模型查询）；只就地改文本，
+  // 归零的格子立即恢复成 ✓。
+  function tickMatrixCooldowns() {
+    if (state.page !== 'models' || state.modelView !== 'matrix') return;
+    const now = Date.now();
+    document.querySelectorAll('#modelTable [data-cool-until]').forEach((el) => {
+      const left = Math.round((Number(el.dataset.coolUntil) - now) / 1000);
+      if (left <= 0) {
+        // 冷却结束：不必等下一次 5s 刷新，立即显示为可用。
+        el.outerHTML = `<span class="mx-yes" title="${esc(t('mx.ok'))}">✓</span>`;
+        return;
+      }
+      const cd = el.querySelector('.mx-cd');
+      if (cd) cd.textContent = fmtCountdown(left);
+    });
+  }
+
 
   function modelsBody(rows, all, q) {
     if (state.modelsLoading && !all.length) return skeletonRows(5, 7);

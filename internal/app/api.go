@@ -21,16 +21,23 @@ import (
 // Version 是网关版本。
 const Version = "0.2.0"
 
-// 计划接入但尚未实现的平台。
+// 所有内置平台清单（单一事实来源）。
 //
-// 控制台会显式展示这些条目：一来让「多平台」这件事在界面上可见，
-// 二来新增平台时只需在适配器注册表里加一项，前端无需改动。
-var plannedPlatforms = []plannedPlatform{
-	{ID: "devin", Name: "Devin", Note: "上游为私有 protobuf over Connect，需独立适配器"},
-	{ID: "cursor", Name: "Cursor", Note: "待调研上游协议"},
+// 控制台据此把「已接入 / 可用（已实现但当前未运行）/ 规划中（未实现）」三类分开展示，
+// 新增平台只需在这里加一项，前端无需改动。Implemented=false 的才是真正的「规划中」。
+var builtinPlatforms = []struct {
+	ID          string
+	Name        string
+	Note        string
+	Implemented bool
+}{
+	{ID: "workbuddy", Name: "WorkBuddy / CodeBuddy", Note: "腾讯 CodeBuddy 桌面端登录态复用", Implemented: true},
+	{ID: "devin", Name: "Devin", Note: "上游为私有 protobuf over Connect，需独立适配器", Implemented: false},
+	{ID: "cursor", Name: "Cursor", Note: "待调研上游协议", Implemented: false},
 }
 
-type plannedPlatform struct {
+// platformEntry 是「规划中 / 可用（已实现但当前未运行）」两类平台共用的精简描述。
+type platformEntry struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Note string `json:"note"`
@@ -48,20 +55,38 @@ type statusResponse struct {
 	Listen      string `json:"listen"`
 	AuthEnabled bool   `json:"auth_enabled"`
 	Time        string `json:"time"`
+	// Platforms 是本进程集成的全部平台（多平台集成的核心字段）。
+	// Platform/PlatformID/Account 保留为默认平台的摘要，兼容旧客户端。
+	Platforms []adapter.Description `json:"platforms"`
 }
 
 func (a *App) apiStatus(w http.ResponseWriter, r *http.Request) {
-	desc := a.describePlatform()
+	descs := a.hub.Describe()
+	def := a.hub.DefaultPlatform()
+	var defID, defName, defAccount string
+	if def != nil {
+		defID = def.ID
+		defName = def.Adapter.Name()
+	}
+	for _, d := range descs {
+		if d.ID == defID {
+			defAccount = d.Account
+			if d.Name != "" {
+				defName = d.Name
+			}
+		}
+	}
 	writeJSON(w, statusResponse{
 		Version:     Version,
 		UptimeSec:   int64(time.Since(a.startedAt).Seconds()),
 		GoVersion:   runtime.Version(),
-		Platform:    a.adapter.Name(),
-		PlatformID:  desc.ID,
-		Account:     desc.Account,
+		Platform:    defName,
+		PlatformID:  defID,
+		Account:     defAccount,
 		Listen:      a.cfg.Addr(),
 		AuthEnabled: a.cfg.Auth.APIKey != "",
 		Time:        time.Now().Format(time.RFC3339),
+		Platforms:   descs,
 	})
 }
 
@@ -84,14 +109,33 @@ func (a *App) apiMetrics(w http.ResponseWriter, r *http.Request) {
 // ───────────────────────── 平台 ─────────────────────────
 
 type platformsResponse struct {
-	Active  []adapter.Description `json:"active"`
-	Planned []plannedPlatform     `json:"planned"`
+	// Active 是本进程实际集成并在运行的全部平台（多平台集成，不止一个）。
+	Active []adapter.Description `json:"active"`
+	// Planned 是尚未实现的平台（规划中）。
+	Planned []platformEntry `json:"planned"`
 }
 
+// apiPlatforms 返回平台总览：已集成运行的平台 + 未实现的规划项。
+//
+// 「可用（已实现但未运行）」这一类随多平台集成而消失——现在一个控制台
+// 集成所有已配置平台，配置了就在跑；想多一个平台，往配置里加一项并重启。
 func (a *App) apiPlatforms(w http.ResponseWriter, r *http.Request) {
+	active := a.hub.Describe()
+	running := map[string]bool{}
+	for _, d := range active {
+		running[d.ID] = true
+	}
+
+	var planned []platformEntry
+	for _, p := range builtinPlatforms {
+		if !p.Implemented && !running[p.ID] {
+			planned = append(planned, platformEntry{ID: p.ID, Name: p.Name, Note: p.Note})
+		}
+	}
+
 	writeJSON(w, platformsResponse{
-		Active:  []adapter.Description{a.describePlatform()},
-		Planned: plannedPlatforms,
+		Active:  active,
+		Planned: planned,
 	})
 }
 
@@ -103,26 +147,59 @@ type accountStatusLister interface {
 	Statuses() []adapter.AccountStatus
 }
 
+// platformOr400 解析请求里的 ?platform= 参数并返回对应平台运行期实例。
+//
+// 未指定时用默认平台（单平台配置下即唯一平台，行为与旧版一致）；
+// 指定了但不存在时返回 400——管理操作打错平台名不该静默落到别的平台。
+func (a *App) platformOr400(w http.ResponseWriter, r *http.Request) (*PlatformRuntime, bool) {
+	id := r.URL.Query().Get("platform")
+	if id == "" {
+		rt := a.hub.DefaultPlatform()
+		if rt == nil {
+			writeJSONWithStatus(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{"message": "没有任何已集成平台"},
+			})
+			return nil, false
+		}
+		return rt, true
+	}
+	rt := a.hub.Platform(id)
+	if rt == nil {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "未知平台: " + id},
+		})
+		return nil, false
+	}
+	return rt, true
+}
+
+// accountStatusView 是带来源平台的账号状态视图（多平台合并号池用）。
+type accountStatusView struct {
+	adapter.AccountStatus
+	Platform string `json:"platform"`
+}
+
 // apiAccounts 暴露号池里每个账号的运行状态（供控制台号池可视化）。
 //
-// 单账号模式下返回空数组而非 404，让前端只有一条代码路径。
+// 多平台集成后这里返回**全部平台账号的合并号池**，每个账号带 platform 来源——
+// 与 sub2api 一致：上游账号是同一个池子里的资源，provider 只是账号属性。
+// 单账号模式返回空数组而非 404，让前端只有一条代码路径。
 func (a *App) apiAccounts(w http.ResponseWriter, r *http.Request) {
 	type resp struct {
-		Accounts []adapter.AccountStatus `json:"accounts"`
-		Total    int                     `json:"total"`
-		Healthy  int                     `json:"healthy"`
+		Accounts []accountStatusView `json:"accounts"`
+		Total    int                 `json:"total"`
+		Healthy  int                 `json:"healthy"`
 	}
-	out := resp{Accounts: []adapter.AccountStatus{}}
-	if lister, ok := a.adapter.(accountStatusLister); ok {
-		sts := lister.Statuses()
-		out.Accounts = sts
-		out.Total = len(sts)
-		for _, st := range sts {
+	out := resp{Accounts: []accountStatusView{}}
+	for _, rt := range a.hub.Platforms() {
+		for _, st := range rt.AccountStatuses() {
 			if st.Healthy {
 				out.Healthy++
 			}
+			out.Accounts = append(out.Accounts, accountStatusView{AccountStatus: st, Platform: rt.ID})
 		}
 	}
+	out.Total = len(out.Accounts)
 	writeJSON(w, out)
 }
 
@@ -138,11 +215,12 @@ type accountLister interface {
 	AccountLabels() []string
 }
 
-// apiAccountsManage 是账号管理端点：
+// apiAccountsManage 是账号管理端点（全部平台账号合并为一个号池视图）：
 //
-//	GET    /api/accounts/manage          列出账号 + 登录状态
-//	POST   /api/accounts/manage          启动添加账号（设备码登录）
+//	GET    /api/accounts/manage          列出所有平台的账号 + 登录状态（每项带 platform 来源）
+//	POST   /api/accounts/manage?platform=X   添加账号（platform 由前端对话框选择）
 //	POST   /api/accounts/manage?action=enable|disable|reset&label=X
+//	                                     操作目标平台按 label 自动解析，也可显式 ?platform=
 func (a *App) apiAccountsManage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		a.listManagedAccounts(w)
@@ -170,8 +248,13 @@ func (a *App) apiAccountsManage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rt, ok := a.resolveAccountPlatform(w, r, body.Label)
+	if !ok {
+		return
+	}
+
 	// 账号操作走可选接口：非号池模式（单账号）自然不支持。
-	ctl, ok := a.adapter.(adapter.PoolController)
+	ctl, ok := rt.Adapter.(adapter.PoolController)
 	if !ok {
 		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{"message": "当前为单账号模式，不支持账号操作"},
@@ -201,63 +284,110 @@ func (a *App) apiAccountsManage(w http.ResponseWriter, r *http.Request) {
 	a.listManagedAccounts(w)
 }
 
-// managedAccount 是账号管理视图：调度状态 + 登录状态合并。
+// managedAccount 是账号管理视图：调度状态 + 登录状态合并 + 来源平台。
 type managedAccount struct {
 	adapter.AccountStatus
+	Platform string                     `json:"platform"`
 	Identity *workbuddy.AccountIdentity `json:"identity,omitempty"`
 }
 
+// listManagedAccounts 返回**全部平台账号的合并视图**（控制台「账号」页数据源）。
+//
+// 与 sub2api 同一模型：上游账号统一在一个号池视图里管理，
+// provider（platform 字段）只是账号的属性，前端不需要按平台切换。
 func (a *App) listManagedAccounts(w http.ResponseWriter) {
+	type platDir struct {
+		ID          string `json:"id"`
+		AccountsDir string `json:"accounts_dir,omitempty"`
+	}
 	out := struct {
 		Accounts    []managedAccount `json:"accounts"`
 		Total       int              `json:"total"`
 		Healthy     int              `json:"healthy"`
 		AccountsDir string           `json:"accounts_dir,omitempty"`
+		Platforms   []platDir        `json:"platforms"`
 	}{Accounts: []managedAccount{}}
 
-	lister, ok := a.adapter.(accountStatusLister)
-	if !ok {
-		writeJSON(w, out)
-		return
-	}
-	sts := lister.Statuses()
-	out.Total = len(sts)
-	for _, st := range sts {
-		if st.Healthy {
-			out.Healthy++
+	for _, rt := range a.hub.Platforms() {
+		out.Platforms = append(out.Platforms, platDir{ID: rt.ID, AccountsDir: rt.AccountsDir()})
+		if out.AccountsDir == "" {
+			out.AccountsDir = rt.AccountsDir()
 		}
-		m := managedAccount{AccountStatus: st}
-		// 登录状态：凭证是否还有效、refreshToken 是否已死。
-		if p, ok := st.Adapter.(accountIdentityProvider); ok {
-			id := p.AccountIdentity()
-			m.Identity = &id
+		for _, st := range rt.AccountStatuses() {
+			if st.Healthy {
+				out.Healthy++
+			}
+			m := managedAccount{AccountStatus: st, Platform: rt.ID}
+			// 登录状态：凭证是否还有效、refreshToken 是否已死。
+			if p, ok := st.Adapter.(accountIdentityProvider); ok {
+				id := p.AccountIdentity()
+				m.Identity = &id
+			}
+			out.Accounts = append(out.Accounts, m)
 		}
-		out.Accounts = append(out.Accounts, m)
 	}
-	out.AccountsDir = a.cfg.Upstream.AccountsDir
+	out.Total = len(out.Accounts)
 	writeJSON(w, out)
 }
 
-// startAccountLogin 发起设备码登录（添加新账号）。
-func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
-	dir := a.cfg.Upstream.AccountsDir
-	if dir == "" {
-		// 未显式配置号池目录时，兜底到 ~/.workbuddy/（workbuddy 自有凭证的
-		// 默认目录）。直接报错会把一个纯配置问题抛回给用户——「添加账号」
-		// 这个动作本身完全可以在默认位置工作，登录完成后提示用户把该目录
-		// 配成 accounts_dir（或下次启动前建 auths/）即可入池。
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil {
+// resolveAccountPlatform 找到 label 所属的平台运行期实例。
+//
+// 显式 ?platform= 优先；否则扫描各平台的账号列表精确匹配（跨平台同名 label 报错）；
+// 都找不到时退回默认平台，让 PoolController 给出准确的错误信息。
+func (a *App) resolveAccountPlatform(w http.ResponseWriter, r *http.Request, label string) (*PlatformRuntime, bool) {
+	if id := r.URL.Query().Get("platform"); id != "" {
+		rt := a.hub.Platform(id)
+		if rt == nil {
 			writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
-				"error": map[string]string{
-					"message": "无法确定用户主目录，请用 -accounts-dir 显式指定号池目录",
-				},
+				"error": map[string]string{"message": "未知平台: " + id},
 			})
-			return
+			return nil, false
 		}
-		dir = filepath.Join(home, ".workbuddy")
+		return rt, true
+	}
+	var hits []*PlatformRuntime
+	for _, rt := range a.hub.Platforms() {
+		for _, st := range rt.AccountStatuses() {
+			if st.Label == label {
+				hits = append(hits, rt)
+				break
+			}
+		}
+	}
+	switch {
+	case len(hits) == 1:
+		return hits[0], true
+	case len(hits) > 1:
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{"message": "账号 " + label + " 在多个平台重复，请带 ?platform= 指定"},
+		})
+		return nil, false
+	default:
+		rt := a.hub.DefaultPlatform()
+		if rt == nil {
+			writeJSONWithStatus(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{"message": "没有任何已集成平台"},
+			})
+			return nil, false
+		}
+		return rt, true
+	}
+}
+
+// startAccountLogin 发起一次「添加账号」登录（设备码授权，按平台分派登录方式，
+// 登录方式在 loginManager.Start 内按平台分支）。
+// platform 由前端「添加账号」对话框显式选择（sub2api 同款交互）。
+func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
+	rt, ok := a.platformOr400(w, r)
+	if !ok {
+		return
+	}
+	dir := rt.AccountsDir()
+	if dir == "" {
+		// 未显式配置号池目录时，兜底到 ~/.workbuddy/（登录凭证的默认位置）。
+		// 号池监视器每 10 秒扫描该目录，新凭证无需重启即可加入轮询。
+		dir = DefaultAccountsDir()
 		_ = os.MkdirAll(dir, 0o700)
-		a.logins.logf("accounts_dir 未配置，本次登录凭证将写入 %s；把它配成 accounts_dir 后即可入池", dir)
 	}
 	// 新凭证文件名由前端给（默认 account-N）；只接受纯文件名，防目录穿越。
 	name := r.URL.Query().Get("name")
@@ -270,7 +400,7 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	sess, err := a.logins.Start(filepath.Join(dir, name))
+	sess, err := a.logins.Start(rt.ID, filepath.Join(dir, name))
 	if err != nil {
 		f := llm.Wrap(err)
 		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
@@ -308,9 +438,9 @@ type accountModelLister interface {
 	ModelsByAccount(ctx context.Context) map[string][]string
 }
 
-// apiAccountModels 返回模型×账号矩阵。
+// apiAccountModels 返回模型×账号矩阵（全部平台合并：账号是列，模型是行）。
 //
-// 单账号模式退化：只有一个账号时返回该账号的模型，前端矩阵自然退化成列表。
+// 跨平台 label 冲突时用「平台/label」区分；单账号平台退化为单列。
 func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
@@ -319,35 +449,79 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		Accounts []string            `json:"accounts"`
 		Models   []string            `json:"models"`
 		Matrix   map[string][]string `json:"matrix"`
+		// Cooldowns 是「账号 → 模型 → 剩余冷却秒数」。
+		//
+		// 限流是「账号 × 模型」维度的（上游明确说可切换其他模型），所以矩阵里
+		// 一个格子既可能「不支持」也可能「支持但暂时被限流」——后者必须能看到
+		// 还要等多久，否则用户会以为这个组合坏了。
+		Cooldowns map[string]map[string]int `json:"cooldowns,omitempty"`
 	}
-	out := resp{Accounts: []string{}, Models: []string{}, Matrix: map[string][]string{}}
+	out := resp{
+		Accounts:  []string{},
+		Models:    []string{},
+		Matrix:    map[string][]string{},
+		Cooldowns: map[string]map[string]int{},
+	}
+	seen := map[string]bool{}
 
-	if lister, ok := a.adapter.(accountModelLister); ok {
-		m := lister.ModelsByAccount(ctx)
-		seen := map[string]bool{}
-		for label, ids := range m {
-			out.Accounts = append(out.Accounts, label)
-			out.Matrix[label] = ids
-			for _, id := range ids {
-				if !seen[id] {
-					seen[id] = true
-					out.Models = append(out.Models, id)
-				}
+	merge := func(key string, ids []string, cooling map[string]int) {
+		out.Accounts = append(out.Accounts, key)
+		out.Matrix[key] = ids
+		if len(cooling) > 0 {
+			out.Cooldowns[key] = cooling
+		}
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				out.Models = append(out.Models, id)
 			}
 		}
-	} else {
-		// 单账号：直接列模型。
-		models, err := a.adapter.ListModels(ctx)
+	}
+
+	// accountCooldowns 从号池状态里取出「该账号上仍在冷却的模型」。
+	// 非号池适配器（单账号）没有这个概念，返回 nil。
+	accountCooldowns := func(adp adapter.Adapter) map[string]map[string]int {
+		lister, ok := adp.(accountStatusLister)
+		if !ok {
+			return nil
+		}
+		out := map[string]map[string]int{}
+		for _, st := range lister.Statuses() {
+			if len(st.ModelCooldowns) > 0 {
+				out[st.Label] = st.ModelCooldowns
+			}
+		}
+		return out
+	}
+
+	for _, rt := range a.hub.Platforms() {
+		if lister, ok := rt.Adapter.(accountModelLister); ok {
+			m := lister.ModelsByAccount(ctx)
+			labels := make([]string, 0, len(m))
+			for label := range m {
+				labels = append(labels, label)
+			}
+			sort.Strings(labels)
+			cooling := accountCooldowns(rt.Adapter)
+			for _, label := range labels {
+				key := label
+				if _, exists := out.Matrix[key]; exists {
+					key = rt.ID + "/" + label
+				}
+				merge(key, m[label], cooling[label])
+			}
+			continue
+		}
+		// 单账号平台：直接列模型。
+		ms, err := rt.Adapter.ListModels(ctx)
 		if err != nil {
-			f := llm.Wrap(err)
-			writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
-			return
+			continue
 		}
-		out.Accounts = []string{"(单账号)"}
-		for _, md := range models {
-			out.Models = append(out.Models, md.ID)
-			out.Matrix["(单账号)"] = append(out.Matrix["(单账号)"], md.ID)
+		ids := make([]string, 0, len(ms))
+		for _, md := range ms {
+			ids = append(ids, md.ID)
 		}
+		merge("(单账号)", ids, nil)
 	}
 	sort.Strings(out.Accounts)
 	sort.Strings(out.Models)
@@ -381,33 +555,47 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// describePlatform 读取当前平台的运行时描述；适配器未实现 Describer 时给出兜底信息。
-func (a *App) describePlatform() adapter.Description {
-	if d, ok := a.adapter.(adapter.Describer); ok {
-		return d.Describe()
-	}
-	return adapter.Description{
-		ID:     a.adapter.Name(),
-		Name:   a.adapter.Name(),
-		Status: "active",
-		Notes:  "该平台未实现 Describer 接口",
-	}
-}
-
 // ───────────────────────── 模型 ─────────────────────────
 
+// apiModels 返回全部平台的模型目录（多平台合并，每项带来源 platform 字段）。
+//
+// 响应三层结构：
+//   - models：扁平合并清单（含 platform 来源），旧前端照常渲染表格；
+//   - platforms：按平台分组的视图，控制台据此做分类/筛选；
+//   - platform：默认平台 ID，兼容只认单平台的旧客户端。
 func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	models, err := a.adapter.ListModels(ctx)
-	if err != nil {
-		writeJSON(w, map[string]any{"models": []any{}, "error": llm.Wrap(err).Error()})
+	all, perr := a.hub.ListModels(ctx)
+	if perr != nil {
+		writeJSON(w, map[string]any{"models": []any{}, "error": llm.Wrap(perr).Error()})
 		return
 	}
+
+	type platformModels struct {
+		ID     string              `json:"id"`
+		Name   string              `json:"name"`
+		Models []adapter.ModelInfo `json:"models"`
+	}
+	var platforms []platformModels
+	for _, rt := range a.hub.Platforms() {
+		ms, err := rt.Adapter.ListModels(ctx)
+		if err != nil {
+			continue
+		}
+		platforms = append(platforms, platformModels{ID: rt.ID, Name: rt.ID, Models: ms})
+	}
+
+	def := a.hub.DefaultPlatform()
+	defID := ""
+	if def != nil {
+		defID = def.ID
+	}
 	writeJSON(w, map[string]any{
-		"platform": a.adapter.Name(),
-		"models":   models,
+		"platform":  defID,
+		"platforms": platforms,
+		"models":    all,
 	})
 }
 
@@ -425,6 +613,13 @@ type configResponse struct {
 		RequestTimeout     string `json:"request_timeout"`
 		ModelCacheTTL      string `json:"model_cache_ttl"`
 	} `json:"upstream"`
+	// Platforms 是多平台集成下每个平台的脱敏开关状态。
+	Platforms []platformSanitize `json:"platforms"`
+}
+
+type platformSanitize struct {
+	ID       string `json:"id"`
+	Sanitize bool   `json:"sanitize"`
 }
 
 func (a *App) apiConfig(w http.ResponseWriter, r *http.Request) {
@@ -440,15 +635,29 @@ func (a *App) apiConfig(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) buildConfigResponse() configResponse {
 	var out configResponse
+	def := a.hub.DefaultPlatform()
 	out.Listen = a.cfg.Addr()
 	out.Auth = a.cfg.Auth.APIKey != ""
-	out.Sanitize = a.currentSanitize()
-	out.Upstream.Platform = a.cfg.Upstream.Platform
-	out.Upstream.BaseURL = a.cfg.Upstream.BaseURL
+	if def != nil {
+		out.Upstream.Platform = def.ID
+		out.Upstream.BaseURL = def.baseURL()
+		if c, ok := def.Adapter.(adapter.Configurable); ok {
+			out.Sanitize = c.Sanitize()
+		} else {
+			out.Sanitize = def.Cfg.Sanitize
+		}
+	}
 	out.Upstream.StreamIdleTimeout = humanDuration(a.cfg.StreamIdleTimeout())
 	out.Upstream.StreamTotalTimeout = humanDuration(a.cfg.StreamTotalTimeout())
 	out.Upstream.RequestTimeout = humanDuration(a.cfg.RequestTimeout())
 	out.Upstream.ModelCacheTTL = humanDuration(a.cfg.ModelCacheTTL())
+	for _, rt := range a.hub.Platforms() {
+		ps := platformSanitize{ID: rt.ID, Sanitize: rt.Cfg.Sanitize}
+		if c, ok := rt.Adapter.(adapter.Configurable); ok {
+			ps.Sanitize = c.Sanitize()
+		}
+		out.Platforms = append(out.Platforms, ps)
+	}
 	return out
 }
 
@@ -477,14 +686,6 @@ func humanDuration(d time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
-// currentSanitize 读取适配器当前的脱敏开关（若支持运行期查询）。
-func (a *App) currentSanitize() bool {
-	if c, ok := a.adapter.(adapter.Configurable); ok {
-		return c.Sanitize()
-	}
-	return a.cfg.Upstream.Sanitize
-}
-
 type configPatch struct {
 	Sanitize      *bool `json:"sanitize"`
 	RefreshModels bool  `json:"refresh_models"`
@@ -493,6 +694,8 @@ type configPatch struct {
 // updateConfig 只开放「可以安全热更新」的项。
 //
 // 端口、上游地址这类改动需要重启，控制台不做假动作——避免用户以为改了却没生效。
+// 多平台语义：带 ?platform= 只作用于该平台；不带则作用于全部平台
+// （统一控制台里的全局开关就该作用于全局）。
 func (a *App) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var patch configPatch
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&patch); err != nil {
@@ -501,20 +704,44 @@ func (a *App) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	applied := map[string]any{}
 
-	if patch.Sanitize != nil {
-		c, ok := a.adapter.(adapter.Configurable)
-		if !ok {
-			http.Error(w, "当前平台不支持运行期修改脱敏开关", http.StatusBadRequest)
+	targets := a.hub.Platforms()
+	if id := r.URL.Query().Get("platform"); id != "" {
+		rt := a.hub.Platform(id)
+		if rt == nil {
+			http.Error(w, "未知平台: "+id, http.StatusBadRequest)
 			return
 		}
-		c.SetSanitize(*patch.Sanitize)
+		targets = []*PlatformRuntime{rt}
+	}
+
+	if patch.Sanitize != nil {
+		appliedAny := false
+		for _, rt := range targets {
+			c, ok := rt.Adapter.(adapter.Configurable)
+			if !ok {
+				continue
+			}
+			c.SetSanitize(*patch.Sanitize)
+			rt.Cfg.Sanitize = *patch.Sanitize
+			appliedAny = true
+		}
+		if !appliedAny {
+			http.Error(w, "所选平台均不支持运行期修改脱敏开关", http.StatusBadRequest)
+			return
+		}
 		a.cfg.Upstream.Sanitize = *patch.Sanitize
 		applied["sanitize"] = *patch.Sanitize
 	}
 	if patch.RefreshModels {
-		if c, ok := a.adapter.(adapter.Configurable); ok {
-			c.InvalidateModels()
-			applied["refresh_models"] = true
+		n := 0
+		for _, rt := range targets {
+			if c, ok := rt.Adapter.(adapter.Configurable); ok {
+				c.InvalidateModels()
+				n++
+			}
+		}
+		if n > 0 {
+			applied["refresh_models"] = n
 		}
 	}
 	writeJSON(w, map[string]any{"applied": applied, "config": a.buildConfigResponse()})

@@ -88,7 +88,10 @@ func TestCollectCredentialPathsExplicit(t *testing.T) {
 func TestCollectCredentialPathsAccountsDir(t *testing.T) {
 	sandboxHome(t)
 	dir := t.TempDir()
-	for _, name := range []string{"b.json", "a.json", "note.txt", "sub"} {
+	cred := []byte(`{"auth":{"accessToken":"tok"},"account":{"uid":"u1"}}`)
+	// a/b 是真凭证；note.txt 扩展名不符；sub 是目录；
+	// data.json 是「客户端数据文件」形状（无 accessToken）——必须被过滤掉。
+	for _, name := range []string{"b.json", "a.json", "note.txt", "sub", "data.json"} {
 		p := filepath.Join(dir, name)
 		if name == "sub" {
 			if err := os.Mkdir(p, 0o755); err != nil {
@@ -96,7 +99,11 @@ func TestCollectCredentialPathsAccountsDir(t *testing.T) {
 			}
 			continue
 		}
-		if err := os.WriteFile(p, []byte(`{}`), 0o600); err != nil {
+		body := cred
+		if name == "data.json" {
+			body = []byte(`{"some":"client data"}`)
+		}
+		if err := os.WriteFile(p, body, 0o600); err != nil {
 			t.Fatalf("写入失败: %v", err)
 		}
 	}
@@ -104,13 +111,41 @@ func TestCollectCredentialPathsAccountsDir(t *testing.T) {
 	cfg := config.Default()
 	cfg.Upstream.AccountsDir = dir
 	got := collectCredentialPaths(cfg)
+	// 只收「*.json 且看起来是凭证」的，data.json 被 looksLikeCredential 挡掉。
 	want := []string{filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")}
 	if len(got) != len(want) {
-		t.Fatalf("应只收录 *.json 且按名排序: got %#v", got)
+		t.Fatalf("应只收录凭证文件且按名排序: got %#v, want %#v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("顺序/筛选不符: got %#v, want %#v", got, want)
+		}
+	}
+}
+
+// TestLooksLikeCredentialFiltersClientData 守住凭证过滤：
+// 默认目录（如 ~/.workbuddy）同时是客户端数据目录，mcp.json / settings.json
+// 这类文件绝不能被当成凭证候选（否则启动日志被刷屏）。
+func TestLooksLikeCredentialFiltersClientData(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]struct {
+		body []byte
+		want bool
+	}{
+		"nested.json":  {[]byte(`{"auth":{"accessToken":"tok"}}`), true},
+		"flat.json":    {[]byte(`{"accessToken":"tok"}`), true},
+		"client.json":  {[]byte(`{"mcpServers":{},"enabled":true}`), false},
+		"empty.json":   {[]byte(`{}`), false},
+		"array.json":   {[]byte(`[1,2,3]`), false},
+		"nulltok.json": {[]byte(`{"auth":{"accessToken":""}}`), false},
+	}
+	for name, c := range cases {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, c.body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := looksLikeCredential(p); got != c.want {
+			t.Errorf("%s: looksLikeCredential=%v, want %v", name, got, c.want)
 		}
 	}
 }
