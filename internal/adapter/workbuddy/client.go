@@ -234,15 +234,15 @@ func httpError(status int, raw []byte, retryAfter string) error {
 		}
 	}
 	// 「额度已用尽」类业务码（嵌套在 error.data.code，如 14018）与频率限制
-	// 不同：频率限制到点重置，额度耗尽要花钱买加量包——几个小时后重试
-	// 只会再挨一次限流。识别它并给长冷却（4h，覆盖典型工作时间），
-	// 号池会在此期间把请求导向其他账号/其他模型。
+	// 语义不同：频率限制的消息明说「可切换其他模型」（模型级，到点重置）；
+	// 额度耗尽只说「购买加量包」——买一次全号恢复，是**账号级**的，
+	// 且没有精确重置时刻。识别它并打上 QuotaExhausted 标记，
+	// 号池据此做**账号级**长冷却（而不是按模型各冷一次，每个模型都要
+	// 再挨一次限流才知道这个号整个没额度了）。
 	if code := nestedBusinessCode(raw); code == 14018 {
 		f.Code = fmt.Sprintf("upstream_%d", code)
 		f.RateLimited = true
-		if f.RetryAfterSeconds <= 0 {
-			f.RetryAfterSeconds = int(quotaExhaustedCooldown.Seconds())
-		}
+		f.QuotaExhausted = true
 	}
 	// 上游限流消息自带精确的重置时刻（例：「您的使用量已超出频率限制，
 	// 将在 2026-09-16 23:21:31 UTC+8 重置」）。解析出来填进 RetryAfterSeconds，
@@ -285,10 +285,6 @@ func resetEpochFromMsg(msg string) int {
 	}
 	return int(t.Unix())
 }
-
-// quotaExhaustedCooldown 是「额度耗尽」类业务码的冷却时长。
-// 这类限制不会自动重置（要购买加量包），短冷却只会反复撞墙。
-const quotaExhaustedCooldown = 4 * time.Hour
 
 // nestedBusinessCode 从响应体里提取嵌套的业务错误码（error.data.code）。
 // 上游把业务码放在 error.data 里而非顶层，envelope 解析不到。

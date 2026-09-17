@@ -31,6 +31,10 @@ type Failure struct {
 	ContextLength bool
 	Timeout       bool
 	Canceled      bool
+	// QuotaExhausted 表示账号额度耗尽（如需购买加量包），不会自动重置。
+	// 与 RateLimited（到点重置、可精确冷却）语义不同：它应当触发
+	// **账号级**的长冷却，而不是按模型分别试错。
+	QuotaExhausted bool
 	// Unauthorized 表示凭据缺失或错误。必须独立于 ClientFixable：
 	// HTTP 层要求这类失败返回 401（客户端 SDK 靠 401 触发重新配置凭据），
 	// 而 ClientFixable 会被统一映射成 400，掩盖真实原因。
@@ -118,6 +122,12 @@ func (f *Failure) classify() {
 	}
 
 	switch {
+	case strings.Contains(msg, "14018"), strings.Contains(msg, "额度已用尽"),
+		strings.Contains(msg, "购买加量包"):
+		f.QuotaExhausted = true
+		f.RateLimited = true
+		f.ClientFixable = false
+		return
 	case strings.Contains(msg, "context length"), strings.Contains(msg, "too long"),
 		strings.Contains(msg, "maximum context"), strings.Contains(msg, "token limit"):
 		f.ContextLength = true

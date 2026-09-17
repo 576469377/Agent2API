@@ -268,3 +268,16 @@ func TestHttpErrorParsesResetTime(t *testing.T) {
 		t.Fatalf("应从重置时刻推导冷却秒数, got %d", f.RetryAfterSeconds)
 	}
 }
+
+// TestQuotaExhaustedClassification 验证「额度耗尽」（code 14018）的分类：
+// 标记 QuotaExhausted（号池据此做账号级长冷却）+ RateLimited（换号依据）。
+// 实测该错误嵌套在 error.data.code 里（如 {"error":{"data":{"code":14018,...}}}），
+// envelope 顶层解析不到，必须走 nestedBusinessCode。
+func TestQuotaExhaustedClassification(t *testing.T) {
+	body := []byte(`{"error":{"data":{"code":14018,"msg":"额度已用尽，请访问以下链接，购买加量包以获取更多额度"}}}`)
+	err := httpError(400, body, "")
+	f := llm.Wrap(err)
+	if !f.QuotaExhausted || !f.RateLimited {
+		t.Fatalf("14018 应标 QuotaExhausted+RateLimited: %+v", f)
+	}
+}

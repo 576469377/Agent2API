@@ -93,7 +93,9 @@ func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 func TestPoolCooldownsRateLimitedAndFailsOver(t *testing.T) {
 	var hits [2]int
 	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("额度耗尽"), onStream: func() { hits[0]++ }})
+	// 消息刻意避开「额度耗尽」等关键词——那会触发 QuotaExhausted 走账号级
+	// 冷却（另一条路径，有独立测试）；这里测的是普通频率限制的模型级冷却。
+	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("too many requests"), onStream: func() { hits[0]++ }})
 	p.Add("b", &fakeAd{name: "test", onStream: func() { hits[1]++ }})
 
 	// 前若干次请求：首次先撞 a（限流→冷却）再 failover 到 b；之后全部直达 b。
@@ -522,16 +524,16 @@ func TestRateLimitBackoffEscalates(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test"})
 	acc := p.accounts[0]
 
-	d1 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
+	d1, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
 	p.cooldownModel(acc, "m1", d1, "x")
 	// 窗口未关：不升级。
-	d2 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
+	d2, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
 	if d2 != d1 {
 		t.Fatalf("冷却窗口未关时不应升级: %v → %v", d1, d2)
 	}
 	// 窗口过期后再失败：升级。
 	acc.modelCooldown["m1"] = time.Now().Add(-time.Second)
-	d3 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
+	d3, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
 	if d3 <= d1 {
 		t.Fatalf("窗口过期后应升级: %v → %v", d1, d3)
 	}
@@ -539,7 +541,7 @@ func TestRateLimitBackoffEscalates(t *testing.T) {
 	before := acc.backoffLevel["m1"]
 	withRA := llm.NewFailure("rate_limited", "x", nil)
 	withRA.RetryAfterSeconds = 42
-	if got := p.nextRateLimitBackoff(acc, "m1", withRA); got != 42*time.Second {
+	if got, _ := p.nextRateLimitBackoff(acc, "m1", withRA); got != 42*time.Second {
 		t.Fatalf("应信任上游 Retry-After, got %v", got)
 	}
 	if acc.backoffLevel["m1"] != before {

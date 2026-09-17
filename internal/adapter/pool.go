@@ -22,6 +22,10 @@ const (
 	// cooldownUnauthorized 是刷新后仍 401 的账号冷却时长：
 	// 多半是账号失效/权益异常，短时间重试没有意义。
 	cooldownUnauthorized = 10 * time.Minute
+	// cooldownQuotaExhausted 是额度耗尽（如需购买加量包）的账号级冷却时长。
+	// 这类限制不会自动重置，但也不是永久的（用户可能去买包/等次日重置），
+	// 2 小时后放一次探测流量比反复撞墙合理；控制台可随时手动解冻。
+	cooldownQuotaExhausted = 2 * time.Hour
 	// maxCooldown 是任何冷却的上限，防止异常数据把账号永久挂起。
 	maxCooldown = 24 * time.Hour
 
@@ -126,8 +130,9 @@ func modelKey(model string) string {
 
 // 冷却原因，用于控制台展示与调度决策。
 const (
-	reasonRateLimited  = "rate_limited"
-	reasonUnauthorized = "unauthorized"
+	reasonRateLimited    = "rate_limited"
+	reasonUnauthorized   = "unauthorized"
+	reasonQuotaExhausted = "quota_exhausted"
 )
 
 // AccountStatus 是单个账号的运行状态快照。
@@ -397,9 +402,18 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 
 		f := llm.Wrap(err)
 		switch {
+		case f.QuotaExhausted:
+			// 额度耗尽是**账号级**的：买一次加量包全号恢复，上游也没说
+			// 「切其他模型有用」。按模型逐个试错只会让每个模型都挨一次限流
+			// （实测同一账号三个模型各冷了 4h，全是同一个错误的重复代价）。
+			// 账号级长冷却，换号；控制台「清除冷却」可手动解冻。
+			p.markFailure(acc)
+			p.cooldownAccount(acc, cooldownQuotaExhausted, reasonQuotaExhausted, f.Message)
+			p.logfNow("账号 %s 额度耗尽，冷却 %s: %s",
+				acc.label, cooldownQuotaExhausted, f.Message)
 		case f.RateLimited:
-			// 限流是「账号 × 模型」维度的，只冷却该模型——同账号上其他模型
-			// 仍然可用（上游提示原话：「您也可以切换其他模型继续使用」）。
+			// 频率限制是「账号 × 模型」维度的（上游明说「可切换其他模型」），
+			// 只冷却该模型——同账号上其他模型仍然可用。
 			p.markFailure(acc)
 			// 上游给了精确重置时刻就完全信任它，不叠加退避等级；
 			// 没给才用指数退避。
