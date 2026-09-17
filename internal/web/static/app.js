@@ -1082,19 +1082,21 @@
       <thead><tr><th>${esc(t('mdl.id'))}</th>${m.accounts.map((a) => `<th class="mx-acct" title="${esc(a)}">${esc(a)}</th>`).join('')}</tr></thead>
       <tbody>${models.map((id) => `<tr>
         <td class="mono">${esc(id)}</td>
-        ${m.accounts.map((a) => modelCell(a, id, has[a].has(id), (cool[a] || {})[id])).join('')}
+        ${m.accounts.map((a) => modelCell(id, has[a].has(id), (cool[a] || {})[id])).join('')}
       </tr>`).join('')}</tbody>`;
   }
 
   // modelCell 渲染单个格子。
-  function modelCell(acct, model, supported, coolSecs) {
-    if (!supported) return '<td class="mx-cell"><span class="mx-no" title="' + esc(t('mx.unsupported')) + '">·</span></td>';
+  // 冷却态优先于 ✓：账号级冷却会把该账号全部模型标上剩余时间，
+  // 此时即使「支持」也要显示冷却——显示 ✓ 用户一试才知道整号被冷（实测踩到）。
+  function modelCell(model, supported, coolSecs) {
     if (coolSecs > 0) {
       // data-cool-until 让倒计时能每秒自更新（见 tickMatrixCooldowns）。
       const until = Date.now() + coolSecs * 1000;
       return `<td class="mx-cell"><span class="mx-cool" data-cool-until="${until}"
         title="${esc(t('mx.ratelimited'))}">⏳ <span class="mx-cd">${fmtCountdown(coolSecs)}</span></span></td>`;
     }
+    if (!supported) return '<td class="mx-cell"><span class="mx-no" title="' + esc(t('mx.unsupported')) + '">·</span></td>';
     return `<td class="mx-cell"><span class="mx-yes" title="${esc(t('mx.ok'))}">✓</span></td>`;
   }
 
@@ -1108,8 +1110,17 @@
     document.querySelectorAll('#modelTable [data-cool-until]').forEach((el) => {
       const left = Math.round((Number(el.dataset.coolUntil) - now) / 1000);
       if (left <= 0) {
-        // 冷却结束：不必等下一次 5s 刷新，立即显示为可用。
-        el.outerHTML = `<span class="mx-yes" title="${esc(t('mx.ok'))}">✓</span>`;
+        // 冷却结束：恢复为该格子的常态。常态不是 ✓——若模型本身不被该账号
+        // 支持，应回到 ·。查矩阵数据判定（比重新渲染整个表轻）。
+        const m = state.matrix;
+        const row = el.closest('tr');
+        const model = row?.querySelector('td.mono')?.textContent;
+        const acctIdx = [...el.closest('tr').querySelectorAll('td')].indexOf(el.closest('td')) - 1;
+        const acct = m?.accounts?.[acctIdx];
+        const supported = !!(m && acct && (m.matrix[acct] || []).includes(model));
+        el.outerHTML = supported
+          ? `<span class="mx-yes" title="${esc(t('mx.ok'))}">✓</span>`
+          : `<span class="mx-no" title="${esc(t('mx.unsupported'))}">·</span>`;
         return;
       }
       const cd = el.querySelector('.mx-cd');

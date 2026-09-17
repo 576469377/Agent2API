@@ -477,17 +477,40 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// accountCooldowns 从号池状态里取出「该账号上仍在冷却的模型」。
-	// 非号池适配器（单账号）没有这个概念，返回 nil。
+	// accountCooldowns 从号池状态取出每个账号的「模型 → 剩余冷却秒数」。
+	//
+	// 两个来源合并：
+	//   1. ModelCooldowns：模型级限流（同账号其他模型仍可用）
+	//   2. 账号级冷却（鉴权失效/额度耗尽/人工停用）：整号不可用，
+	//      该账号的**所有模型**都标上剩余时间——否则矩阵显示 ✓ 用户一试
+	//      才知道整个号都被冷了（截图实测踩到）。
+	// 非号池适配器没有这个概念，返回 nil。
 	accountCooldowns := func(adp adapter.Adapter) map[string]map[string]int {
 		lister, ok := adp.(accountStatusLister)
 		if !ok {
 			return nil
 		}
+		// 先取各账号的模型清单（账号级冷却要标记到它的全部模型上）。
+		modelLists := map[string][]string{}
+		if ml, ok := adp.(accountModelLister); ok {
+			modelLists = ml.ModelsByAccount(context.Background())
+		}
 		out := map[string]map[string]int{}
 		for _, st := range lister.Statuses() {
-			if len(st.ModelCooldowns) > 0 {
-				out[st.Label] = st.ModelCooldowns
+			merged := map[string]int{}
+			for m, secs := range st.ModelCooldowns {
+				merged[m] = secs
+			}
+			// 账号级冷却：整号所有模型都不可用，剩余时间一致。
+			if !st.Healthy && st.CooldownSecs > 0 && st.State != "disabled" {
+				for _, id := range modelLists[st.Label] {
+					if _, exists := merged[id]; !exists || merged[id] < st.CooldownSecs {
+						merged[id] = st.CooldownSecs
+					}
+				}
+			}
+			if len(merged) > 0 {
+				out[st.Label] = merged
 			}
 		}
 		return out
