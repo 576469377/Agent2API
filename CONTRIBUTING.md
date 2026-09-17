@@ -58,16 +58,20 @@ make test-race  # 竞态检测（CI 也跑）
 
 ## 新增上游平台
 
-架构上这是最受欢迎的一类贡献：
+架构上这是最受欢迎的一类贡献。多平台枢纽（Hub）已就绪，只需要实现适配器并注册：
 
-1. 在 `internal/adapter/<平台名>/` 下新建包
-2. 实现 `adapter.Adapter` 接口（3 个方法：`Stream` / `ListModels` / `Name`）
-3. 可选：实现 `adapter.Describer` / `adapter.Configurable`（用于控制台展示与热更新，不实现也能跑）
-4. 在 [`cmd/agent2api`](cmd/agent2api/) 里注册
+1. 在 `internal/adapter/<平台名>/` 下新建包，实现 `adapter.Adapter` 接口（3 个方法：`Stream` / `ListModels` / `Name`）
+2. 可选：实现 `adapter.Describer` / `adapter.Configurable`（用于控制台展示与热更新，不实现也能跑）
+3. 注册 5 个点（平台差异全部收口在这些位置，其余代码零改动）：
+   - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `newPlatformAdapter` 工厂（按平台构造适配器的分支）
+   - [`cmd/agent2api/main.go`](cmd/agent2api/main.go) 的 `supportedPlatforms` 集合（启动校验）
+   - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `platformDefaultPaths`（该平台的默认凭证位置，自动探测用）
+   - [`internal/config/config.go`](internal/config/config.go) 的 `autoPlatforms` 列表（零配置自动集成；列表顺序即默认平台优先级）
+   - [`internal/app/hub.go`](internal/app/hub.go) 的 `platformDefaultBaseURLs`（该平台默认上游地址）
 
-**三个下游协议编码器一行都不用改** —— 这是 IR 分层设计的核心收益。
+模型路由、`/v1/models` 合并、控制台多平台展示都由 Hub 通用处理，**三个下游协议编码器一行都不用改** —— 这是 IR 分层设计的核心收益。
 
-> 注：当前 `cmd` 里对平台有硬编码判断（仅允许 `workbuddy`），接入新平台时需要一并调整。若你计划做这件事，欢迎先开 Issue 讨论。
+> 若你计划接入新平台，欢迎先开 Issue 讨论。
 
 ## 代码风格
 

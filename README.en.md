@@ -2,7 +2,7 @@
 
 A local reverse-proxy gateway that translates AI agent platforms' private protocols into standard LLM APIs.
 
-**WorkBuddy / CodeBuddy** is supported today, exposed as OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages — so Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**.
+It exposes OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages — so Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**. A built-in multi-platform Hub lets several upstream platforms coexist in one process, routed by model name — the bundled platform today is **WorkBuddy / CodeBuddy**.
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.md) · [Disclaimer](DISCLAIMER.md)
 
@@ -11,6 +11,25 @@ A local reverse-proxy gateway that translates AI agent platforms' private protoc
 > [!WARNING]
 > **A personal learning and research project — not production software.** For use only with **your own authorized accounts**, on your own machine or a private environment, at your own risk.
 > It reads the **credentials** your desktop client is already logged in with (credentials = your account — never share them), and its operation **may not comply with upstream terms of service**. The author does not encourage or support commercial use or exposing it as a public service.
+
+---
+
+## Contents
+
+- [Background](#background)
+- [Quick Start](#quick-start)
+- [Web Console](#web-console)
+- [Multi-Account Pool](#multi-account-pool)
+- [Supported Endpoints](#supported-endpoints)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [FAQ](#faq)
+- [Known Limitations](#known-limitations)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -33,13 +52,16 @@ Claude Code / Codex / any OpenAI client
    WorkBuddy upstream
 ```
 
+With multiple platforms, the Hub routes each request by its `model` field to the upstream that owns it (see [Multi-platform config](#multi-platform-config-upstreamplatforms)).
+
 **Highlights**
 
 - **All three protocols at once**: Chat Completions / Responses / Anthropic Messages, streaming and non-streaming
 - **Reasoning**: the upstream's `reasoning_content` is passed through as each protocol's thinking output
 - **Tool calls**: native `tool_calls` channel, with fragment reassembly
 - **Credential reuse**: reads your desktop client's existing login — no re-authentication
-- **Multi-account pool**: add accounts when quota runs short; routed by account health, swapped on rate limits
+- **Multi-account pool**: add accounts when quota runs short; routed by account health, failed requests fail over automatically
+- **Multi-platform hub**: declare several upstreams via `upstream.platforms`; they share one process and are routed by model name. With zero config, every built-in platform is auto-integrated
 - **Content sanitization**: keeps client boilerplate from tripping upstream keyword review (required for Claude Code / Codex)
 - **Built-in console**: compiled into the single binary, no frontend build step, i18n + light/dark themes
 
@@ -100,6 +122,9 @@ curl http://127.0.0.1:8787/v1/responses \
   -d '{"model":"deepseek-v4-flash","input":"hello"}'
 ```
 
+> [!NOTE]
+> Swap `deepseek-v4-flash` in the examples for any model listed by `agent2api models`; unknown model names pass through to the default platform for the upstream to decide.
+
 ---
 
 ## Web Console
@@ -122,7 +147,7 @@ The console is compiled in with `go:embed`: no frontend build, no CDN dependenci
 
 ## Multi-Account Pool
 
-One account not enough quota? Put several credentials in a pool directory — the gateway routes across them automatically and swaps on rate limits.
+One account not enough quota? Put several credentials in a pool directory — the gateway routes across them automatically and fails over on errors.
 
 ```bash
 agent2api login -out auths/account-a.json    # log in one by one
@@ -137,15 +162,17 @@ You can also **add accounts** from the console's Accounts page (device-code logi
 | Situation | Behavior |
 |---|---|
 | Normal routing | Requests are picked by **weighted random** over account health — healthier accounts are chosen more often but never hog traffic. Sessions **stick to one account**, so long contexts don't drift between accounts |
-| Rate limited (429) | Only **that model on that account** cools down; other models keep working. If the upstream message states an exact reset time, the account thaws right on schedule; otherwise backoff grows exponentially |
-| Auth failed (401 after refresh) | The whole account cools down for 10 minutes |
+| Rate limited (429) **with** an exact reset time from upstream | Only **that model on that account** cools down until the stated time (capped at 24h), then the request fails over; other models on the same account keep working |
+| Rate limited (429) **without** a reset time | **No lockout**: the account's health score drops and the request fails over — a single ordinary rate limit must not suspend a whole account/model (real-world logs showed "one question, both accounts cooling") |
+| Quota exhausted (14018) | Also **no lockout**: the upstream `credits` field is a cost multiplier, not an account balance, and the upstream gives no recovery time. Health drops, request fails over, and free/cheap models on the same account keep working |
+| Auth failed (401 after refresh) | The whole account is marked **blocked** (terminal — it does not auto-recover). This is a dead account, not a rate limit; retrying is pointless. Recover via the console's **re-login** or **reset cooldown** |
 | Request fault (context too long, …) | Fail fast — switching accounts can't help |
-| Transport error / 5xx | Swap but don't cool down (could be a global blip), with pool-level backoff and jitter |
-| All cooling | Return 429 with the **earliest** thaw time; if everything is auth-failed instead, return 401 (retrying can never succeed) |
+| Transport error / 5xx | Fail over but don't cool down (could be a global blip), with pool-level backoff and jitter |
+| Model unservable pool-wide | Return 429 with the **earliest** thaw time, suggesting a different model; if everything is auth-failed instead, return 401 (retrying can never succeed) |
 
-The health score: success-rate EWMA×0.6 + latency EWMA×0.4, with a penalty for consecutive failures and shrinkage toward neutral on few samples. Exact backoff parameters live in [`internal/adapter/pool.go`](internal/adapter/pool.go).
+The health score: success-rate EWMA×0.6 + latency EWMA×0.4, with a penalty for consecutive failures and shrinkage toward neutral on few samples. Exact scheduling and cooldown parameters live in [`internal/adapter/pool.go`](internal/adapter/pool.go).
 
-The Accounts page also manages the pool at runtime: per-account scheduling state, login state and credential expiry, and usage (persisted across restarts). It supports **disable/enable** (temporarily pull an account out of rotation), **reset cooldown** (when upstream recovers early), and **re-login** (device-code login for a dropped account, writing back to the same file).
+The Accounts page also manages the pool at runtime: per-account scheduling state, login state and credential expiry, and usage (persisted across restarts). It supports **disable/enable** (temporarily pull an account out of rotation), **reset cooldown** (when upstream recovers early — also the recovery path for blocked accounts), and **re-login** (device-code login for a dropped account, writing back to the same file).
 
 > Desktop-client credentials and pool files can coexist — each account card is labeled with its source. The desktop client going offline **does not affect** the gateway: credentials are read once at startup and refreshed by the gateway itself.
 
@@ -179,10 +206,29 @@ Precedence: CLI flags > environment variables > config file > built-in defaults.
 | `-credential` | `AGENT2API_CREDENTIAL_PATH` | Credential file path; auto-detected when empty |
 | `-accounts-dir` | — | Pool directory; every `*.json` counts as one account |
 | `-base-url` | `AGENT2API_BASE_URL` | Upstream URL |
-| `-metrics-file` | — | Metrics persistence path |
+| `-metrics-file` | — | Metrics persistence path; defaults to `metrics.json` next to the config file, or `agent2api-metrics.json` in the working directory without one |
 | `-no-persist` | — | Disable metrics persistence |
 | `-no-sanitize` | — | Disable content sanitization |
-| `-platform` | — | Force a specific upstream platform (only `workbuddy` today; auto-detect by default, for debugging) |
+| `-platform` | — | Pin a single platform (only `workbuddy` today); by default all built-in platforms are auto-integrated |
+
+### Multi-platform config (upstream.platforms)
+
+To aggregate several upstream platforms in one gateway, declare them under `upstream.platforms`:
+
+```json
+{
+  "upstream": {
+    "platforms": [
+      { "id": "workbuddy", "accounts_dir": "auths", "sanitize": true }
+    ]
+  }
+}
+```
+
+- **Routing**: `/v1/models` merges every platform's catalog (each entry carries its `platform`); a request's `model` goes to the platform whose catalog contains it, and **unknown model names pass through to the default platform** (the first in the list) — preserving the single-platform "let upstream decide" semantics
+- **Field fallback**: a platform's `credential_path` / `accounts_dir` / `base_url` / timeout entries fall back to the top-level fields when omitted; platforms are fully isolated (separate pools, cooldowns, login sessions)
+- **⚠️ The `sanitize` exception**: a boolean can't distinguish "omitted" from "false" — when platforms are declared explicitly, **each one must state `"sanitize": true`** (required for Claude Code / Codex); omitting it turns sanitization off for that platform
+- **Zero config (default)**: all built-in platforms are auto-integrated (just workbuddy today); platforms that can't log in are skipped with a warning
 
 Subcommands:
 
@@ -190,7 +236,7 @@ Subcommands:
 |---|---|
 | `agent2api` | Start the gateway |
 | `agent2api login` | Device-code login |
-| `agent2api models` | List available models |
+| `agent2api models` | List available models (merged across platforms; `-platform` filters to one) |
 | `agent2api dedupe` | Remove duplicate/invalid credentials from a directory; previews by default, deletes with `-yes` |
 
 > [!NOTE]
@@ -227,6 +273,8 @@ internal/
 
 **Key design point**: `api/*` and `adapter/*` never import each other — they communicate only through `internal/llm`, collapsing "N platforms × M protocols" from N×M into N+M. Adding a platform requires no changes to the three downstream protocols.
 
+Multi-platform orchestration lives in the **Hub** ([`internal/app/hub.go`](internal/app/hub.go)): at startup each platform gets its own adapter / pool / login session, a "model ID → platform" index is built, requests are routed by model name, and unknown names pass through to the default platform. To the Hub, a `Pool` is just an ordinary Adapter — the multi-account and multi-platform layers don't know about each other.
+
 The interfaces are deliberately tiny: `Adapter` has just 3 methods (`Stream` / `ListModels` / `Name`) and `ResponseStream` just 1 (`Recv`). A fake adapter for tests costs about ten lines.
 
 See [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md) for the full design and [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md) for the upstream protocol teardown.
@@ -243,7 +291,26 @@ go test ./... -race
 
 Protocol translation uses **golden-frame replay**: sanitized real upstream samples live in [`fixtures/`](fixtures/) and are fed to the parser frame by frame, asserting the resulting **IR event sequence** rather than bytes — fully offline, never hitting upstream.
 
-12 packages, 123 test cases, `-race` clean. Core package coverage: `common` 94%, `obs` 94%, `llm` 89%, `adapter` 65%, `config` 58%, `app` 38%, `workbuddy` 55%.
+12 packages, roughly 120 test cases. Core package coverage (`make cover`, numbers drift with code): `common` 94%, `obs` 94%, `llm` 84%, `adapter` 64%, `config` 58%, `app` 38%, `workbuddy` 55%.
+
+---
+
+## FAQ
+
+**Startup fails with "all platforms failed to initialize" or `no_credential`?**
+No usable credentials on this machine. If the WorkBuddy / CodeBuddy desktop client is installed and logged in, it is detected automatically; otherwise run `agent2api login` first.
+
+**Claude Code connects, but every request gets blocked?**
+Do not disable sanitization (drop `-no-sanitize`). The client's fixed system-template security wording trips upstream keyword review.
+
+**What can `model` be?**
+Check `agent2api models` or the console's Models page for the models your account can actually use; unknown model names pass through to the default platform for the upstream to decide.
+
+**Why does a non-streaming request take as long to first byte as streaming?**
+The upstream only supports streaming; non-streaming responses are aggregated proxy-side, so there is nothing to return earlier.
+
+**How do I change the port / listen address?**
+`-port` / `-host` (or the matching environment variables, see [Configuration](#configuration)). If you expose it to your LAN, set `-api-key` as well.
 
 ---
 
@@ -259,7 +326,7 @@ Protocol translation uses **golden-frame replay**: sanitized real upstream sampl
 
 **Other behavior**
 
-- **Metrics persistence is on by default**: without a config file it writes `agent2api-metrics.json` to the working directory (contains usage stats). It is in `.gitignore`, but exclude it manually when packaging
+- **Metrics persistence is on by default**: it writes `metrics.json` next to the config file (`agent2api-metrics.json` in the working directory without a config file), containing usage stats (model names, accounts, platforms, token counts). It is in `.gitignore`, but exclude it manually when packaging
 - **"Add account" in the console needs a pool directory**: without one, credentials go to `~/.workbuddy`; configure `-accounts-dir` (or create `auths/`) and they join the pool automatically
 
 ---
@@ -267,7 +334,7 @@ Protocol translation uses **golden-frame replay**: sanitized real upstream sampl
 ## Roadmap
 
 - [ ] Pool circuit breaking and quota queries
-- [ ] A second platform adapter
+- [ ] A second platform adapter (Hub routing is ready; only the adapter is missing)
 - [ ] `cmd/probe` protocol drift detection
 
 ---
