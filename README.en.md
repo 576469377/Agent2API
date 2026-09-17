@@ -2,7 +2,7 @@
 
 A local reverse-proxy gateway that translates AI agent platforms' private protocols into standard LLM APIs.
 
-**WorkBuddy / CodeBuddy** is supported today. It exposes OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages — so Claude Code, Codex CLI, and any OpenAI/Anthropic client work **without modification**.
+**WorkBuddy / CodeBuddy** is supported today, exposed as OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages — so Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**.
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.md) · [Disclaimer](DISCLAIMER.md)
 
@@ -36,12 +36,12 @@ Claude Code / Codex / any OpenAI client
 **Highlights**
 
 - **All three protocols at once**: Chat Completions / Responses / Anthropic Messages, streaming and non-streaming
-- **Reasoning**: upstream `delta.reasoning_content` → `reasoning_content` / `thinking` blocks / reasoning summary
+- **Reasoning**: the upstream's `reasoning_content` is passed through as each protocol's thinking output
 - **Tool calls**: native `tool_calls` channel, with fragment reassembly
 - **Credential reuse**: reads your desktop client's existing login — no re-authentication
-- **Multi-account pool**: put several accounts in a pool and it routes across them by account health, swapping on rate limits
-- **Content sanitization**: dodges upstream keyword review (required for Claude Code / Codex)
-- **Built-in console**: compiled in via `go:embed`, no frontend build step, i18n + light/dark themes
+- **Multi-account pool**: add accounts when quota runs short; routed by account health, swapped on rate limits
+- **Content sanitization**: keeps client boilerplate from tripping upstream keyword review (required for Claude Code / Codex)
+- **Built-in console**: compiled into the single binary, no frontend build step, i18n + light/dark themes
 
 ---
 
@@ -54,12 +54,14 @@ go install github.com/576469377/Agent2API/cmd/agent2api@latest
 # Option 2: build from source
 git clone https://github.com/576469377/Agent2API && cd Agent2API
 make build                     # produces bin/agent2api
+```
 
+**No configuration required.** The gateway auto-detects your desktop client's existing login; without one, use `agent2api login` for device-code login.
+
+```bash
 agent2api                      # starts on 127.0.0.1:8787
 agent2api models               # list available models
 ```
-
-**No configuration required**: it auto-detects your desktop client's existing login. Without a desktop client, use `agent2api login` for device-code login.
 
 The banner prints the console URL — open it in a browser to manage the gateway.
 
@@ -102,27 +104,25 @@ curl http://127.0.0.1:8787/v1/responses \
 
 ## Web Console
 
-Compiled into the binary with `go:embed` — no frontend build, no CDN dependencies, native SVG charts. Visit `http://127.0.0.1:8787`:
+The console is compiled in with `go:embed`: no frontend build, no CDN dependencies (charts are native SVG). Visit `http://127.0.0.1:8787` after starting.
 
 | Page | What it shows |
 |---|---|
-| **Overview** | Status wall, request trend, token usage, per-protocol/model/**account** rankings; auto-refresh with countdown |
-| **Accounts** | Pool management: scheduling state, login state and credential expiry, **per-account usage**; enable/disable, reset cooldown, re-login, add account |
-| **Chat** | Talk to the gateway directly to verify protocols and models; tables & math rendering |
+| **Overview** | Status wall, request trend, token usage, per-protocol/model/account rankings; auto-refresh with countdown |
+| **Accounts** | Pool management: scheduling and login state, credential expiry, per-account usage; enable/disable, reset cooldown, re-login, add account |
+| **Chat** | Talk to the gateway directly to verify protocols and models |
 | **Platforms** | Upstream URL, account count, model count, health |
-| **Models** | Model list with capability tags; switchable **account × model matrix** |
-| **Request Log** | Last 200 requests (with the account actually used), failed rows highlighted |
+| **Models** | Model list with capability tags; switchable account × model matrix |
+| **Request Log** | Last 200 requests (annotated with the account actually used), failed rows highlighted |
 | **Settings** | Sanitization toggle (hot reload), model refetch, access key, effective config |
 
-![Console · Accounts](docs/images/console-accounts.png)
-
-> Account names in the screenshot are demo data. Only **math rendering** lazily loads KaTeX on first use and degrades to plain text offline.
+> Only the Chat page's **math rendering** lazily loads KaTeX from a CDN on first use; offline it falls back to plain monospace text. Everything else has zero external dependencies.
 
 ---
 
 ## Multi-Account Pool
 
-One account not enough quota? Put several credentials in a pool directory — the gateway routes across them by account health and swaps accounts on rate limits.
+One account not enough quota? Put several credentials in a pool directory — the gateway routes across them automatically and swaps on rate limits.
 
 ```bash
 agent2api login -out auths/account-a.json    # log in one by one
@@ -130,20 +130,22 @@ agent2api login -out auths/account-b.json
 agent2api -accounts-dir auths                 # start (auto-enabled if ./auths exists)
 ```
 
-You can also **add accounts** from the console's Accounts page (device-code login); credentials are written to disk and picked up by **hot reload** (directory scanned every 10s — no restart needed).
+You can also **add accounts** from the console's Accounts page (device-code login): credentials are written to disk and picked up by hot reload, which scans the directory every 10 seconds — no restart needed.
 
-**Scheduling semantics**
+### Scheduling semantics
 
 | Situation | Behavior |
 |---|---|
-| Routing | Requests are picked by **weighted random** over account health (success-rate EWMA×0.6 + latency EWMA×0.4, consecutive failures penalized; scores shrink toward neutral on few samples) — healthier accounts are picked more but never hog traffic, and a fresh pool degrades to even rotation. Sessions also **stick to one account** (identified via `metadata.user_id` / `user`), so long contexts don't drift between accounts |
-| Rate limited (429) | Cool down **that model on that account** and swap (other models on the same account keep working); the cooldown parses the upstream's exact reset time (e.g. "resets at 23:21:31") and thaws on schedule — exponential backoff otherwise (10s floor, 60s base, 24h cap) |
-| Auth failed (401 after refresh) | 10-minute cooldown of the whole account |
-| Request fault (context too long, …) | Fail fast — rotating accounts can't help |
+| Normal routing | Requests are picked by **weighted random** over account health — healthier accounts are chosen more often but never hog traffic. Sessions **stick to one account**, so long contexts don't drift between accounts |
+| Rate limited (429) | Only **that model on that account** cools down; other models keep working. If the upstream message states an exact reset time, the account thaws right on schedule; otherwise backoff grows exponentially |
+| Auth failed (401 after refresh) | The whole account cools down for 10 minutes |
+| Request fault (context too long, …) | Fail fast — switching accounts can't help |
 | Transport error / 5xx | Swap but don't cool down (could be a global blip), with pool-level backoff and jitter |
-| All cooling | Return 429 with the **earliest** thaw time; all auth-failed returns 401 (retrying can never succeed) |
+| All cooling | Return 429 with the **earliest** thaw time; if everything is auth-failed instead, return 401 (retrying can never succeed) |
 
-**Account management in the console**: per-account scheduling state (▸ marks the next one used), login state and credential expiry, per-account usage (persisted across restarts); supports **disable/enable** (temporarily pull an account out of scheduling), **reset cooldown** (when upstream recovers early), and **re-login** (device-code login for a dropped account, writing back to the same file).
+The health score: success-rate EWMA×0.6 + latency EWMA×0.4, with a penalty for consecutive failures and shrinkage toward neutral on few samples. Exact backoff parameters live in [`internal/adapter/pool.go`](internal/adapter/pool.go).
+
+The Accounts page also manages the pool at runtime: per-account scheduling state, login state and credential expiry, and usage (persisted across restarts). It supports **disable/enable** (temporarily pull an account out of rotation), **reset cooldown** (when upstream recovers early), and **re-login** (device-code login for a dropped account, writing back to the same file).
 
 > Desktop-client credentials and pool files can coexist — each account card is labeled with its source. The desktop client going offline **does not affect** the gateway: credentials are read once at startup and refreshed by the gateway itself.
 
@@ -160,7 +162,7 @@ You can also **add accounts** from the console's Accounts page (device-code logi
 | `GET /health` | Health check | — | ✅ |
 | `GET /` | Web console | — | ✅ |
 
-Text, reasoning, tool calls, multi-turn, system prompts, sampling parameters, image input.
+Supported features: text, reasoning, tool calls, multi-turn conversation, system prompts, sampling parameters, image input.
 
 ---
 
@@ -182,10 +184,17 @@ Precedence: CLI flags > environment variables > config file > built-in defaults.
 | `-no-sanitize` | — | Disable content sanitization |
 | `-platform` | — | Force a specific upstream platform (only `workbuddy` today; auto-detect by default, for debugging) |
 
-Subcommands: `agent2api` (serve), `agent2api login` (device-code login), `agent2api models` (list models), `agent2api dedupe` (remove duplicate/invalid credentials from a credential directory; previews by default, deletes with `-yes`, defaults to `~/.workbuddy`, override with `-dir`).
+Subcommands:
+
+| Command | Purpose |
+|---|---|
+| `agent2api` | Start the gateway |
+| `agent2api login` | Device-code login |
+| `agent2api models` | List available models |
+| `agent2api dedupe` | Remove duplicate/invalid credentials from a directory; previews by default, deletes with `-yes` |
 
 > [!NOTE]
-> `server.write_timeout_sec` and `log.level` / `log.format` are **not read** at the moment (streaming responses deliberately have no write timeout; log level/format are not implemented yet) — kept for backward compatibility.
+> `server.write_timeout_sec` and `log.level` / `log.format` are not read at the moment (streaming responses deliberately have no write timeout; log level/format are not implemented yet) — kept for backward compatibility.
 
 ---
 
@@ -218,7 +227,7 @@ internal/
 
 **Key design point**: `api/*` and `adapter/*` never import each other — they communicate only through `internal/llm`, collapsing "N platforms × M protocols" from N×M into N+M. Adding a platform requires no changes to the three downstream protocols.
 
-`Adapter` has just 3 methods (`Stream` / `ListModels` / `Name`) and `ResponseStream` has just 1 (`Recv`), so faking an adapter for tests costs almost nothing.
+The interfaces are deliberately tiny: `Adapter` has just 3 methods (`Stream` / `ListModels` / `Name`) and `ResponseStream` just 1 (`Recv`). A fake adapter for tests costs about ten lines.
 
 See [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md) for the full design and [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md) for the upstream protocol teardown.
 
@@ -244,13 +253,13 @@ Protocol translation uses **golden-frame replay**: sanitized real upstream sampl
 
 - **Upstream does not support non-streaming requests**: non-streaming responses are aggregated proxy-side, so TTFB matches streaming
 - **Single process, single instance**: cooldown state lives in memory; multiple instances cool down independently and will hammer upstream
-- **Quota query endpoint not implemented**: that upstream route requires enterprise privileges (403)
+- **Quota query not implemented**: that upstream route requires enterprise privileges (403)
+- **Reasoning is one-way**: the upstream sends no thinking signature — Anthropic `thinking` blocks always carry an empty signature, and each turn re-reasons from scratch
 - **DSML text-mode tool-call fallback not implemented**: upstream currently uses native `tool_calls`; it must be added if upstream ever regresses
-- **Reasoning is one-way**: the upstream only emits `reasoning_content` on responses and without a signature — Anthropic `thinking` blocks always carry `"signature": ""`, and assistant thinking is never replayed upstream (each turn re-reasons from scratch); revisit if the upstream ever validates signatures
 
 **Other behavior**
 
-- **Metrics persistence is on by default**: without a config file it writes `agent2api-metrics.json` to the working directory (contains usage stats). It is in `.gitignore`, but **exclude it manually when packaging**
+- **Metrics persistence is on by default**: without a config file it writes `agent2api-metrics.json` to the working directory (contains usage stats). It is in `.gitignore`, but exclude it manually when packaging
 - **"Add account" in the console needs a pool directory**: without one, credentials go to `~/.workbuddy`; configure `-accounts-dir` (or create `auths/`) and they join the pool automatically
 
 ---
