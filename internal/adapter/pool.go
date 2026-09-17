@@ -305,33 +305,44 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 	tried := map[int]bool{}
 	if req.SessionKey != "" {
 		sk = req.SessionKey
+		// 亲和查找必须在 p.mu 内完成：accounts 切片会被 poolwatch 的 Add
+		// 并发 append（扩容重分配期间锁外读可撕裂），modelCooldown 会被
+		// 限流路径并发写（map 并发读写是不可恢复的 fatal panic）。
 		p.mu.Lock()
 		bound, has := p.affinity.get(sk)
-		p.mu.Unlock()
+		var boundIdx = -1
+		var boundAcc *poolAccount
 		if has {
 			for idx, acc := range p.accounts {
-				if acc.label != bound || !acc.available(time.Now(), req.Model) {
-					continue
+				if acc.label == bound && acc.available(time.Now(), req.Model) {
+					boundIdx, boundAcc = idx, acc
+					break
 				}
-				tried[idx] = true
-				s, err := acc.adp.Stream(ctx, req)
-				if err == nil {
-					bs, probeErr := probeFirstEvent(ctx, s)
-					if probeErr == nil {
-						return &labeledStream{ResponseStream: bs, label: acc.label}, nil
-					}
-					_ = closeStream(s)
-					err = probeErr
-				}
-				// 亲和账号失败：解绑，错误带入正常换号循环。
-				lastErr = err
-				p.affinity.delete(sk)
-				break
 			}
-			if lastErr == nil {
+			if boundIdx < 0 {
 				// 绑定的账号不在池里或不可用：解绑走正常调度。
 				p.affinity.delete(sk)
 			}
+		}
+		p.mu.Unlock()
+
+		if boundAcc != nil {
+			tried[boundIdx] = true
+			s, err := boundAcc.adp.Stream(ctx, req)
+			if err == nil {
+				bs, probeErr := probeFirstEvent(ctx, s)
+				if probeErr == nil {
+					return &labeledStream{ResponseStream: bs, label: boundAcc.label}, nil
+				}
+				_ = closeStream(s)
+				err = probeErr
+			}
+			// 亲和账号失败：解绑（持锁——affinity 表是裸 map），错误带入
+			// 正常换号循环。
+			lastErr = err
+			p.mu.Lock()
+			p.affinity.delete(sk)
+			p.mu.Unlock()
 		}
 	}
 
@@ -392,10 +403,10 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			p.markFailure(acc)
 			// 上游给了精确重置时刻就完全信任它，不叠加退避等级；
 			// 没给才用指数退避。
-			d := p.nextRateLimitBackoff(acc, req.Model, f)
+			d, level := p.nextRateLimitBackoff(acc, req.Model, f)
 			p.cooldownModel(acc, req.Model, d, f.Message)
 			p.logfNow("账号 %s 的模型 %s 触发限流，冷却 %s（第 %d 级）: %s",
-				acc.label, req.Model, d.Truncate(time.Second), acc.backoffLevel[modelKey(req.Model)], f.Message)
+				acc.label, req.Model, d.Truncate(time.Second), level, f.Message)
 		case f.Unauthorized:
 			// 单个适配器内部已尝试过刷新重试；仍 401 说明账号大概率失效。
 			// 这是**账号级**终态（与模型无关）。
@@ -632,7 +643,7 @@ func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]boo
 // 上游给了精确重置时刻 → 完全信任，不动等级（它比我们的猜测准得多）。
 // 否则按等级指数退避，且只在「该模型的上一个冷却窗口已过期」时才升级——
 // 否则并发的一批失败会把等级一次冲到顶。
-func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failure) time.Duration {
+func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failure) (time.Duration, int) {
 	if f.RetryAfterSeconds > 0 {
 		d := time.Duration(f.RetryAfterSeconds) * time.Second
 		if d > maxCooldown {
@@ -641,25 +652,24 @@ func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failu
 		if d < time.Second {
 			d = time.Second
 		}
-		return d
+		return d, -1 // 上游精确时刻，无等级概念
 	}
 	key := modelKey(model)
+	// 读取-判定-升级-写回在同一临界区：否则错峰读取会让一批并发失败
+	// 把退避等级逐个推高（实测 2→4、4→7 跳档）。
 	p.mu.Lock()
 	level := acc.backoffLevel[key]
 	until := acc.modelCooldown[key]
-	p.mu.Unlock()
-
-	// 冷却窗口未关：沿用「当前已生效的那一档」，不重算也不升级。
 	if until.After(time.Now()) {
-		return p.backoffDuration(level - 1)
+		p.mu.Unlock()
+		return p.backoffDuration(level - 1), level
 	}
 	d := p.backoffDuration(level)
-	p.mu.Lock()
-	if acc.backoffLevel[key] == level && acc.backoffLevel[key] < 16 {
-		acc.backoffLevel[key]++
+	if level < 16 {
+		acc.backoffLevel[key] = level + 1
 	}
 	p.mu.Unlock()
-	return d
+	return d, level
 }
 
 // backoffDuration 由等级换算时长，带上限与地板。

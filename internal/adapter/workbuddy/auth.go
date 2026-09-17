@@ -178,6 +178,10 @@ type Auth struct {
 	cli  *httpClient
 	// CredentialPath 非空时，刷新成功后回写磁盘。
 	credentialPath string
+	// refreshing 表示一次刷新正在进行（两段式刷新的中间态）。
+	// 刷新的网络 I/O 在锁外执行，否则上游变慢时（最长 20s）
+	// 同账号的所有并发请求都会阻塞在 BuildHeaders 的锁上。
+	refreshing bool
 }
 
 func newAuth(cli *httpClient, cred *Credential, path string) *Auth {
@@ -214,13 +218,32 @@ func (c *Credential) expiresSoon() bool {
 }
 
 // EnsureValid 保证凭证有效，必要时刷新一次。
+// EnsureValid 保证凭证有效，必要时刷新一次。
+//
+// 两段式：锁内只做「检查过期 → 抢占刷新权」，网络 I/O 与磁盘写回在锁外。
+// 否则刷新最长占锁 20 秒（上游变慢时），同账号的所有并发请求都会
+// 阻塞在 BuildHeaders 上。已刷新失败的并发请求拿到的错误与直接刷新一致。
 func (a *Auth) EnsureValid() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if !a.cred.expiresSoon() {
+		a.mu.Unlock()
 		return nil
 	}
-	return a.refreshLocked()
+	if a.refreshing {
+		// 别的 goroutine 正在刷新：不排队等（会阻塞请求路径），
+		// 用当前凭证继续——旧 token 大概率仍有效；真失效了下次再刷。
+		a.mu.Unlock()
+		return nil
+	}
+	a.refreshing = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.refreshing = false
+		a.mu.Unlock()
+	}()
+
+	return a.Refresh()
 }
 
 // Refresh 强制刷新 token。

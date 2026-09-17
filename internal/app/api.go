@@ -408,11 +408,10 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// 把实际落盘位置带回去：前端要在成功提示里告诉用户「凭证在哪、
 	// 怎么让它进号池」。
-	out := struct {
-		*loginSession
+	writeJSON(w, struct {
+		*loginSnapshot
 		AccountsDir string `json:"accounts_dir_used"`
-	}{sess, dir}
-	writeJSON(w, out)
+	}{sess, dir})
 }
 
 // apiLoginStatus 轮询一次登录会话。

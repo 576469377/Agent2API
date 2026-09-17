@@ -69,7 +69,7 @@ func newLoginManager(logf func(string, ...any)) *loginManager {
 
 // Start 发起一次登录，立刻返回会话（含授权 URL）。
 // platform 决定登录方式；当前仅实现 workbuddy 的设备码授权。
-func (m *loginManager) Start(platform, outPath string) (*loginSession, error) {
+func (m *loginManager) Start(platform, outPath string) (*loginSnapshot, error) {
 	s := &loginSession{
 		ID:        newSessionID(),
 		Status:    loginPending,
@@ -127,32 +127,64 @@ func (m *loginManager) Start(platform, outPath string) (*loginSession, error) {
 		m.logf("登录成功: %s", s.Account)
 	}()
 
-	// 等一小会儿拿授权 URL：拿不到也不算失败（用户可能已经在别处完成），
-	// 前端可以继续轮询状态。
+	// 等一小会儿拿授权 URL：拿不到也不算失败（前端轮询时会看到）。
+	// 注意：登录 goroutine 持锁写 AuthURL，这里也持锁读——15s 超时只是
+	// 决定「Start 要不要等」，不影响 URL 最终可见（Get 快照会带上）。
 	select {
 	case u := <-urlReady:
 		m.mu.Lock()
 		s.AuthURL = u
 		m.mu.Unlock()
 	case <-time.After(15 * time.Second):
-		m.logf("等待授权 URL 超时（继续在后台完成登录）")
+		m.logf("等待授权 URL 超时（继续在后台完成登录，URL 可稍后从轮询获取）")
 	}
-	return s, nil
+	// 返回锁内快照（s 的字段还会被登录 goroutine 写）。
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return &loginSnapshot{
+		ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, OutPath: s.OutPath,
+		Account: s.Account, Error: s.Error, StartedAt: s.StartedAt,
+	}, nil
 }
 
-// Get 查询会话状态。已完成且过期的会话会被清理。
-func (m *loginManager) Get(id string) (*loginSession, error) {
+// loginSnapshot 是会话状态的不可变快照。
+// 直接返回 *loginSession 会与登录 goroutine 的字段写入构成数据竞争
+// （撕裂读），所以查询时在锁内复制一份。
+type loginSnapshot struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"`
+	AuthURL   string    `json:"auth_url,omitempty"`
+	OutPath   string    `json:"out_path,omitempty"`
+	Account   string    `json:"account,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// Get 查询会话状态（锁内快照）。已完成且过期的会话会被清理；
+// 超过 24h 从未被查询的会话也顺带清理（防无界增长）。
+func (m *loginManager) Get(id string) (*loginSnapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return nil, &llm.Failure{Code: "login_not_found", Message: "登录会话不存在或已过期", ClientFixable: true}
 	}
-	if !s.doneAt.IsZero() && time.Since(s.doneAt) > loginSessionTTL {
+	now := time.Now()
+	if !s.doneAt.IsZero() && now.Sub(s.doneAt) > loginSessionTTL {
 		delete(m.sessions, id)
 		return nil, &llm.Failure{Code: "login_not_found", Message: "登录会话已过期", ClientFixable: true}
 	}
-	return s, nil
+	// 顺带清理：启动超过 24h 的会话无论是否完成都回收
+	//（正常流程几秒到几分钟就结束，24h 还在说明客户端早丢了）。
+	for k, other := range m.sessions {
+		if now.Sub(other.StartedAt) > 24*time.Hour {
+			delete(m.sessions, k)
+		}
+	}
+	return &loginSnapshot{
+		ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, OutPath: s.OutPath,
+		Account: s.Account, Error: s.Error, StartedAt: s.StartedAt,
+	}, nil
 }
 
 func newSessionID() string {

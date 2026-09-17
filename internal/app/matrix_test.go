@@ -25,7 +25,21 @@ func TestMatrixExposesModelCooldowns(t *testing.T) {
 	pool.Add("acct-b.json", &mxAd{})
 
 	// 触发 acct-a 上 model-x 的限流冷却。
-	_, _ = pool.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	// 注意：亲和会让成功的会话粘住账号（先选中 b 就一直 b），所以要
+	// 用**不同 SessionKey 且清空亲和**的方式强制命中 a——最直接的办法
+	// 是直接往池里塞一个使用 a 的请求直到 a 被冷却。
+	for i := 0; i < 50; i++ {
+		_, _ = pool.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+		aCooled := false
+		for _, st := range pool.Statuses() {
+			if st.Label == "acct-a.json" && st.ModelCooldowns["model-x"] > 0 {
+				aCooled = true
+			}
+		}
+		if aCooled {
+			break
+		}
+	}
 
 	// 用与生产相同的方式构造 App（hub 包号池）。
 	cfg := config.Default()
