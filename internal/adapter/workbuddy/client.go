@@ -233,6 +233,17 @@ func httpError(status int, raw []byte, retryAfter string) error {
 			f.RetryAfterSeconds = secs
 		}
 	}
+	// 「额度已用尽」类业务码（嵌套在 error.data.code，如 14018）与频率限制
+	// 不同：频率限制到点重置，额度耗尽要花钱买加量包——几个小时后重试
+	// 只会再挨一次限流。识别它并给长冷却（4h，覆盖典型工作时间），
+	// 号池会在此期间把请求导向其他账号/其他模型。
+	if code := nestedBusinessCode(raw); code == 14018 {
+		f.Code = fmt.Sprintf("upstream_%d", code)
+		f.RateLimited = true
+		if f.RetryAfterSeconds <= 0 {
+			f.RetryAfterSeconds = int(quotaExhaustedCooldown.Seconds())
+		}
+	}
 	// 上游限流消息自带精确的重置时刻（例：「您的使用量已超出频率限制，
 	// 将在 2026-09-16 23:21:31 UTC+8 重置」）。解析出来填进 RetryAfterSeconds，
 	// 号池就能做「到点解冻」的精确冷却，而不是拍一个固定时长。
@@ -273,6 +284,26 @@ func resetEpochFromMsg(msg string) int {
 		return 0
 	}
 	return int(t.Unix())
+}
+
+// quotaExhaustedCooldown 是「额度耗尽」类业务码的冷却时长。
+// 这类限制不会自动重置（要购买加量包），短冷却只会反复撞墙。
+const quotaExhaustedCooldown = 4 * time.Hour
+
+// nestedBusinessCode 从响应体里提取嵌套的业务错误码（error.data.code）。
+// 上游把业务码放在 error.data 里而非顶层，envelope 解析不到。
+func nestedBusinessCode(raw []byte) int {
+	var probe struct {
+		Error struct {
+			Data struct {
+				Code int `json:"code"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(decodeBytes(raw), &probe); err != nil {
+		return 0
+	}
+	return probe.Error.Data.Code
 }
 
 // decodeBytes 解码上游字节。上游偶发返回非 UTF-8（如 GBK），按 utf8 → GBK → GB18030 → 替换 兜底。

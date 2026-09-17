@@ -260,14 +260,19 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 	return nil, lastErr
 }
 
-// shouldRetryDial 判断连接失败是否值得重拨：传输层断裂或 5xx/429。
+// shouldRetryDial 判断连接失败是否值得**在同一账号上**重拨。
+//
+// 只重拨传输层断裂与 5xx：这些是「这一下没打出去」，同账号再试有意义。
+// 限流/鉴权**不**在这里重试——限流换多少次都还是限流（重试只是把同一
+// 账号多打几顿、拖长失败时间），号池层会冷却该模型并换其他账号；
+// 鉴权由 401 分支的凭证刷新处理。
 func shouldRetryDial(err error) bool {
 	if isRetryableTransportError(err) {
 		return true
 	}
 	var f *llm.Failure
 	if errors.As(err, &f) {
-		if f.RateLimited || f.UpstreamFault {
+		if f.UpstreamFault {
 			return true
 		}
 	}
