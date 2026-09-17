@@ -49,6 +49,11 @@ type Record struct {
 	// Platform 是本次请求实际路由到的上游平台 ID（多平台集成时的归因字段）。
 	Platform string `json:"platform,omitempty"`
 
+	// ModelRequested 是客户端**请求里写的**模型名，仅当它与 Model（实际发往
+	// 上游的名字）不同时才记录——即命中了 models.aliases 的别名。
+	// 控制台据此回答「这条 claude-sonnet-4-5 的请求实际用了哪个模型」。
+	ModelRequested string `json:"model_requested,omitempty"`
+
 	// GenMs 是本次请求的「生成耗时」（毫秒）：从上游开始产出算起，到流结束或被中断为止。
 	// 它是 TPS 的分母，与 DurationMs（含建连、解码、写回）语义不同。
 	// 0 表示**未测量**（失败请求、未产出 token、或来自无该字段的旧指标文件），

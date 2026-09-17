@@ -270,7 +270,7 @@ func TestHttpErrorParsesResetTime(t *testing.T) {
 }
 
 // TestQuotaExhaustedClassification 验证「额度耗尽」（code 14018）的分类：
-// 标记 QuotaExhausted（号池据此做账号级长冷却）+ RateLimited（换号依据）。
+// 标记 QuotaExhausted + RateLimited（号池据此走「不加锁、换下一个」的路径）。
 // 实测该错误嵌套在 error.data.code 里（如 {"error":{"data":{"code":14018,...}}}），
 // envelope 顶层解析不到，必须走 nestedBusinessCode。
 func TestQuotaExhaustedClassification(t *testing.T) {
@@ -279,5 +279,13 @@ func TestQuotaExhaustedClassification(t *testing.T) {
 	f := llm.Wrap(err)
 	if !f.QuotaExhausted || !f.RateLimited {
 		t.Fatalf("14018 应标 QuotaExhausted+RateLimited: %+v", f)
+	}
+	// 消息必须是嵌套里那句可读文案，而不是整段转义 JSON——它会被原样返回给
+	// 客户端（嵌套形态下不再有账号级冷却兜底，这层文案就是用户看到的东西）。
+	if strings.Contains(f.Message, `"code"`) || strings.Contains(f.Message, `\"`) {
+		t.Fatalf("14018 的 Message 应是可读文案而非裸 JSON, got %q", f.Message)
+	}
+	if !strings.Contains(f.Message, "额度已用尽") {
+		t.Fatalf("应提取 error.data.msg 作为 Message, got %q", f.Message)
 	}
 }

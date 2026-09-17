@@ -45,6 +45,7 @@
       'acct.relogin': 'Re-login', 'acct.disable': 'Disable', 'acct.enable': 'Enable',
       'acct.reset': 'Reset cooldown', 'acct.state': 'State', 'acct.cool': 'Cooldown left',
       'acct.modelslimited': 'models limited',
+      'acct.inflight': 'in-flight / limit',
       'acct.usage': 'Usage', 'acct.success': 'Success rate', 'acct.lasterr': 'Last error',
       'acct.src': 'Source', 'acct.srcdesktop': 'Desktop client', 'acct.srcfile': 'Pool file',
       'login.ok': 'valid until', 'login.expiring': 'expiring soon (auto-refresh)',
@@ -59,6 +60,7 @@
       'mx.ratelimited': 'rate limited (cooldown)', 'mx.nodata': 'No matrix data',
       'mx.nodatahint': 'Requires pool mode; switch back to list view for single-account mode',
       'mx.accooled': 'accounts fully cooled', 'mx.acccool': 'whole account cooled (not per-model)',
+      'mx.load': 'in-flight / concurrency limit',
       'mdl.id': 'Model ID', 'mdl.name': 'Name', 'mdl.ctx': 'Context', 'mdl.maxout': 'Max output',
       'mdl.cap': 'Capabilities', 'mdl.tools': 'tools', 'mdl.think': 'thinking', 'mdl.vision': 'vision',
       'mdl.default': 'default', 'mdl.nomodel': 'No models returned by upstream',
@@ -101,6 +103,7 @@
       'acct.relogin': '重新登录', 'acct.disable': '停用', 'acct.enable': '启用',
       'acct.reset': '清除冷却', 'acct.state': '状态', 'acct.cool': '剩余冷却',
       'acct.modelslimited': '个模型限流',
+      'acct.inflight': '在途/并发上限',
       'acct.usage': '用量', 'acct.success': '成功率', 'acct.lasterr': '最近错误',
       'acct.src': '来源', 'acct.srcdesktop': '桌面客户端', 'acct.srcfile': '号池文件',
       'login.ok': '有效至', 'login.expiring': '凭证即将过期（网关会自动刷新）',
@@ -115,6 +118,7 @@
       'mx.ratelimited': '限流冷却中', 'mx.nodata': '暂无矩阵数据',
       'mx.nodatahint': '需要号池模式；单账号模式请切回列表视图',
       'mx.accooled': '个账号整号冷却', 'mx.acccool': '整号冷却（非按模型）',
+      'mx.load': '在途请求 / 并发上限',
       'mdl.id': '模型 ID', 'mdl.name': '名称', 'mdl.ctx': '上下文', 'mdl.maxout': '最大输出',
       'mdl.cap': '能力', 'mdl.tools': '工具', 'mdl.think': '思考', 'mdl.vision': '视觉',
       'mdl.default': '默认', 'mdl.nomodel': '上游未返回任何模型',
@@ -880,6 +884,13 @@
       : t('acct.srcfile');
     acts.push(`<button class="btn btn-xs" data-acct="relogin" data-label="${esc(a.label)}" data-path="${esc(id.credential_path || '')}" title="${esc(reloginTip)}">重新登录</button>`);
 
+    // 并发负载：在途 / 上限。上限未配置时只显示在途数；两者都为 0 时整行不显示
+    //（空闲账号不需要多一行噪声）。
+    const maxC = a.max_concurrency || 0;
+    const loadRow = (maxC > 0 || (a.in_flight || 0) > 0)
+      ? `<dt>${esc(t('acct.inflight'))}</dt><dd>${maxC > 0 ? `${a.in_flight || 0}/${maxC}` : `${a.in_flight || 0}`}</dd>`
+      : '';
+
     return `<div class="acct acct-manage" data-level="${lv}"${a.is_next ? ' data-next' : ''}>
       <div class="acct-top">
         <span class="acct-name" title="${esc(a.label)}">${a.is_next ? '▸ ' : ''}${esc(name)}</span>
@@ -888,6 +899,7 @@
       <dl class="acct-kv">
         <dt>来源</dt><dd>${srcBadge}</dd>
         <dt>登录</dt><dd class="${loginLv ? 'kv-' + loginLv : ''}" title="${esc(loginTxt)}">${esc(loginTxt)}</dd>
+        ${loadRow}
         ${usageRow}
         ${mcList.length ? `<dt>${esc(t('acct.modelslimited'))}</dt><dd title="${esc(mcList.map(([m, s2]) => `${m} (${fmtCountdown(s2)})`).join('\n'))}">${esc(mcList.map(([m, s2]) => `${m} · ${fmtCountdown(s2)}`).join('、'))}</dd>` : ''}
         ${a.last_error ? `<dt>最近错误</dt><dd title="${esc(a.last_error)}">${esc(a.last_error)}</dd>` : ''}
@@ -1069,6 +1081,8 @@
     const models = q ? m.models.filter((x) => x.toLowerCase().includes(q)) : m.models;
     const cool = m.cooldowns || {};        // 模型级：账号 → 模型 → 剩余秒
     const acctCool = m.account_cooldowns || {};  // 账号级：账号 → 剩余秒（整号）
+    const load = m.in_flight || {};             // 账号 → 在途请求数
+    const maxConc = m.max_concurrency || 0;     // 每账号并发上限（0 = 不限）
 
     // 统计被限的格子数（仅模型级），写进副标题——一眼看出池子健康度。
     let coolingCells = 0;
@@ -1085,14 +1099,19 @@
     const has = {};
     for (const acc of m.accounts) has[acc] = new Set(m.matrix[acc] || []);
 
-    // 列头：账号名 + 若整号冷却则附上剩余时间（只标一次，不污染每个格子）。
+    // 列头：账号名 + 整号冷却剩余时间（只标一次）+ 在途负载。
+    // 负载显示为「在途/上限」（未设上限时只显示在途数），让用户一眼看出
+    // 号池是被打满还是空闲——限流频繁时据此决定加号还是调上限。
     host.innerHTML = `
       <thead><tr><th>${esc(t('mdl.id'))}</th>${m.accounts.map((a) => {
         const secs = acctCool[a] || 0;
         const badge = secs > 0
           ? ` <span class="mx-acct-cool" data-cool-until="${Date.now() + secs * 1000}" title="${esc(t('mx.acccool'))}">⏳ <span class="mx-cd">${fmtCountdown(secs)}</span></span>`
           : '';
-        return `<th class="mx-acct" title="${esc(a)}">${esc(a)}${badge}</th>`;
+        const n = load[a] || 0;
+        const loadTxt = maxConc > 0 ? `${n}/${maxConc}` : `${n}`;
+        const loadBadge = `<span class="mx-load" title="${esc(t('mx.load'))}">${loadTxt}</span>`;
+        return `<th class="mx-acct" title="${esc(a)}">${esc(a)}${badge}${loadBadge}</th>`;
       }).join('')}</tr></thead>
       <tbody>${models.map((id) => `<tr>
         <td class="mono">${esc(id)}</td>

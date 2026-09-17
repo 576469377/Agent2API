@@ -2,34 +2,21 @@
 
 把 AI Agent 平台的私有协议翻译成标准 LLM API 的本地反向代理网关。
 
-对外提供 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种协议，Claude Code、Codex CLI 及任意 OpenAI / Anthropic 客户端**零改造**接入。内置多平台枢纽（Hub）：多个上游平台在同一进程共存、按模型名自动路由 —— 当前内置平台为 **WorkBuddy / CodeBuddy**。
+Claude Code、Codex CLI 及任意 OpenAI / Anthropic 客户端**零改造**接入：对外提供 Chat Completions、Responses、Anthropic Messages 三种协议，内置多平台枢纽（Hub）按模型名把请求路由到对应上游 —— 当前内置平台为 **WorkBuddy / CodeBuddy**。
 
 [简体中文](README.md) · [English](README.en.md) · [更新日志](CHANGELOG.md) · [免责声明](DISCLAIMER.md)
-
----
 
 > [!WARNING]
 > **个人学习与研究项目，非生产软件。** 仅供本人已授权账号在本机或私有环境自用，风险自担。
 > 它会读取桌面客户端已登录的**凭证**（凭证 = 账号，切勿外传），运作方式**可能不符合上游服务条款**。作者不鼓励也不支持商用或对外提供服务。
 
----
-
 ## 目录
 
-- [它解决什么问题](#它解决什么问题)
-- [快速开始](#快速开始)
-- [网页控制台](#网页控制台)
-- [多账号号池](#多账号号池)
-- [支持的接口](#支持的接口)
-- [配置](#配置)
-- [安全须知](#安全须知)
-- [架构](#架构)
-- [测试](#测试)
-- [常见问题](#常见问题)
-- [已知限制](#已知限制)
-- [路线图](#路线图)
-- [贡献](#贡献)
-- [许可证](#许可证)
+**上手**：[它解决什么问题](#它解决什么问题) · [快速开始](#快速开始) · [网页控制台](#网页控制台) · [多账号号池](#多账号号池)
+
+**参考**：[支持的接口](#支持的接口) · [配置](#配置) · [安全须知](#安全须知) · [架构](#架构)
+
+**其他**：[测试](#测试) · [常见问题](#常见问题) · [已知限制](#已知限制) · [路线图](#路线图) · [贡献](#贡献) · [许可证](#许可证)
 
 ---
 
@@ -85,7 +72,12 @@ agent2api                      # 启动，默认 127.0.0.1:8787
 agent2api models               # 列出当前账号可用模型
 ```
 
-启动后命令行会打印控制台地址，浏览器打开即可管理。
+启动后命令行会打印控制台地址，浏览器打开即可管理。也可以用一条命令确认网关活着：
+
+```bash
+curl -s http://127.0.0.1:8787/health
+# {"platform":"workbuddy","platforms":["workbuddy"],"status":"ok","time":…}
+```
 
 > [!WARNING]
 > **监听 `0.0.0.0` 且未设 `-api-key`，同网段任何人都能用你的账号额度。**
@@ -108,15 +100,20 @@ export ANTHROPIC_API_KEY=任意值     # 未配置网关密钥时不会校验
 
 ### 调用示例
 
+同一句话，三种协议各调一次：
+
 ```bash
+# OpenAI Chat Completions
 curl http://127.0.0.1:8787/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
 
+# Anthropic Messages
 curl http://127.0.0.1:8787/v1/messages \
   -H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" \
   -d '{"model":"deepseek-v4-flash","max_tokens":1024,"messages":[{"role":"user","content":"你好"}]}'
 
+# OpenAI Responses
 curl http://127.0.0.1:8787/v1/responses \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","input":"你好"}'
@@ -137,7 +134,7 @@ curl http://127.0.0.1:8787/v1/responses \
 | **账号** | 号池管理：调度与登录状态、凭证有效期、每账号用量；启停、清冷却、重新登录、添加账号 |
 | **对话** | 直接与网关对话，验证协议与模型表现 |
 | **平台** | 上游地址、账号数、模型数、健康状态 |
-| **模型** | 模型清单与能力标签，可切换账号 × 模型矩阵 |
+| **模型** | 模型清单与能力标签，可切换账号 × 模型矩阵（列头显示每账号**在途/并发上限**与整号冷却倒计时） |
 | **调用日志** | 最近 200 条请求（标注实际使用的账号），失败行高亮 |
 | **设置** | 脱敏开关（热更新）、重新拉取模型清单、访问密钥、当前生效配置 |
 
@@ -162,6 +159,7 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 | 情况 | 行为 |
 |---|---|
 | 日常调度 | 按账号**健康度加权随机**选号，健康者更易被选中但不被独占；同一会话**粘住同一账号**，长上下文不在账号间漂移 |
+| 并发压力 | 每账号有**并发上限**（默认 4，`max_concurrency_per_account` 可调）：达到上限的账号不再被选中，请求**排队等槽位**而不是失败（本地背压）。在途数在控制台矩阵列头显示为「2/4」 |
 | 限流（429）且上游给出精确重置时刻 | 只冷却**该账号上的该模型**到指定时刻（封顶 24h）并换号，同账号其他模型不受影响 |
 | 限流（429）但无精确重置时刻 | **不锁定**：只降低该账号健康度并换号 —— 避免一次普通限流把账号/模型整体挂起（实测曾出现「一个问题问完，两个号都冷却」） |
 | 额度耗尽（14018） | 同样**不锁定**：上游的 credits 是积分倍率而非账号余额，且上游不提供恢复时刻；降健康度换号，同账号的免费/低价模型照常可用 |
@@ -170,9 +168,14 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 | 传输错误 / 5xx | 换号但不冷却（可能是全局抖动），池级退避加抖动 |
 | 该模型全池不可用 | 返回 429 并附**最早**解冻秒数，提示改用其他模型；若全部是鉴权失效则返回 401（重试永远不会成功） |
 
-健康分的构成：成功率 EWMA×0.6 + 延迟 EWMA×0.4，连续失败逐次降权，样本少时向中性收缩。想看精确的调度与冷却参数，源码在 [`internal/adapter/pool.go`](internal/adapter/pool.go)。
+健康分 = 成功率 EWMA×0.6 + 延迟 EWMA×0.4，连续失败逐次降权，样本少时向中性收缩。精确参数见 [`internal/adapter/pool.go`](internal/adapter/pool.go)。
 
-控制台的「账号」页提供运行时管理：每账号的调度状态、登录状态与凭证有效期、用量（落盘持久化）；支持**停用/启用**（临时摘出调度）、**清除冷却**（上游提前恢复时手动解冻，也是 blocked 账号的恢复入口）、**重新登录**（掉线账号直接发起设备码登录，凭证写回原文件）。
+控制台「账号」页可运行时干预，无需重启网关：
+
+- **停用 / 启用**：临时把某账号摘出调度
+- **清除冷却**：上游提前恢复时手动解冻（也是 blocked 账号的恢复入口）
+- **重新登录**：掉线账号直接发起设备码登录，凭证写回原文件
+- 每账号的调度状态、登录状态、凭证有效期与用量（落盘持久化）
 
 > 桌面客户端凭证与号池文件可以并存，账号卡片会标注来源。桌面客户端**下线不影响**网关运行 —— 凭证只是启动时读一次，后续刷新由网关自己完成。
 
@@ -185,11 +188,13 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 | `POST /v1/chat/completions` | OpenAI Chat Completions | ✅ | ✅ |
 | `POST /v1/responses` | OpenAI Responses | ✅ | ✅ |
 | `POST /v1/messages` | Anthropic Messages | ✅ | ✅ |
-| `GET /v1/models` | 模型列表 | — | ✅ |
-| `GET /health` | 健康检查 | — | ✅ |
-| `GET /` | 网页控制台 | — | ✅ |
+| `GET /v1/models` | 模型列表（含 `models.aliases` 声明的别名） | — | ✅ |
+| `GET /metrics` | Prometheus 文本格式指标（与控制台指标同源，需 API Key） | — | ✅ |
+| `GET /health` | 健康检查（只报状态与平台 ID，不探测上游） | — | ✅ |
 
 支持文本、思考过程、工具调用、多轮对话、系统提示词、采样参数、图片输入。
+
+管理与调试界面在 `/`（见[网页控制台](#网页控制台)），不属于 API。
 
 ---
 
@@ -242,6 +247,64 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 > [!NOTE]
 > `server.write_timeout_sec` 与 `log.level` / `log.format` 目前不会被读取（流式响应刻意不设写超时；日志级别/格式尚未实现），仅为向后兼容保留。
 
+### 模型别名（models.aliases）
+
+客户端会发固定的模型名（Claude Code 发 `claude-sonnet-4-5-*`、Codex 发 `gpt-5-*`），
+而这些名字常常不在账号的可用目录里。别名表把它们映射到账号实际可用的模型上，
+客户端**零改动**即可接入：
+
+```json
+{
+  "models": {
+    "aliases": {
+      "claude-sonnet-4-5-20250929": "glm-5.3",
+      "gpt-4o": "workbuddy/deepseek-v4-pro"
+    }
+  }
+}
+```
+
+- 两种写法：`"目标模型"`（同平台换模型）或 `"平台ID/目标模型"`（换平台 + 换模型）
+- 别名会出现在 `/v1/models` 与控制台模型页（客户端通常只认列表里出现过的名字）
+- **不递归**（别名指向的必须是真实模型）；平台名写错时退化为普通模型名并告警，
+  不让一个配置笔误把网关变成不可用
+- 别名只影响路由与发往上游的模型名：会话亲和、号池调度、脱敏都不变
+- 调用日志会同时记录「请求的模型」与「实际使用的模型」，便于核对映射
+
+### 并发上限（max_concurrency_per_account）
+
+```json
+{ "upstream": { "max_concurrency_per_account": 4 } }
+```
+
+客户端（Claude Code 等）会并发发请求，同一账号上同时压着十几个请求时上游极易回 429。
+并发上限把请求**排在账号前面**（本地排队，受客户端超时约束），选号时优先挑还有余量的账号：
+
+- 默认 **4**；设 `0` 关闭（不限并发）
+- 这是**背压**不是失败：排队期间客户端连接保持，不会被换号或标记冷却
+- 排队只发生在所有账号都满员时——只要有账号空闲，请求立刻走它
+- 平台级可用 `upstream.platforms[].max_concurrency_per_account` 单独覆盖
+
+### Prometheus 指标（/metrics）
+
+`/metrics` 用 Prometheus 文本格式暴露与控制台同源的指标，指标名与类型行齐全
+（`agent2api_requests_total`、`agent2api_in_flight_requests`、按模型/协议/账号的分组计数、
+`agent2api_tokens_*_total` 等），另含 `agent2api_build_info{version,go}` 便于按版本对比。
+
+启用 API Key 时抓取端需带上凭据：
+
+```yaml
+scrape_configs:
+  - job_name: agent2api
+    authorization:
+      credentials: <api_key>
+    static_configs:
+      - targets: ["127.0.0.1:8787"]
+```
+
+> 无 TPS 样本时**不输出**平均解码速度指标——0 tok/s 与「没测过」是两回事，
+> 输出 0 会让告警误报。
+
 ---
 
 ## 安全须知
@@ -277,7 +340,10 @@ internal/
 
 接口刻意做小：`Adapter` 只有 3 个方法（`Stream` / `ListModels` / `Name`），`ResponseStream` 只有 1 个（`Recv`）。造假适配器做测试只要十行。
 
-详细设计见 [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md)，上游协议逆向见 [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md)。
+延伸阅读：
+
+- 详细设计 —— [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md)
+- 上游协议逆向 —— [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md)
 
 ---
 
@@ -312,6 +378,17 @@ go test ./... -race
 **怎么改端口 / 监听地址？**
 `-port` / `-host`（或对应环境变量，见[配置](#配置)）。要暴露到局域网，必须同时设置 `-api-key`。
 
+**客户端说会话粘性不生效 / 同一会话被分到了不同账号？**
+会话粘性按优先级取路由键：`session_id` 等**请求头** → body 里的 `metadata.user_id` / `user`
+→ 「系统提示 + 首条用户消息」的哈希。如果你在网关前面放了 Nginx，注意它**默认丢弃带下划线的
+请求头**（`session_id` 就在其列），需要在 `http` 或 `server` 块里加
+`underscores_in_headers on;`，否则这个信号到不了网关。
+
+**感觉并发一高就触发上游限流？**
+默认每账号 4 并发（`upstream.max_concurrency_per_account`），超出部分在网关内排队而不是打上游。
+如果上游仍然频繁 429，可以再调低；反之嫌排队太慢（或上游是企业版）、想让请求尽快出去，设 `0` 关闭。
+控制台矩阵列头的「在途/上限」读数可以判断是号池被打满还是配置过紧。
+
 ---
 
 ## 已知限制
@@ -319,7 +396,8 @@ go test ./... -race
 **设计限制**
 
 - **上游不支持非流式请求**：非流式在代理侧聚合，首字延迟与流式一致
-- **单进程单实例**：冷却状态在内存，多实例部署时各自独立冷却，会重复冲击上游
+- **单进程单实例**：冷却状态、会话亲和、并发槽位都在内存，多实例部署时各自独立，会重复冲击上游（共享状态需外部存储，见路线图）
+- **并发上限是进程内的**：多实例部署时每个实例各算各的，无法全局限流
 - **额度查询未实现**：上游该路由需企业版权限（403）
 - **思考过程是单向的**：上游不带思考签名，Anthropic `thinking` block 的 signature 恒为空，多轮会话中上游每次重新推理
 - **DSML 文本态工具调用兜底未实现**：实测上游走原生 `tool_calls`，如遇回退需补上
@@ -336,6 +414,11 @@ go test ./... -race
 - [ ] 号池熔断与额度查询
 - [ ] 第二个平台适配器（Hub 路由已就绪，差适配器实现）
 - [ ] `cmd/probe` 协议漂移检测
+- [ ] 多 API Key 分发与每 Key 用量/限额（当前是单密钥 + 进程内全局限流，见 sub2api 的 key 体系）
+- [ ] 共享状态（冷却/亲和/并发槽位）以支持多实例部署
+- [x] 模型别名路由（`models.aliases`，对应 sub2api 的 composite groups）
+- [x] 每账号并发上限与在途可视化（对应 sub2api 的 per-account concurrency limit）
+- [x] Prometheus 文本指标（`/metrics`）
 
 ---
 

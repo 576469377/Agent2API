@@ -411,7 +411,14 @@ func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("所有平台初始化失败: %s", strings.Join(failures, "; "))
 	}
-	return app.NewHub(runtimes, logger)
+	hub, err := app.NewHub(runtimes, logger)
+	if err != nil {
+		return nil, err
+	}
+	// 模型别名（models.aliases）：客户端固定模型名 → 账号实际可用的模型。
+	// 必须在开始服务之前装载（运行期只读，避免查询到半张表）。
+	hub.SetAliases(cfg.Models.Aliases)
+	return hub, nil
 }
 
 // truncate 按字符截断长文本用于单行展示。

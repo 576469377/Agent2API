@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/576469377/Agent2API/internal/llm"
@@ -15,26 +16,9 @@ import (
 
 // 号池的冷却策略常量。
 const (
-	// cooldownRateLimitedDefault 是限流且上游未给出重置时间时的退避基数。
-	cooldownRateLimitedDefault = 60 * time.Second
-	// cooldownRateLimitFloor 是限流冷却的下限，避免亚秒级反复震荡。
-	cooldownRateLimitFloor = 10 * time.Second
 	// cooldownUnauthorized 是刷新后仍 401 的账号冷却时长：
 	// 多半是账号失效/权益异常，短时间重试没有意义。
 	cooldownUnauthorized = 10 * time.Minute
-	// cooldownQuotaModel 是「额度耗尽（14018）」的模型级冷却上限。
-	// 14018 没有精确重置时刻（上游只说「购买加量包」），于是走指数退避；
-	// 退避封顶到这个值——既避免反复撞墙，又不会因一次耗尽就锁死太久。
-	// 它的语义是模型级（同账号免费模型仍可用），与 cooldownUnauthorized 的整号封禁不同。
-	cooldownQuotaModel = 2 * time.Hour
-	// cooldownResetTrustCap 是「上游给的精确重置时刻」的可信上限。
-	// 上游偶尔把长窗口（日额度级）的重置时刻附在一次普通限流响应里
-	// （实测一句「将在 16:51 重置」把模型一口气锁了 13.9 小时，用户视角
-	// 等于模型坏了半天）。超过上限的部分不再照单全收：先冷到上限，
-	// 到点由真实请求探测——上游已恢复则立刻可用；仍在窗口内则拿到新的
-	// 重置时刻续冷。与 cooldownQuotaModel 同值：都是「来历存疑的长限制」
-	// 的封顶探测节奏。
-	cooldownResetTrustCap = 2 * time.Hour
 	// maxCooldown 是任何冷却的上限，防止异常数据把账号永久挂起。
 	maxCooldown = 24 * time.Hour
 
@@ -84,7 +68,8 @@ func (s accountState) String() string {
 }
 
 // Pool 把同一平台的 N 个适配器包装成一个 Adapter：按健康度调度健康账号，
-// 失败时按错误类别决定「冷却该账号并换下一个」还是「直接失败」。
+// 失败时换下一个账号继续试，只有上游明确给出重置时刻时才冻结对应模型
+// （拿不到具体冷却时间就绝不自己发明一个时长把账号锁住）。
 //
 // 它只依赖 adapter.Adapter 接口与 llm.Failure 的分类字段，
 // 不感知任何具体平台——因此对后续接入的新平台同样可用。
@@ -99,6 +84,14 @@ type Pool struct {
 	// affinity 是会话亲和表：同一会话粘住同一账号（避免长上下文在账号间
 	// 漂移导致上游重复处理全部输入）。
 	affinity *affinityTable
+	// maxConc 是每账号并发上限（0 = 不限）。
+	//
+	// 为什么需要它：客户端（Claude Code 等）会并发发请求，同一账号上同时压着
+	// 十几个请求时上游极易回 429；而按现有冷却策略 429 又不锁定，结果就是
+	// 反复换号重试、整体变慢。并发上限是「把请求排在账号前」的背压，
+	// 让每个账号按自己能承受的节奏被使用——与 sub2api 的 per-account
+	// concurrency limit 同一思路。
+	maxConc int
 }
 
 type poolAccount struct {
@@ -113,13 +106,20 @@ type poolAccount struct {
 	// 其他仍然可用的模型额度一起浪费掉（实测能白白锁掉数小时）。
 	// 键是模型 ID，值是解冻时刻。
 	modelCooldown map[string]time.Time
-	// backoffLevel 是按模型的连续限流退避等级（0 起），该模型成功一次即清零。
-	backoffLevel map[string]int
-	lastErr      string
-	// reason 是账号级冷却/封禁的具体原因（quota_exhausted / unauthorized / 空）。
-	// 留空时 Statuses 退化为 rate_limited；额度耗尽必须如实标成 quota_exhausted，
-	// 否则控制台把「买加量包才能恢复」和「到点自动恢复」混为一谈。
+	lastErr       string
+	// reason 是账号级封禁的具体原因（unauthorized / 空）。
+	// 留空时 Statuses 退化为 rate_limited——限流与额度耗尽都是「账号 × 模型」
+	// 维度的，只记在 modelCooldown 里，不构成账号级原因。
 	reason string
+
+	// —— 并发（背压）——
+	//
+	// sem 是并发槽位信号量（容量 = Pool.maxConc）；不限并发（maxConc=0）时为 nil。
+	// inFlight 是当前在途请求数，含正在生成中的流，仅用于展示与选号。
+	// 两者都由 acquireSlot/releaseSlot 维护：槽位在**流的整个生命周期**内占用，
+	// 流关闭或读到结尾才归还（提前归还等于没有限制）。
+	sem      chan struct{}
+	inFlight int32
 
 	// —— 健康度（用于选号，见 pickLocked）——
 	//
@@ -162,6 +162,11 @@ type AccountStatus struct {
 	// ModelCooldowns 是该账号上仍在冷却中的模型（模型 ID → 剩余秒数）。
 	// 上游限流按模型维度，因此账号「健康」与「某些模型被限」可以并存。
 	ModelCooldowns map[string]int `json:"model_cooldowns,omitempty"`
+	// InFlight 是该账号当前在途请求数（含正在生成中的流）；
+	// MaxConcurrency 是每账号并发上限（0 或缺失 = 不限）。
+	// 控制台据此显示「2/4」这类负载，用于判断该不该加号或调上限。
+	InFlight       int `json:"in_flight"`
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
 	// IsNext 表示严格轮询下「下一个请求将使用该账号」。
 	IsNext  bool    `json:"is_next"`
 	Adapter Adapter `json:"-"`
@@ -177,11 +182,42 @@ func NewPool(name string, logf func(string, ...any)) *Pool {
 func (p *Pool) Add(label string, adp Adapter) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.accounts = append(p.accounts, &poolAccount{
+	acc := &poolAccount{
 		adp: adp, label: label,
 		modelCooldown: map[string]time.Time{},
-		backoffLevel:  map[string]int{},
-	})
+	}
+	if p.maxConc > 0 {
+		acc.sem = make(chan struct{}, p.maxConc)
+	}
+	p.accounts = append(p.accounts, acc)
+}
+
+// SetMaxConcurrencyPerAccount 设置每账号并发上限（0 = 不限）。
+//
+// 装配期调用（启动前）。语义：账号上的在途请求达到上限后，新请求会**等待**
+// 槽位（受 ctx 约束），而不是失败或换号——换号只针对「上游拒绝」，
+// 本地排队不该被当成账号故障（那会把健康的账号也冷却掉）。
+func (p *Pool) SetMaxConcurrencyPerAccount(n int) {
+	if n < 0 {
+		n = 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.maxConc = n
+	for _, acc := range p.accounts {
+		if n > 0 {
+			acc.sem = make(chan struct{}, n)
+		} else {
+			acc.sem = nil
+		}
+	}
+}
+
+// MaxConcurrencyPerAccount 返回每账号并发上限（0 = 不限），供控制台展示。
+func (p *Pool) MaxConcurrencyPerAccount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.maxConc
 }
 
 // Len 返回账号总数。
@@ -345,15 +381,20 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 
 		if boundAcc != nil {
 			tried[boundIdx] = true
+			// 并发槽位：亲和请求同样要排队（否则绑定会把某个账号打爆）。
+			if err := boundAcc.acquireSlot(ctx); err != nil {
+				return nil, err
+			}
 			s, err := boundAcc.adp.Stream(ctx, req)
 			if err == nil {
 				bs, probeErr := probeFirstEvent(ctx, s)
 				if probeErr == nil {
-					return &labeledStream{ResponseStream: bs, label: boundAcc.label}, nil
+					return &labeledStream{ResponseStream: boundAcc.withSlot(bs), label: boundAcc.label}, nil
 				}
 				_ = closeStream(s)
 				err = probeErr
 			}
+			boundAcc.releaseSlot()
 			// 亲和账号失败：解绑（持锁——affinity 表是裸 map），错误带入
 			// 正常换号循环。
 			lastErr = err
@@ -375,6 +416,11 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		}
 		tried[idx] = true
 
+		// 并发槽位：账号在途请求达到上限时在这里排队（受 ctx 约束）。
+		// 选号阶段已优先挑「有余量」的账号，所以只有全部账号都满员时才会真正等待。
+		if err := acc.acquireSlot(ctx); err != nil {
+			return nil, err
+		}
 		s, err := acc.adp.Stream(ctx, req)
 		if err == nil {
 			// 首帧探针：把「HTTP 200 但流内首发即报错」纳入换号窗口。
@@ -391,11 +437,14 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 				}
 				// 带上账号标签：app 层据此把请求归因到具体账号，
 				// 控制台才能回答「每个账号用了多少额度」。
-				return &labeledStream{ResponseStream: bs, label: acc.label}, nil
+				// withSlot 让槽位在流的整个生命周期内保持占用。
+				return &labeledStream{ResponseStream: acc.withSlot(bs), label: acc.label}, nil
 			}
 			_ = closeStream(s)
 			err = probeErr
 		}
+		// 本次尝试结束（不管成功与否都已换号或返回），归还槽位。
+		acc.releaseSlot()
 		lastErr = err
 		// 会话亲和解绑：绑定的账号失败了，旧绑定已无意义
 		//（下次请求会按健康度重新选择并重建绑定）。
@@ -414,26 +463,37 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 
 		f := llm.Wrap(err)
 		switch {
-		case f.ClientFixable:
-			// 请求本身有问题（参数错、上下文超限等），换任何账号结果都一样。
-			return nil, err
-		case f.RateLimited && f.RetryAfterSeconds > 0:
-			// 限流且上游给了**精确重置时刻**：尊重它，仅冷却该 (账号,模型)
-			// 到指定时刻，然后继续尝试下一个账号。其余限流（无精确时刻）、
-			// 额度耗尽（14018，上游只说「购买加量包」）一律**不锁定**——
-			// 只降健康度并尝试下一个，避免一次限流就把账号/模型挂起
-			//（实测「一个问题问完，两个号都冷却」即此所致）。
+		case f.QuotaExhausted, f.RateLimited:
+			// 限流 / 额度耗尽的处理原则：**只在拿到上游明确重置时刻时才记冷却**，
+			// 拿不到就只降健康度、换下一个账号——绝不自己发明一个时长把账号锁住。
+			//
+			// 为什么不做指数退避：实测一次问答就会让两个账号同时「被锁上」
+			//（一个拿到上游的重置时刻、另一个被退避成几十秒到几分钟），
+			// 而后者那个时长与上游的真实限制毫无关系，纯属本地猜测，
+			// 用户看到的却是「两个号都冷却了」。换号本来就够用：上游真在限制，
+			// 换一个账号就能继续服务；全部账号都失败时把上游错误如实返回
+			//（见循环末尾），由客户端按 429 的节奏自行退避。
+			//
+			// 必须排在 Unauthorized/ClientFixable 之前：401 的 Failure 同时带
+			// ClientFixable=true，若让 ClientFixable 先命中，鉴权失效的账号
+			// 就不会被换掉（不会标记 blocked、也不会试下一个账号）。
 			p.markFailure(acc)
-			d := time.Duration(f.RetryAfterSeconds) * time.Second
-			if d > maxCooldown {
-				d = maxCooldown
+			kind := "触发限流"
+			if f.QuotaExhausted {
+				kind = "额度耗尽"
 			}
-			if d < time.Second {
-				d = time.Second
+			if d := upstreamCooldown(f); d > 0 {
+				// 上游明说了何时重置（Retry-After 头或「将在 … 重置」文案）：
+				// 这是真实信息，照此冻结该模型，再换下一个账号。
+				// 同账号其他模型不受影响——限流是「账号 × 模型」维度的，
+				// 上游自己也提示「可以切换其他模型」。
+				p.cooldownModel(acc, req.Model, d, f.Message)
+				p.logfNow("账号 %s 的模型 %s %s，按上游给出的重置时刻冷却 %s，换下一个账号: %s",
+					acc.label, req.Model, kind, d.Truncate(time.Second), f.Message)
+			} else {
+				p.logfNow("账号 %s 的模型 %s %s，上游未给重置时刻，不冷却，换下一个账号: %s",
+					acc.label, req.Model, kind, f.Message)
 			}
-			p.cooldownModel(acc, req.Model, d, f.Message)
-			p.logfNow("账号 %s 的模型 %s 限流（上游精确重置 %s），冷却后换号: %s",
-				acc.label, req.Model, d.Truncate(time.Second), f.Message)
 		case f.Unauthorized:
 			// 鉴权失效（401，单适配器已刷新重试过）：整号终态，标记 blocked
 			// 并继续尝试下一个账号。这是账号死亡而非限流，反复重试无意义，
@@ -442,13 +502,12 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			p.markFailure(acc)
 			p.cooldownAccount(acc, cooldownUnauthorized, reasonUnauthorized, f.Message)
 			p.logfNow("账号 %s 鉴权失效，标记 blocked 并换号: %s", acc.label, f.Message)
+		case f.ClientFixable:
+			// 请求本身有问题（参数错、上下文超限等），换任何账号结果都一样。
+			return nil, err
 		default:
-			// 其余失败统一「不锁定，换下一个」：
-			//   · 限流但上游未给精确重置时刻；
-			//   · 额度耗尽（14018，无精确重置）；
-			//   · 传输断裂 / 5xx / 未知（可能是全局抖动）。
-			// 这些都不冷却账号/模型，只降健康度（下次选号自然避开）并尝试下一个；
-			// 全部账号都失败才在循环结束后返回错误。
+			// 传输断裂 / 5xx / 未知：可能是全局抖动，不冷却账号但降健康度
+			//（下次选号会优先避开它），换下一个试。
 			p.markFailure(acc)
 			p.logfNow("账号 %s 的模型 %s 失败，换下一个账号: %s", acc.label, req.Model, f.Error())
 			// 池级短退避 + 抖动：上游整体故障时避免把 N 个账号连续无间隔打完
@@ -577,7 +636,82 @@ func (a *poolAccount) earliestModelThaw(now time.Time) time.Time {
 	return earliest
 }
 
-// succeed 记录一次成功：游标对齐到「实际服务的账号」之后，并清零退避等级。
+// —— 账号并发（背压）——
+
+// hasCapacity 判断账号是否还有空闲并发槽位（不限并发恒为 true）。
+// 调用方必须持有 p.mu：len/cap 对 channel 本身是安全的，但 sem 字段会
+// 被 SetMaxConcurrencyPerAccount 重建，读写要与它同步。
+func (a *poolAccount) hasCapacity() bool {
+	if a.sem == nil {
+		return true
+	}
+	return len(a.sem) < cap(a.sem)
+}
+
+// acquireSlot 占用一个并发槽位；账号不限并发时立即返回。
+//
+// 槽位满时**阻塞等待**（select 在 ctx 上可取消）：这是背压而不是失败——
+// 上游并没有拒绝我们，只是本地要按账号能承受的并发发请求。
+// 等待期间不持有任何锁（否则会堵住整个号池）。
+func (a *poolAccount) acquireSlot(ctx context.Context) error {
+	if a.sem == nil {
+		atomic.AddInt32(&a.inFlight, 1)
+		return nil
+	}
+	select {
+	case a.sem <- struct{}{}:
+		atomic.AddInt32(&a.inFlight, 1)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// releaseSlot 归还槽位。幂等（withSlot 用 sync.OnceFunc 包了一层，
+// 但直接调用也不会把计数减成负数或阻塞）。
+func (a *poolAccount) releaseSlot() {
+	if atomic.AddInt32(&a.inFlight, -1) < 0 {
+		atomic.StoreInt32(&a.inFlight, 0) // 防御：重复释放不留下负计数
+	}
+	if a.sem != nil {
+		select {
+		case <-a.sem:
+		default: // 没有已占用的槽位：重复释放，忽略。
+		}
+	}
+}
+
+// withSlot 把「归还槽位」绑到流上：流关闭或读到结尾时归还（只归还一次）。
+//
+// 为什么不在这里立刻归还：请求的整个生命周期（含上游生成）都占用该账号的
+// 并发额度，提前归还等于没有上限。
+func (a *poolAccount) withSlot(s llm.ResponseStream) llm.ResponseStream {
+	// 即便不限并发（sem == nil）也要包装：inFlight 计数同样要归还。
+	return &slotStream{ResponseStream: s, release: sync.OnceFunc(a.releaseSlot)}
+}
+
+// slotStream 在流结束时归还账号并发槽位（Close 或 Recv 出错，只归还一次）。
+type slotStream struct {
+	llm.ResponseStream
+	release func()
+}
+
+func (s *slotStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
+	ev, err := s.ResponseStream.Recv(ctx)
+	if err != nil {
+		// 流已结束（正常结束或出错）：调用方不会再持用它。
+		// 兜底释放是必要的——协议编码器不一定会 Close（非流式聚合路径就是）。
+		s.release()
+	}
+	return ev, err
+}
+
+func (s *slotStream) Close() error {
+	s.release()
+	return closeStream(s.ResponseStream)
+}
+
+// succeed 记录一次成功：游标对齐到「实际服务的账号」之后。
 //
 // 游标对齐的必要性：若只按槽位轮转再跳过冷却账号，冷却账号的后继承受
 // 双倍流量，反而加速它触发限流（连锁冷却）。
@@ -586,8 +720,6 @@ func (p *Pool) succeed(idx int, latencyMs float64) {
 	defer p.mu.Unlock()
 	a := p.accounts[idx]
 	p.next = (idx + 1) % len(p.accounts)
-	// 成功一次即清零该账号所有模型的退避等级（整号可达已被证实）。
-	a.backoffLevel = map[string]int{}
 	if a.state == stateCooldown {
 		a.state = stateReady
 	}
@@ -649,7 +781,6 @@ func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]boo
 		weight float64
 	}
 	cands := make([]cand, 0, n)
-	total := 0.0
 	for i, acc := range p.accounts {
 		if tried[i] || !acc.available(now, model) {
 			continue
@@ -659,10 +790,25 @@ func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]boo
 			w = 0.05 // 下限：不被完全饿死，否则永远拿不到新样本
 		}
 		cands = append(cands, cand{idx: i, acc: acc, weight: w})
-		total += w
 	}
 	if len(cands) == 0 {
 		return -1, nil
+	}
+	// 有余量的账号优先：并发已满的账号不该再被选中，除非所有候选都满了
+	//（那时选中即会等待槽位——是排队，不是失败，见 acquireSlot）。
+	// 先过滤再算权重总和，保证加权随机只在真正的候选集上做。
+	free := make([]cand, 0, len(cands))
+	for _, c := range cands {
+		if c.acc.hasCapacity() {
+			free = append(free, c)
+		}
+	}
+	if len(free) > 0 {
+		cands = free
+	}
+	total := 0.0
+	for _, c := range cands {
+		total += c.weight
 	}
 	// 加权随机。
 	//
@@ -680,59 +826,20 @@ func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]boo
 	return cands[len(cands)-1].idx, cands[len(cands)-1].acc
 }
 
-// nextRateLimitBackoff 计算某账号上某模型的限流冷却时长并推进其退避等级。
+// upstreamCooldown 返回上游明确给出的冷却时长；上游没说（RetryAfterSeconds<=0）
+// 则返回 0。
 //
-// 上游给了精确重置时刻 → 完全信任，不动等级（它比我们的猜测准得多）。
-// 否则按等级指数退避，且只在「该模型的上一个冷却窗口已过期」时才升级——
-// 否则并发的一批失败会把等级一次冲到顶。
-func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failure) (time.Duration, int) {
-	if f.RetryAfterSeconds > 0 {
-		d := time.Duration(f.RetryAfterSeconds) * time.Second
-		if d > maxCooldown {
-			d = maxCooldown
-		}
-		if d < time.Second {
-			d = time.Second
-		}
-		return d, -1 // 上游精确时刻，无等级概念
+// 调用方只在 0 / 非 0 之间区分：0 = 「不知道」→ 换号而不是加锁。宁可多打一次
+// 上游，也不把账号冻结在一个自己猜出来的时长上（那会让控制台显示一个与
+// 真实限制无关的倒计时）。给了具体时刻时仍受 maxCooldown 约束，防止异常数据
+// 把模型挂起过久；不设下限——1 秒也是上游的真实意思。
+func upstreamCooldown(f *llm.Failure) time.Duration {
+	if f.RetryAfterSeconds <= 0 {
+		return 0
 	}
-	// 无上游重置时刻时的退避封顶：额度耗尽（14018）封顶到 cooldownQuotaModel——
-	// 它不会自动重置（只说「购买加量包」），但也不是永久的，封顶到 2h 比无限
-	// 退避合理；普通频率限制保留 maxCooldown 上限。
-	cap := maxCooldown
-	if f.QuotaExhausted {
-		cap = cooldownQuotaModel
-	}
-	key := modelKey(model)
-	// 读取-判定-升级-写回在同一临界区：否则错峰读取会让一批并发失败
-	// 把退避等级逐个推高（实测 2→4、4→7 跳档）。
-	p.mu.Lock()
-	level := acc.backoffLevel[key]
-	until := acc.modelCooldown[key]
-	if until.After(time.Now()) {
-		p.mu.Unlock()
-		return p.backoffDuration(level-1, cap), level
-	}
-	d := p.backoffDuration(level, cap)
-	if level < 16 {
-		acc.backoffLevel[key] = level + 1
-	}
-	p.mu.Unlock()
-	return d, level
-}
-
-// backoffDuration 由等级换算时长，带上限与地板。cap 是退避封顶（额度耗尽
-// 用 cooldownQuotaModel，普通限流用 maxCooldown），防止无重置时刻的失败无限退避。
-func (p *Pool) backoffDuration(level int, cap time.Duration) time.Duration {
-	if level < 0 {
-		level = 0
-	}
-	d := cooldownRateLimitedDefault << uint(level)
-	if d > cap || d <= 0 { // <=0 防移位溢出
-		d = cap
-	}
-	if d < cooldownRateLimitFloor {
-		d = cooldownRateLimitFloor
+	d := time.Duration(f.RetryAfterSeconds) * time.Second
+	if d > maxCooldown {
+		d = maxCooldown
 	}
 	return d
 }
@@ -936,7 +1043,12 @@ func (p *Pool) Statuses() []AccountStatus {
 	defer p.mu.Unlock()
 	out := make([]AccountStatus, 0, len(p.accounts))
 	for i, acc := range p.accounts {
-		st := AccountStatus{Label: acc.label, Adapter: acc.adp, IsNext: i == p.next%len(p.accounts)}
+		st := AccountStatus{
+			Label: acc.label, Adapter: acc.adp,
+			IsNext:         i == p.next%len(p.accounts),
+			InFlight:       int(atomic.LoadInt32(&acc.inFlight)),
+			MaxConcurrency: p.maxConc,
+		}
 		if acc.state == stateDisabled {
 			// 手动停用：不健康但不是故障，且没有冷却倒计时。
 			st.State = stateDisabled.String()
@@ -1071,7 +1183,6 @@ func (p *Pool) SetAccountEnabled(label string, enabled bool) error {
 				acc.state = stateReady
 				acc.cooldownUntil = time.Time{}
 				acc.modelCooldown = map[string]time.Time{}
-				acc.backoffLevel = map[string]int{}
 				acc.lastErr = ""
 			}
 		} else {
@@ -1098,7 +1209,6 @@ func (p *Pool) ResetAccountCooldown(label string) error {
 		acc.state = stateReady
 		acc.cooldownUntil = time.Time{}
 		acc.modelCooldown = map[string]time.Time{}
-		acc.backoffLevel = map[string]int{}
 		acc.lastErr = ""
 		p.logfNow("账号 %s 的冷却已手动清除（含全部模型）", label)
 		return nil

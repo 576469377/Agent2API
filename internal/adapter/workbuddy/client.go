@@ -192,15 +192,20 @@ func (c *httpClient) doJSON(ctx context.Context, method, path string, body any, 
 func httpError(status int, raw []byte, retryAfter string) error {
 	msg := strings.TrimSpace(string(raw))
 	var env envelope
-	if err := json.Unmarshal(decodeBytes(raw), &env); err == nil {
+	if err := json.Unmarshal(decodeBytes(raw), &env); err == nil && (env.Msg != "" || env.Error != "") {
 		if env.Msg != "" {
 			msg = env.Msg
-		} else if env.Error != "" {
+		} else {
 			msg = env.Error
 			if env.Description != "" {
 				msg += ": " + env.Description
 			}
 		}
+	} else if m := nestedBusinessMsg(raw); m != "" {
+		// 嵌套形态（{"error":{"data":{"code":…,"msg":"…"}}}）：顶层 error 是对象
+		// 而非字符串，envelope 解不出消息，msg 会退化成整段裸 JSON。
+		// 这句文案既要回给客户端、也要写进日志，必须提出可读的那段。
+		msg = m
 	}
 	if len(msg) > 500 {
 		msg = msg[:500]
@@ -233,12 +238,10 @@ func httpError(status int, raw []byte, retryAfter string) error {
 			f.RetryAfterSeconds = secs
 		}
 	}
-	// 「额度已用尽」类业务码（嵌套在 error.data.code，如 14018）与频率限制
-	// 语义不同：频率限制的消息明说「可切换其他模型」（模型级，到点重置）；
-	// 额度耗尽只说「购买加量包」——买一次全号恢复，是**账号级**的，
-	// 且没有精确重置时刻。识别它并打上 QuotaExhausted 标记，
-	// 号池据此做**账号级**长冷却（而不是按模型各冷一次，每个模型都要
-	// 再挨一次限流才知道这个号整个没额度了）。
+	// 「额度已用尽」类业务码（嵌套在 error.data.code，如 14018）：上游只说
+	// 「购买加量包」，没有可解析的重置时刻。识别它并打上 QuotaExhausted 标记，
+	// 号池据此走「拿不到重置时刻就不加锁、直接换号」的路径
+	//（不再像早期那样整号长冷却——那会把同账号的免费模型一起锁死）。
 	if code := nestedBusinessCode(raw); code == 14018 {
 		f.Code = fmt.Sprintf("upstream_%d", code)
 		f.RateLimited = true
@@ -246,7 +249,8 @@ func httpError(status int, raw []byte, retryAfter string) error {
 	}
 	// 上游限流消息自带精确的重置时刻（例：「您的使用量已超出频率限制，
 	// 将在 2026-09-16 23:21:31 UTC+8 重置」）。解析出来填进 RetryAfterSeconds，
-	// 号池就能做「到点解冻」的精确冷却，而不是拍一个固定时长。
+	// 号池据此冻结该 (账号,模型) 到点解冻——这是唯一会被信任的冷却时长；
+	// 解析不出就退化为「不冷却、换号」。
 	// 仅在限流且尚无 Retry-After 头时兜底填充。
 	if f.RateLimited && f.RetryAfterSeconds <= 0 {
 		if secs := resetEpochFromMsg(msg); secs > 0 {
@@ -300,6 +304,29 @@ func nestedBusinessCode(raw []byte) int {
 		return 0
 	}
 	return probe.Error.Data.Code
+}
+
+// nestedBusinessMsg 从响应体里提取嵌套的业务错误文案（error.data.msg）。
+//
+// 与 nestedBusinessCode 同一个来由：嵌套形态下顶层 envelope 解不出消息
+// （error 是对象而非字符串），若不提取，Message 会退化成整段裸 JSON
+// （客户端会看到 {"error":{"data":{"code":14018,…}}} 这种东西）。
+func nestedBusinessMsg(raw []byte) string {
+	var probe struct {
+		Error struct {
+			Msg  string `json:"msg"`
+			Data struct {
+				Msg string `json:"msg"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(decodeBytes(raw), &probe); err != nil {
+		return ""
+	}
+	if probe.Error.Data.Msg != "" {
+		return probe.Error.Data.Msg
+	}
+	return probe.Error.Msg
 }
 
 // decodeBytes 解码上游字节。上游偶发返回非 UTF-8（如 GBK），按 utf8 → GBK → GB18030 → 替换 兜底。

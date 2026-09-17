@@ -134,6 +134,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/accounts/models", a.withAuth(a.apiAccountModels))
 	mux.HandleFunc("/api/models", a.withAuth(a.apiModels))
 	mux.HandleFunc("/api/config", a.withAuth(a.apiConfig))
+	// /metrics 用 Prometheus 文本格式暴露同一份指标（见 apiPrometheus）。
+	// 与控制台接口一样走 withAuth：抓取端用 Authorization: Bearer <api_key> 即可。
+	mux.HandleFunc("/metrics", a.withAuth(a.apiPrometheus))
 
 	// 内置网页控制台：/ 与 /static/
 	mux.Handle("/static/", http.StripPrefix("/static/", web.Static()))
@@ -295,27 +298,35 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		return
 	}
 	// 会话亲和的路由键：同一会话的多轮请求粘住同一账号。
-	// 从原始 body 提取（协议无关），详见 affinity.go。
-	req.SessionKey = sessionKeyOf(body)
+	// 请求头优先（客户端显式声明），其次 body 里的稳定字段，详见 affinity.go。
+	req.SessionKey = sessionKeyOf(body, r.Header)
+
+	// 模型别名：客户端固定模型名 → 账号实际可用的模型（见 config.ModelsConfig）。
+	// 命中别名时记录原始名，控制台据此显示「claude-* → glm-5.3」。
+	model, platformHint := a.hub.ResolveAlias(req.Model)
+	if model != req.Model {
+		rec.ModelRequested = req.Model
+		req.Model = model
+	}
 	rec.Model = req.Model
 	rec.Stream = req.Stream
 
 	if req.Stream {
-		a.writeStream(w, r, proto, req, rec)
+		a.writeStream(w, r, proto, req, rec, platformHint)
 	} else {
-		a.writeFinal(w, r, proto, req, rec)
+		a.writeFinal(w, r, proto, req, rec, platformHint)
 	}
 	a.logger.Printf("protocol=%s model=%s stream=%v dur_ms=%d ok=%v",
 		proto.Name(), req.Model, req.Stream, time.Since(start).Milliseconds(), rec.OK)
 }
 
 // writeFinal 走非流式：上游恒为流式，这里在本地聚合成单个 JSON。
-func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record) {
+// platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
+func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
 	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.RequestTimeout())
 	defer cancel()
 
-	// 按模型名路由到所属平台；未知模型透传给默认平台（见 Hub 注释）。
-	rt := a.hub.Route(req.Model)
+	rt := a.hub.RouteWithHint(req.Model, platformHint)
 	rec.Platform = rt.ID
 	stream, err := rt.Adapter.Stream(ctx, req)
 	if err != nil {
@@ -370,9 +381,9 @@ func (a *App) fail(rec *obs.Record, err error) {
 //
 // committed 标记首字节是否已写出——一旦写出，HTTP 状态就是 200，
 // 此后的错误只能降级为流内错误事件。
-func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record) {
-	// 按模型名路由到所属平台；未知模型透传给默认平台（见 Hub 注释）。
-	rt := a.hub.Route(req.Model)
+// platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
+func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
+	rt := a.hub.RouteWithHint(req.Model, platformHint)
 	rec.Platform = rt.ID
 	stream, err := rt.Adapter.Stream(r.Context(), req)
 	if err != nil {

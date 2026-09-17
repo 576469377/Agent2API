@@ -14,9 +14,28 @@ type Config struct {
 	Upstream UpstreamConfig `json:"upstream"`
 	Auth     AuthConfig     `json:"auth"`
 	Log      LogConfig      `json:"log"`
+	Models   ModelsConfig   `json:"models"`
 	// MetricsFile 是指标落盘路径；空字符串表示不持久化（重启即清零）。
 	// 配置为绝对或相对路径均可；相对路径相对进程工作目录解析。
 	MetricsFile string `json:"metrics_file,omitempty"`
+}
+
+// ModelsConfig 是模型层的配置（别名与路由）。
+type ModelsConfig struct {
+	// Aliases 是模型别名表：客户端请求的模型名 → 实际路由目标。
+	//
+	// 两种写法：
+	//
+	//	"claude-sonnet-4-5-20250929": "glm-5.3"                // 同平台，换模型
+	//	"gpt-4o": "workbuddy/deepseek-v4-pro"                  // 指定平台 + 模型
+	//
+	// 用途：Claude Code / Codex 这类客户端会发固定的模型名，别名把它们映射到
+	// 账号实际可用的模型上，客户端零改动即可接入——即 sub2api 的 composite
+	// groups（管理员路由层）的轻量版。
+	//
+	// 未知平台名的 "a/b" 写法会被当作普通模型名（不报错），避免配置写错时
+	// 整个网关不可用。别名不会递归解析（别名指向的名字必须是真实模型）。
+	Aliases map[string]string `json:"aliases,omitempty"`
 }
 
 // ServerConfig 是 HTTP 服务配置。
@@ -64,6 +83,15 @@ type UpstreamConfig struct {
 	StreamTotalTimeoutSec int `json:"stream_total_timeout_sec"`
 	RequestTimeoutSec     int `json:"request_timeout_sec"`
 	ModelCacheTTLSec      int `json:"model_cache_ttl_sec"`
+
+	// MaxConcurrencyPerAccount 是每个上游账号的并发上限（0 = 不限，默认 4）。
+	//
+	// 存在的原因：客户端（Claude Code 等）会并发发请求，同一账号上同时压着
+	// 十几个请求时上游极易回 429，而 429 一旦发生就要换号重试，整体反而更慢。
+	// 并发上限把请求排在账号前面（本地排队，不是失败），让每个账号按自己能
+	// 承受的节奏被使用——与 sub2api 的 per-account concurrency limit 同思路。
+	// 号池选号时会优先挑「还有余量」的账号。
+	MaxConcurrencyPerAccount int `json:"max_concurrency_per_account"`
 }
 
 // PlatformConfig 是单个上游平台的配置。
@@ -86,6 +114,8 @@ type PlatformConfig struct {
 	StreamTotalTimeoutSec int `json:"stream_total_timeout_sec,omitempty"`
 	RequestTimeoutSec     int `json:"request_timeout_sec,omitempty"`
 	ModelCacheTTLSec      int `json:"model_cache_ttl_sec,omitempty"`
+	// MaxConcurrencyPerAccount 该平台的每账号并发上限；为 0 时回退顶层同名项。
+	MaxConcurrencyPerAccount int `json:"max_concurrency_per_account,omitempty"`
 }
 
 // autoPlatforms 是「自动集成」的候选清单（零配置时的默认行为）。
@@ -106,15 +136,16 @@ func (c Config) ResolvePlatforms() []PlatformConfig {
 	}
 	if c.Upstream.Platform != "" {
 		return []PlatformConfig{{
-			ID:                    c.Upstream.Platform,
-			CredentialPath:        c.Upstream.CredentialPath,
-			AccountsDir:           c.Upstream.AccountsDir,
-			BaseURL:               c.Upstream.BaseURL,
-			Sanitize:              c.Upstream.Sanitize,
-			StreamIdleTimeoutSec:  c.Upstream.StreamIdleTimeoutSec,
-			StreamTotalTimeoutSec: c.Upstream.StreamTotalTimeoutSec,
-			RequestTimeoutSec:     c.Upstream.RequestTimeoutSec,
-			ModelCacheTTLSec:      c.Upstream.ModelCacheTTLSec,
+			ID:                       c.Upstream.Platform,
+			CredentialPath:           c.Upstream.CredentialPath,
+			AccountsDir:              c.Upstream.AccountsDir,
+			BaseURL:                  c.Upstream.BaseURL,
+			Sanitize:                 c.Upstream.Sanitize,
+			StreamIdleTimeoutSec:     c.Upstream.StreamIdleTimeoutSec,
+			StreamTotalTimeoutSec:    c.Upstream.StreamTotalTimeoutSec,
+			RequestTimeoutSec:        c.Upstream.RequestTimeoutSec,
+			ModelCacheTTLSec:         c.Upstream.ModelCacheTTLSec,
+			MaxConcurrencyPerAccount: c.Upstream.MaxConcurrencyPerAccount,
 		}}
 	}
 	// 自动集成：平台的明细字段（凭证目录 / base_url / 超时）全部走
@@ -154,6 +185,9 @@ func (c Config) CloneForPlatform(pc PlatformConfig) Config {
 	if pc.ModelCacheTTLSec > 0 {
 		c.Upstream.ModelCacheTTLSec = pc.ModelCacheTTLSec
 	}
+	if pc.MaxConcurrencyPerAccount > 0 {
+		c.Upstream.MaxConcurrencyPerAccount = pc.MaxConcurrencyPerAccount
+	}
 	return c
 }
 
@@ -189,6 +223,10 @@ func Default() Config {
 			StreamTotalTimeoutSec: 1800,
 			RequestTimeoutSec:     60,
 			ModelCacheTTLSec:      1800,
+			// 每账号 4 并发：单账号被并发打爆是 429 的主要来源，4 足以
+			// 让单个客户端（含其子代理）跑满，又不至于让上游开始限流。
+			// 设 0 关闭（不限并发）。
+			MaxConcurrencyPerAccount: 4,
 		},
 		Log: LogConfig{Level: "info", Format: "text"},
 	}

@@ -3,6 +3,8 @@ package adapter
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,8 @@ type fakeAd struct {
 	events []llm.ResponseEvent
 	// onStream 在每次 Stream 被调用时执行（用于计数）。
 	onStream func()
+	// onClose 在返回的流被 Close 时执行（用于观测「同时在途」）。
+	onClose func()
 }
 
 func (f *fakeAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.ResponseStream, error) {
@@ -39,14 +43,15 @@ func (f *fakeAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respo
 		return nil, fl
 	}
 	if len(f.events) > 0 {
-		return &fakeStream{events: f.events}, nil
+		return &fakeStream{events: f.events, onClose: f.onClose}, nil
 	}
-	return &fakeStream{}, nil
+	return &fakeStream{onClose: f.onClose}, nil
 }
 
 type fakeStream struct {
-	events []llm.ResponseEvent
-	pos    int
+	events  []llm.ResponseEvent
+	pos     int
+	onClose func()
 }
 
 func (s *fakeStream) Recv(context.Context) (llm.ResponseEvent, error) {
@@ -58,7 +63,12 @@ func (s *fakeStream) Recv(context.Context) (llm.ResponseEvent, error) {
 	return ev, nil
 }
 
-func (s *fakeStream) Close() error { return nil }
+func (s *fakeStream) Close() error {
+	if s.onClose != nil {
+		s.onClose()
+	}
+	return nil
+}
 
 func (f *fakeAd) ListModels(context.Context) ([]ModelInfo, error) { return nil, nil }
 func (f *fakeAd) Name() string                                    { return f.name }
@@ -518,6 +528,36 @@ func TestProbeFirstEventPreservesContent(t *testing.T) {
 	}
 }
 
+// TestUnauthorizedFailsOverAndBlocks 覆盖真实 401 的形态：httpError 对 401
+// 同时置 Unauthorized 与 ClientFixable（401 属于「可修正」类状态码）。
+// 号池的 ClientFixable 分支若排在 Unauthorized 之前，401 会被当成「调用方
+// 请求有问题」直接返回——既不标记 blocked，也不换到下一个可用账号。
+func TestUnauthorizedFailsOverAndBlocks(t *testing.T) {
+	unauth := llm.NewFailure("unauthorized", "token expired", nil)
+	unauth.Unauthorized = true
+	unauth.ClientFixable = true // 与 httpError(401) 一致
+
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", err: unauth})
+	p.Add("b", &fakeAd{name: "test"})
+
+	// 选号是加权随机：循环直到 a 被选中（此时必须由 b 兜底成功）。
+	for i := 0; i < 50; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{})
+		if err != nil {
+			t.Fatalf("b 可用，鉴权失效的账号应被换掉（第 %d 次）: %v", i, err)
+		}
+		_ = closeStream(s)
+		p.mu.Lock()
+		blocked := p.accounts[0].state == stateBlocked
+		p.mu.Unlock()
+		if blocked {
+			return
+		}
+	}
+	t.Fatal("401 账号应在被选中时标记 blocked 并换号")
+}
+
 // TestAllBlockedReturnsUnauthorized 是「全池 401」的回归测试：
 // 全部账号鉴权失效是终态失败，必须返回 401 而非 429——
 // 返回 429 会让客户端无限重试一个永远不可能成功的请求。
@@ -525,6 +565,7 @@ func TestAllBlockedReturnsUnauthorized(t *testing.T) {
 	unauth := llm.NewFailure("unauthorized", "token expired", nil)
 	unauth.Unauthorized = true
 	p := NewPool("test", nil)
+
 	p.Add("a", &fakeAd{name: "test", err: unauth})
 	p.Add("b", &fakeAd{name: "test", err: unauth})
 
@@ -568,39 +609,30 @@ func TestAllCoolingUsesEarliestReset(t *testing.T) {
 	}
 }
 
-// TestRateLimitBackoffEscalates 验证无上游重置时刻时的指数退避与成功清零。
-func TestRateLimitBackoffEscalates(t *testing.T) {
-	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test"})
-	acc := p.accounts[0]
-
-	d1, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
-	p.cooldownModel(acc, "m1", d1, "x")
-	// 窗口未关：不升级。
-	d2, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
-	if d2 != d1 {
-		t.Fatalf("冷却窗口未关时不应升级: %v → %v", d1, d2)
+// TestUpstreamCooldownOnlyTrustsExplicitReset 验证新策略的核心不变量：
+// 冷却时长只能来自上游明确给出的重置时刻，号池自己绝不发明一个时长——
+// 拿不到就返回 0，调用方据此换号而不是加锁。
+func TestUpstreamCooldownOnlyTrustsExplicitReset(t *testing.T) {
+	// 上游没说何时重置：0 = 不知道。
+	if d := upstreamCooldown(llm.NewFailure("rate_limited", "too many requests", nil)); d != 0 {
+		t.Fatalf("上游未给重置时刻应返回 0（不冷却），got %v", d)
 	}
-	// 窗口过期后再失败：升级。
-	acc.modelCooldown["m1"] = time.Now().Add(-time.Second)
-	d3, _ := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
-	if d3 <= d1 {
-		t.Fatalf("窗口过期后应升级: %v → %v", d1, d3)
+	// 额度耗尽同样没有可解析的时刻（上游只说「购买加量包」）：也不发明时长。
+	quota := llm.NewFailure("upstream_14018", "额度已用尽，请购买加量包", nil)
+	if d := upstreamCooldown(quota); d != 0 {
+		t.Fatalf("额度耗尽未给重置时刻应返回 0（不冷却），got %v", d)
 	}
-	// 上游给了精确时刻：完全信任，不动等级。
-	before := acc.backoffLevel["m1"]
-	withRA := llm.NewFailure("rate_limited", "x", nil)
-	withRA.RetryAfterSeconds = 42
-	if got, _ := p.nextRateLimitBackoff(acc, "m1", withRA); got != 42*time.Second {
-		t.Fatalf("应信任上游 Retry-After, got %v", got)
+	// 上游给了精确时刻：照单接受——1 秒也是上游的真实意思，不设下限。
+	withReset := llm.NewFailure("rate_limited", "too many requests", nil)
+	withReset.RetryAfterSeconds = 42
+	if d := upstreamCooldown(withReset); d != 42*time.Second {
+		t.Fatalf("应接受上游的精确重置时刻，got %v", d)
 	}
-	if acc.backoffLevel["m1"] != before {
-		t.Fatal("上游给了精确时刻时不应推进退避等级")
-	}
-	// 成功清零。
-	p.succeed(0, 100)
-	if len(acc.backoffLevel) != 0 {
-		t.Fatalf("成功后应清零, got %+v", acc.backoffLevel)
+	// 异常数据仍受上限约束，不至于把模型挂起好几天。
+	huge := llm.NewFailure("rate_limited", "too many requests", nil)
+	huge.RetryAfterSeconds = int((72 * time.Hour).Seconds())
+	if d := upstreamCooldown(huge); d != maxCooldown {
+		t.Fatalf("超长重置时刻应封顶到 %v，got %v", maxCooldown, d)
 	}
 }
 
@@ -1000,5 +1032,157 @@ func TestSessionAffinityFailsOverWhenBoundAccountFails(t *testing.T) {
 			t.Fatal("a 已限流，不应再承接该会话")
 		}
 		_ = closeStream(s)
+	}
+}
+
+// TestPoolMaxConcurrencyIsEnforced 验证每账号并发上限（背压）的完整语义：
+// 槽位在**流的整个生命周期**内占用、超限的请求排队而不是失败、
+// 关流即归还、在途数可从 Statuses 读到（控制台据此显示负载）。
+func TestPoolMaxConcurrencyIsEnforced(t *testing.T) {
+	var mu sync.Mutex
+	live, maxLive := 0, 0
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{
+		name: "test",
+		onStream: func() {
+			mu.Lock()
+			live++
+			if live > maxLive {
+				maxLive = live
+			}
+			mu.Unlock()
+		},
+		onClose: func() {
+			mu.Lock()
+			live--
+			mu.Unlock()
+		},
+	})
+	p.SetMaxConcurrencyPerAccount(2)
+
+	const total = 6
+	streams := make(chan llm.ResponseStream, total)
+	var wg sync.WaitGroup
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "m"})
+			if err != nil {
+				t.Errorf("并发请求不应失败（应排队）: %v", err)
+				return
+			}
+			streams <- s
+		}()
+	}
+
+	// 逐个收流并关闭：每关一个，排队的请求才补位。
+	// 这条循环本身就是「无死锁 + 无槽位泄漏」的证明——任何一处泄漏都会超时。
+	for i := 0; i < total; i++ {
+		var s llm.ResponseStream
+		select {
+		case s = <-streams:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("第 %d 个请求超时（槽位未被归还）", i+1)
+		}
+		mu.Lock()
+		cur := live
+		mu.Unlock()
+		if cur > 2 {
+			t.Fatalf("同时在途 %d 超过上限 2", cur)
+		}
+		if i == 0 {
+			// 满员时应能读到在途数与上限（控制台展示依赖这两个字段）。
+			st := p.Statuses()[0]
+			if st.InFlight != 2 || st.MaxConcurrency != 2 {
+				t.Fatalf("Statuses 应反映在途/上限, got in_flight=%d max=%d",
+					st.InFlight, st.MaxConcurrency)
+			}
+		}
+		_ = closeStream(s)
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if maxLive > 2 {
+		t.Fatalf("峰值在途 %d 超过上限 2", maxLive)
+	}
+	if live != 0 {
+		t.Fatalf("全部关闭后仍有在途流: %d", live)
+	}
+	if st := p.Statuses()[0]; st.InFlight != 0 {
+		t.Fatalf("关闭后 in_flight 应为 0, got %d", st.InFlight)
+	}
+}
+
+// TestPoolSlotReleasedOnFailedAttempt 验证失败的尝试也会归还槽位：
+// 上限为 1 时，若失败路径漏掉归还，第二次请求就会永久阻塞。
+func TestPoolSlotReleasedOnFailedAttempt(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", err: &llm.Failure{
+		Code: "boom", Message: "上游抖动", UpstreamFault: true,
+	}})
+	p.SetMaxConcurrencyPerAccount(1)
+
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, err := p.Stream(ctx, llm.RequestMessages{Model: "m"})
+		// 必须在 cancel 之前判定：真正阻塞到超时的表现就是 ctx 已 Done。
+		blocked := ctx.Err()
+		cancel()
+		if err == nil {
+			t.Fatal("账号恒失败，请求应返回错误")
+		}
+		if blocked != nil {
+			t.Fatalf("第 %d 次请求疑似因槽位泄漏而阻塞: %v", i+1, blocked)
+		}
+	}
+	if st := p.Statuses()[0]; st.InFlight != 0 {
+		t.Fatalf("失败尝试后槽位未归还: in_flight=%d", st.InFlight)
+	}
+}
+
+// TestPoolPrefersAccountWithCapacity 验证选号会避开已满员的账号：
+// a 占满并发后，请求应全部落到 b，而不是排在 a 后面白等。
+func TestPoolPrefersAccountWithCapacity(t *testing.T) {
+	var bHits int32
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "a"})
+	p.Add("b", &fakeAd{name: "b", onStream: func() { atomic.AddInt32(&bHits, 1) }})
+	p.SetMaxConcurrencyPerAccount(1)
+
+	// 占满 a：反复请求直到某次命中 a（选号是加权随机的）。
+	var held llm.ResponseStream
+	for i := 0; i < 20 && held == nil; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "m"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l, ok := s.(AccountLabeler); ok && l.AccountLabel() == "a" {
+			held = s // a 的槽位被这个流占住
+			continue
+		}
+		_ = closeStream(s)
+	}
+	if held == nil {
+		t.Skip("未能稳定命中 a（选号随机），跳过")
+	}
+	defer func() { _ = closeStream(held) }()
+
+	// a 已满员：后续请求必须全部走 b。
+	before := atomic.LoadInt32(&bHits)
+	for i := 0; i < 10; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "m"})
+		if err != nil {
+			t.Fatalf("b 有余量，请求不应失败: %v", err)
+		}
+		if l, ok := s.(AccountLabeler); ok && l.AccountLabel() == "a" {
+			t.Fatal("a 已达并发上限，不应再被选中")
+		}
+		_ = closeStream(s)
+	}
+	if atomic.LoadInt32(&bHits) == before {
+		t.Fatal("请求应落到有余量的 b")
 	}
 }

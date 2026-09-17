@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"strings"
 )
 
 // 会话亲和（session affinity）。
@@ -18,17 +20,28 @@ import (
 // 延迟无递减、usage 无 cached_tokens），所以这里不做「保缓存」的承诺；
 // 亲和的价值在重复处理成本与一致性。上游若未来加入缓存，此机制自动受益。
 
-// sessionKeyOf 从请求体提取会话路由键。
+// sessionKeyOf 提取会话路由键。
 //
 // 优先级：
-//  1. Anthropic: metadata.user_id（Claude Code 每轮都发）
-//  2. OpenAI: user 字段
-//  3. 兜底：系统提示 + 首条 user 消息的哈希——它们在会话内稳定。
+//  1. 显式会话请求头：session_id / X-Session-Id / X-Session-ID / Session-Id
+//     ——客户端明说「这是同一个会话」时最可信（sub2api 也是用 session_id 头
+//     做粘性会话）。注意 Nginx 默认**丢弃带下划线的请求头**，自建反代要
+//     `underscores_in_headers on;` 才能透传 session_id。
+//  2. Anthropic: metadata.user_id（Claude Code 每轮都发）
+//  3. OpenAI: user 字段
+//  4. 兜底：系统提示 + 首条 user 消息的哈希——它们在会话内稳定。
 //     （完整消息列表逐轮增长，直接哈希会每轮变化，绝不能用。）
 //
-// body 是原始请求体（避免依赖具体协议结构）；解析失败返回空串，
+// body 是原始请求体（避免依赖具体协议结构）；都提取不到返回空串，
 // 该请求退化为普通调度。
-func sessionKeyOf(body []byte) string {
+func sessionKeyOf(body []byte, h http.Header) string {
+	// 1. 显式会话头。header 的 Get 大小写不敏感，但下划线是原样保留的，
+	//    因此这里要写出实际的键名（与 sub2api 的 session_id 兼容）。
+	for _, name := range []string{"session_id", "X-Session-Id", "Session-Id"} {
+		if v := strings.TrimSpace(h.Get(name)); v != "" {
+			return "s:" + v
+		}
+	}
 	var probe struct {
 		Metadata struct {
 			UserID string `json:"user_id"`
@@ -50,19 +63,19 @@ func sessionKeyOf(body []byte) string {
 		return "u:" + probe.User
 	}
 	// 兜底：系统提示 + 首条 user 消息。
-	h := sha256.New()
+	sum := sha256.New()
 	if len(probe.System) > 0 {
-		h.Write(probe.System)
+		sum.Write(probe.System)
 	}
 	for _, m := range probe.Messages {
 		if m.Role == "user" {
-			h.Write(m.Content)
+			sum.Write(m.Content)
 			break
 		}
 	}
-	sum := h.Sum(nil)
-	if len(sum) == 0 {
+	digest := sum.Sum(nil)
+	if len(digest) == 0 {
 		return ""
 	}
-	return "h:" + hex.EncodeToString(sum[:8])
+	return "h:" + hex.EncodeToString(digest[:8])
 }

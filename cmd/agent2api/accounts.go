@@ -34,6 +34,9 @@ func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) })
 
 	logf := func(format string, args ...any) { logger.Printf(format, args...) }
 	pool := adapter.NewPool(cfg.Upstream.Platform, logf)
+	// 每账号并发上限（0 = 不限）：装配期设定，之后不再变。
+	// 这是背压而不是限制功能——请求会排队等槽位，不会因此失败或换号。
+	pool.SetMaxConcurrencyPerAccount(cfg.Upstream.MaxConcurrencyPerAccount)
 	loaded := 0
 	seenUID := map[string]bool{} // 同一账号不得以两份凭证入池：独立刷新链会互相顶掉会话
 	for _, p := range paths {

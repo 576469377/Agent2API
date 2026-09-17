@@ -116,3 +116,66 @@ func TestAddrAndDurations(t *testing.T) {
 		t.Fatal("ModelCacheTTL 零值应回退默认")
 	}
 }
+
+// TestConcurrencyDefaultAndPlatformOverride 覆盖并发上限的默认值、
+// JSON 解析与平台级覆盖：这是「单账号被并发打爆」的那道闸门，
+// 默认值一旦静默变成 0（不限并发）就等于功能失效。
+func TestConcurrencyDefaultAndPlatformOverride(t *testing.T) {
+	cfg := Default()
+	if cfg.Upstream.MaxConcurrencyPerAccount != 4 {
+		t.Fatalf("默认每账号并发上限应为 4, got %d", cfg.Upstream.MaxConcurrencyPerAccount)
+	}
+	// 自动集成路径也要带上顶层值（否则 CloneForPlatform 后变成 0 = 不限）。
+	if pls := cfg.ResolvePlatforms(); pls[0].MaxConcurrencyPerAccount != 0 {
+		t.Fatalf("自动集成不应覆盖顶层值, got %+v", pls[0])
+	}
+	if got := cfg.CloneForPlatform(cfg.ResolvePlatforms()[0]); got.Upstream.MaxConcurrencyPerAccount != 4 {
+		t.Fatalf("未声明平台级上限时应回退顶层 4, got %d", got.Upstream.MaxConcurrencyPerAccount)
+	}
+	// 平台级显式覆盖。
+	cfg.Upstream.Platforms = []PlatformConfig{{ID: "workbuddy", Sanitize: true, MaxConcurrencyPerAccount: 9}}
+	got := cfg.CloneForPlatform(cfg.Upstream.Platforms[0])
+	if got.Upstream.MaxConcurrencyPerAccount != 9 {
+		t.Fatalf("平台级上限应覆盖顶层, got %d", got.Upstream.MaxConcurrencyPerAccount)
+	}
+	// 显式单平台模式把顶层值带进 PlatformConfig（供装配层统一读取）。
+	cfg2 := Default()
+	cfg2.Upstream.Platform = "workbuddy"
+	cfg2.Upstream.MaxConcurrencyPerAccount = 7
+	pls := cfg2.ResolvePlatforms()
+	if pls[0].MaxConcurrencyPerAccount != 7 {
+		t.Fatalf("单平台模式应带上顶层上限, got %+v", pls[0])
+	}
+	// 0 表示不限并发——允许显式关闭。
+	cfg3 := Default()
+	cfg3.Upstream.MaxConcurrencyPerAccount = 0
+	if got := cfg3.CloneForPlatform(cfg3.ResolvePlatforms()[0]); got.Upstream.MaxConcurrencyPerAccount != 0 {
+		t.Fatalf("0 应表示不限并发, got %d", got.Upstream.MaxConcurrencyPerAccount)
+	}
+}
+
+// TestAliasesFromJSON 验证别名表能按文档里的写法被解析出来。
+func TestAliasesFromJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	body := `{
+	  "models": {
+	    "aliases": {
+	      "claude-sonnet-4-5-20250929": "glm-5.3",
+	      "gpt-4o": "workbuddy/deepseek-v4-pro"
+	    }
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("加载配置失败: %v", err)
+	}
+	if len(cfg.Models.Aliases) != 2 {
+		t.Fatalf("别名条数不对: %+v", cfg.Models.Aliases)
+	}
+	if cfg.Models.Aliases["gpt-4o"] != "workbuddy/deepseek-v4-pro" {
+		t.Fatalf("平台限定别名未解析: %+v", cfg.Models.Aliases)
+	}
+}

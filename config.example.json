@@ -9,7 +9,14 @@
     "stream_idle_timeout_sec": 120,
     "stream_total_timeout_sec": 1800,
     "request_timeout_sec": 60,
-    "model_cache_ttl_sec": 1800
+    "model_cache_ttl_sec": 1800,
+    "max_concurrency_per_account": 4
+  },
+  "models": {
+    "aliases": {
+      "claude-sonnet-4-5-20250929": "glm-5.3",
+      "gpt-4o": "workbuddy/deepseek-v4-pro"
+    }
   },
   "auth": {
     "api_key": ""

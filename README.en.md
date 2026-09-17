@@ -2,34 +2,21 @@
 
 A local reverse-proxy gateway that translates AI agent platforms' private protocols into standard LLM APIs.
 
-It exposes OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages — so Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**. A built-in multi-platform Hub lets several upstream platforms coexist in one process, routed by model name — the bundled platform today is **WorkBuddy / CodeBuddy**.
+Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**: it exposes Chat Completions, Responses, and Anthropic Messages, with a built-in multi-platform Hub that routes each request by model name — the bundled platform today is **WorkBuddy / CodeBuddy**.
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.md) · [Disclaimer](DISCLAIMER.md)
-
----
 
 > [!WARNING]
 > **A personal learning and research project — not production software.** For use only with **your own authorized accounts**, on your own machine or a private environment, at your own risk.
 > It reads the **credentials** your desktop client is already logged in with (credentials = your account — never share them), and its operation **may not comply with upstream terms of service**. The author does not encourage or support commercial use or exposing it as a public service.
 
----
-
 ## Contents
 
-- [Background](#background)
-- [Quick Start](#quick-start)
-- [Web Console](#web-console)
-- [Multi-Account Pool](#multi-account-pool)
-- [Supported Endpoints](#supported-endpoints)
-- [Configuration](#configuration)
-- [Security](#security)
-- [Architecture](#architecture)
-- [Testing](#testing)
-- [FAQ](#faq)
-- [Known Limitations](#known-limitations)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
+**Start here**: [Background](#background) · [Quick Start](#quick-start) · [Web Console](#web-console) · [Multi-Account Pool](#multi-account-pool)
+
+**Reference**: [Supported Endpoints](#supported-endpoints) · [Configuration](#configuration) · [Security](#security) · [Architecture](#architecture)
+
+**Elsewhere**: [Testing](#testing) · [FAQ](#faq) · [Known Limitations](#known-limitations) · [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -85,7 +72,12 @@ agent2api                      # starts on 127.0.0.1:8787
 agent2api models               # list available models
 ```
 
-The banner prints the console URL — open it in a browser to manage the gateway.
+The banner prints the console URL — open it in a browser to manage the gateway. You can also confirm the gateway is alive with one command:
+
+```bash
+curl -s http://127.0.0.1:8787/health
+# {"platform":"workbuddy","platforms":["workbuddy"],"status":"ok","time":…}
+```
 
 > [!WARNING]
 > **Listening on `0.0.0.0` without `-api-key` means anyone on your network can spend your quota.**
@@ -108,15 +100,20 @@ export ANTHROPIC_API_KEY=anything    # not validated when no gateway key is set
 
 ### Examples
 
+The same prompt, once per protocol:
+
 ```bash
+# OpenAI Chat Completions
 curl http://127.0.0.1:8787/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hello"}]}'
 
+# Anthropic Messages
 curl http://127.0.0.1:8787/v1/messages \
   -H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" \
   -d '{"model":"deepseek-v4-flash","max_tokens":1024,"messages":[{"role":"user","content":"hello"}]}'
 
+# OpenAI Responses
 curl http://127.0.0.1:8787/v1/responses \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","input":"hello"}'
@@ -162,6 +159,7 @@ You can also **add accounts** from the console's Accounts page (device-code logi
 | Situation | Behavior |
 |---|---|
 | Normal routing | Requests are picked by **weighted random** over account health — healthier accounts are chosen more often but never hog traffic. Sessions **stick to one account**, so long contexts don't drift between accounts |
+| Concurrency pressure | Each account has a **concurrency limit** (default 4, `max_concurrency_per_account`): a saturated account stops being selected and requests **queue for a slot** instead of failing (local backpressure). In-flight counts show up in the console matrix header as "2/4" |
 | Rate limited (429) **with** an exact reset time from upstream | Only **that model on that account** cools down until the stated time (capped at 24h), then the request fails over; other models on the same account keep working |
 | Rate limited (429) **without** a reset time | **No lockout**: the account's health score drops and the request fails over — a single ordinary rate limit must not suspend a whole account/model (real-world logs showed "one question, both accounts cooling") |
 | Quota exhausted (14018) | Also **no lockout**: the upstream `credits` field is a cost multiplier, not an account balance, and the upstream gives no recovery time. Health drops, request fails over, and free/cheap models on the same account keep working |
@@ -170,9 +168,14 @@ You can also **add accounts** from the console's Accounts page (device-code logi
 | Transport error / 5xx | Fail over but don't cool down (could be a global blip), with pool-level backoff and jitter |
 | Model unservable pool-wide | Return 429 with the **earliest** thaw time, suggesting a different model; if everything is auth-failed instead, return 401 (retrying can never succeed) |
 
-The health score: success-rate EWMA×0.6 + latency EWMA×0.4, with a penalty for consecutive failures and shrinkage toward neutral on few samples. Exact scheduling and cooldown parameters live in [`internal/adapter/pool.go`](internal/adapter/pool.go).
+Health = success-rate EWMA×0.6 + latency EWMA×0.4, with a penalty for consecutive failures and shrinkage toward neutral on few samples. Exact parameters live in [`internal/adapter/pool.go`](internal/adapter/pool.go).
 
-The Accounts page also manages the pool at runtime: per-account scheduling state, login state and credential expiry, and usage (persisted across restarts). It supports **disable/enable** (temporarily pull an account out of rotation), **reset cooldown** (when upstream recovers early — also the recovery path for blocked accounts), and **re-login** (device-code login for a dropped account, writing back to the same file).
+The Accounts page lets you intervene at runtime — no restart needed:
+
+- **Disable / enable**: pull an account out of rotation temporarily
+- **Reset cooldown**: unfreeze manually when upstream recovers early (also the recovery path for blocked accounts)
+- **Re-login**: device-code login for a dropped account, writing back to the same file
+- Per-account scheduling state, login state, credential expiry and usage (persisted across restarts)
 
 > Desktop-client credentials and pool files can coexist — each account card is labeled with its source. The desktop client going offline **does not affect** the gateway: credentials are read once at startup and refreshed by the gateway itself.
 
@@ -185,11 +188,13 @@ The Accounts page also manages the pool at runtime: per-account scheduling state
 | `POST /v1/chat/completions` | OpenAI Chat Completions | ✅ | ✅ |
 | `POST /v1/responses` | OpenAI Responses | ✅ | ✅ |
 | `POST /v1/messages` | Anthropic Messages | ✅ | ✅ |
-| `GET /v1/models` | Model list | — | ✅ |
-| `GET /health` | Health check | — | ✅ |
-| `GET /` | Web console | — | ✅ |
+| `GET /v1/models` | Model list (includes aliases declared in `models.aliases`) | — | ✅ |
+| `GET /metrics` | Prometheus text-format metrics (same source as the console; API key required) | — | ✅ |
+| `GET /health` | Health check (reports status and platform IDs only; does not probe upstream) | — | ✅ |
 
 Supported features: text, reasoning, tool calls, multi-turn conversation, system prompts, sampling parameters, image input.
+
+The management and debugging UI lives at `/` (see [Web Console](#web-console)) — it is not an API.
 
 ---
 
@@ -242,6 +247,55 @@ Subcommands:
 > [!NOTE]
 > `server.write_timeout_sec` and `log.level` / `log.format` are not read at the moment (streaming responses deliberately have no write timeout; log level/format are not implemented yet) — kept for backward compatibility.
 
+### Model aliases (models.aliases)
+
+Clients send fixed model names (Claude Code asks for `claude-sonnet-4-5-*`, Codex for `gpt-5-*`) that often are not in your account's catalogue. The alias table maps them onto models your accounts actually have, so clients work **unmodified**:
+
+```json
+{
+  "models": {
+    "aliases": {
+      "claude-sonnet-4-5-20250929": "glm-5.3",
+      "gpt-4o": "workbuddy/deepseek-v4-pro"
+    }
+  }
+}
+```
+
+- Two forms: `"target-model"` (same platform) or `"platform-id/target-model"` (different platform **and** model)
+- Aliases are listed by `/v1/models` and on the console's Models page (clients usually only use names they can discover)
+- **No recursion** (the target must be a real model); a typo in the platform id degrades to a plain model name and logs a warning instead of breaking the gateway
+- Aliases only affect routing and the model name sent upstream — session affinity, pool scheduling and sanitization are untouched
+- The call log records both the requested model and the model actually used
+
+### Concurrency limit (max_concurrency_per_account)
+
+```json
+{ "upstream": { "max_concurrency_per_account": 4 } }
+```
+
+Clients fire requests in parallel, and a dozen in-flight requests on one account is the main source of upstream 429s. The limit **queues requests in front of the account** (local queueing, bounded by the client's own timeout) and prefers accounts that still have headroom:
+
+- Default **4**; set `0` to disable (unlimited)
+- This is **backpressure, not failure**: queued requests neither fail over nor mark an account as cooling
+- Queueing only happens when *every* account is saturated — as long as one has room, requests go straight through
+- Platforms may override it via `upstream.platforms[].max_concurrency_per_account`
+
+### Prometheus metrics (/metrics)
+
+`/metrics` exposes the same metrics as the console in Prometheus text format (`agent2api_requests_total`, `agent2api_in_flight_requests`, per-model/protocol/account counters, `agent2api_tokens_*_total`, plus `agent2api_build_info{version,go}`).
+
+```yaml
+scrape_configs:
+  - job_name: agent2api
+    authorization:
+      credentials: <api_key>
+    static_configs:
+      - targets: ["127.0.0.1:8787"]
+```
+
+> The average decode-speed metric is **omitted** when there are no samples — 0 tok/s and "never measured" are different things, and emitting 0 triggers false alerts.
+
 ---
 
 ## Security
@@ -277,7 +331,10 @@ Multi-platform orchestration lives in the **Hub** ([`internal/app/hub.go`](inter
 
 The interfaces are deliberately tiny: `Adapter` has just 3 methods (`Stream` / `ListModels` / `Name`) and `ResponseStream` just 1 (`Recv`). A fake adapter for tests costs about ten lines.
 
-See [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md) for the full design and [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md) for the upstream protocol teardown.
+Further reading:
+
+- Full design — [`docs/design/01-架构设计.md`](docs/design/01-架构设计.md)
+- Upstream protocol teardown — [`docs/research/02-WorkBuddy上游协议逆向.md`](docs/research/02-WorkBuddy上游协议逆向.md)
 
 ---
 
@@ -312,6 +369,12 @@ The upstream only supports streaming; non-streaming responses are aggregated pro
 **How do I change the port / listen address?**
 `-port` / `-host` (or the matching environment variables, see [Configuration](#configuration)). If you expose it to your LAN, set `-api-key` as well.
 
+**Session affinity doesn't seem to work / one session lands on different accounts?**
+Affinity derives its routing key in this order: **headers** (`session_id`, `X-Session-Id`) → `metadata.user_id` / `user` in the body → a hash of "system prompt + first user message". If you put Nginx in front, note that it **drops headers containing underscores by default** (`session_id` is one of them) — add `underscores_in_headers on;` in the `http` or `server` block, otherwise that signal never reaches the gateway.
+
+**Upstream rate limits as soon as I run things in parallel?**
+Each account allows 4 concurrent requests by default (`upstream.max_concurrency_per_account`); anything beyond that queues inside the gateway instead of hitting upstream. Lower it if you still see frequent 429s, or set `0` to disable queueing and let requests leave immediately. The "in-flight / limit" reading in the console matrix header tells you whether the pool is saturated or the limit is simply too tight.
+
 ---
 
 ## Known Limitations
@@ -319,7 +382,8 @@ The upstream only supports streaming; non-streaming responses are aggregated pro
 **By design**
 
 - **Upstream does not support non-streaming requests**: non-streaming responses are aggregated proxy-side, so TTFB matches streaming
-- **Single process, single instance**: cooldown state lives in memory; multiple instances cool down independently and will hammer upstream
+- **Single process, single instance**: cooldown state, session affinity and concurrency slots all live in memory; multiple instances act independently and will hammer upstream (shared state needs external storage — see Roadmap)
+- **The concurrency limit is per process**: with multiple instances each one counts on its own, so there is no global limit
 - **Quota query not implemented**: that upstream route requires enterprise privileges (403)
 - **Reasoning is one-way**: the upstream sends no thinking signature — Anthropic `thinking` blocks always carry an empty signature, and each turn re-reasons from scratch
 - **DSML text-mode tool-call fallback not implemented**: upstream currently uses native `tool_calls`; it must be added if upstream ever regresses
@@ -336,6 +400,11 @@ The upstream only supports streaming; non-streaming responses are aggregated pro
 - [ ] Pool circuit breaking and quota queries
 - [ ] A second platform adapter (Hub routing is ready; only the adapter is missing)
 - [ ] `cmd/probe` protocol drift detection
+- [ ] Multi API key distribution with per-key usage/limits (today: a single key plus in-process limits)
+- [ ] Shared state (cooldowns / affinity / concurrency slots) to support multi-instance deployments
+- [x] Model alias routing (`models.aliases`, sub2api's composite groups)
+- [x] Per-account concurrency limit with in-flight visibility (sub2api's per-account concurrency limit)
+- [x] Prometheus text metrics (`/metrics`)
 
 ---
 

@@ -61,6 +61,9 @@ type Hub struct {
 	// index 模型 ID → 平台 ID。启动时从各平台 ListModels 构建；
 	// 模型 ID 冲突时首个平台胜出并告警——两平台同名模型必然有一个路由不到。
 	index map[string]string
+	// aliases 是模型别名表（见 aliases.go）：请求模型名 → 实际路由目标。
+	// 装配期由 SetAliases 装载，运行期只读。
+	aliases map[string]aliasTarget
 
 	logger *log.Logger
 }
@@ -199,6 +202,9 @@ func (h *Hub) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			out = append(out, ModelInfo{ModelInfo: m, Platform: rt.ID})
 		}
 	}
+	// 别名也进目录：客户端通常只认列表里出现过的模型名，
+	// 不列出来它们就不会去用（控制台同理，需要一个地方能查到别名）。
+	out = append(out, aliasModelInfos(h.Aliases())...)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Platform != out[j].Platform {
 			return out[i].Platform < out[j].Platform

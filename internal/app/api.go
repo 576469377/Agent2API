@@ -16,6 +16,7 @@ import (
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/api/common"
 	"github.com/576469377/Agent2API/internal/llm"
+	"github.com/576469377/Agent2API/internal/obs"
 )
 
 // Version 是网关版本。
@@ -446,10 +447,96 @@ type accountModelLister interface {
 type accountCooling struct {
 	model   map[string]map[string]int
 	account map[string]int
+	// inflight 是「账号 → 在途请求数」，maxConc 是每账号并发上限（0 = 不限）。
+	// 与冷却无关，但同源（都来自 Statuses），放一起省一次遍历。
+	inflight map[string]int
+	maxConc  int
 }
 
-// apiAccountModels 返回模型×账号矩阵（全部平台合并：账号是列，模型是行）。
+// apiPrometheus 用 Prometheus 文本格式暴露指标（/metrics）。
 //
+// 为什么在已有 /api/metrics（JSON，给控制台）之外再开一个：JSON 快照是给人看
+// 的，而抓取系统（Prometheus / VictoriaMetrics / Grafana Agent）要的是文本格式
+// 与稳定的指标名。这里只是把同一份 Snapshot 重新渲染，不新增任何采集成本。
+//
+// 命名遵循 Prometheus 约定：计数器以 _total 结尾，单位写进名字
+// （_seconds / _milliseconds），标签值做转义。
+func (a *App) apiPrometheus(w http.ResponseWriter, r *http.Request) {
+	s := a.metrics.Snapshot()
+	var b strings.Builder
+
+	// build_info 是约定俗成的「版本指纹」：值恒为 1，版本进标签，
+	// 便于在监控里按版本分组对比（升级前后行为差异一眼可见）。
+	b.WriteString("# HELP agent2api_build_info 构建信息，值恒为 1\n")
+	b.WriteString("# TYPE agent2api_build_info gauge\n")
+	fmt.Fprintf(&b, "agent2api_build_info{version=%q,go=%q} 1\n", Version, runtime.Version())
+
+	writeGauge := func(name, help string, v float64) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %g\n", name, help, name, name, v)
+	}
+	writeCounter := func(name, help string, v int64) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
+	}
+	writeGauge("agent2api_uptime_seconds", "进程已运行秒数", float64(s.UptimeSec))
+	writeGauge("agent2api_in_flight_requests", "当前处理中的请求数", float64(s.InFlight))
+	writeGauge("agent2api_last_minute_rpm", "最近一分钟的请求数", float64(s.LastMinuteRPM))
+	writeGauge("agent2api_request_duration_milliseconds_avg", "请求平均耗时（毫秒）", s.AvgLatencyMs)
+	// TPS 无样本时**不输出**（而不是输出 0）：0 tok/s 与「没测过」是两回事，
+	// 监控里出现 0 会误导告警（见 obs.Snapshot 的同名注释）。
+	if s.TPSSamples > 0 {
+		writeGauge("agent2api_decode_tokens_per_second_avg", "平均解码速度（输出 token/秒）", s.AvgTPS)
+	}
+	writeCounter("agent2api_requests_total", "累计请求数", s.Total)
+	writeCounter("agent2api_requests_ok_total", "累计成功请求数", s.OK)
+	writeCounter("agent2api_requests_failed_total", "累计失败请求数", s.Failed)
+	writeCounter("agent2api_tokens_input_total", "累计输入 token 数", s.InputTokens)
+	writeCounter("agent2api_tokens_output_total", "累计输出 token 数", s.OutputTokens)
+	writeCounter("agent2api_tokens_reasoning_total", "累计思考 token 数", s.ReasoningTokens)
+
+	// 分组计数：模型 / 协议 / 账号。三者都是有限集合（模型数是账号目录大小、
+	// 账号数是号池容量、协议数是固定枚举），不会造成标签基数爆炸。
+	writeGroup := func(metric, label, help string, stats []obsGroupStat) {
+		if len(stats) == 0 {
+			return
+		}
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s counter\n", metric, help, metric)
+		for _, st := range stats {
+			fmt.Fprintf(&b, "%s{%s=%q} %d\n", metric+"_requests_total", label, st.Key, st.Total)
+			fmt.Fprintf(&b, "%s{%s=%q} %d\n", metric+"_requests_ok_total", label, st.Key, st.OK)
+			fmt.Fprintf(&b, "%s{%s=%q} %d\n", metric+"_requests_failed_total", label, st.Key, st.Failed)
+			fmt.Fprintf(&b, "%s{%s=%q} %d\n", metric+"_tokens_input_total", label, st.Key, st.InputTokens)
+			fmt.Fprintf(&b, "%s{%s=%q} %d\n", metric+"_tokens_output_total", label, st.Key, st.OutputTokens)
+		}
+	}
+	writeGroup("agent2api_model", "model", "按模型的累计指标", toObsStats(s.ByModel))
+	writeGroup("agent2api_protocol", "protocol", "按下游协议的累计指标", toObsStats(s.ByProtocol))
+	writeGroup("agent2api_account", "account", "按上游账号的累计指标", toObsStats(s.ByAccount))
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = w.Write([]byte(b.String()))
+}
+
+// obsGroupStat 是分组统计的最小投影（避免 api.go 直接依赖 obs 的内部结构）。
+type obsGroupStat struct {
+	Key          string
+	Total        int64
+	OK           int64
+	Failed       int64
+	InputTokens  int64
+	OutputTokens int64
+}
+
+func toObsStats(in []obs.GroupStat) []obsGroupStat {
+	out := make([]obsGroupStat, 0, len(in))
+	for _, g := range in {
+		out = append(out, obsGroupStat{
+			Key: g.Key, Total: g.Total, OK: g.OK, Failed: g.Failed,
+			InputTokens: g.InputTokens, OutputTokens: g.OutputTokens,
+		})
+	}
+	return out
+}
+
 // 跨平台 label 冲突时用「平台/label」区分；单账号平台退化为单列。
 func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
@@ -470,6 +557,10 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		//（额度耗尽/鉴权失效/人工停用）：整号不可用，与具体模型无关。
 		// 值为该账号的整号冷却剩余秒数；0 或不存在表示该账号无账号级冷却。
 		AccountCooldowns map[string]int `json:"account_cooldowns,omitempty"`
+		// InFlight 是「账号 → 当前在途请求数」，MaxConcurrency 是每账号并发
+		// 上限（0 = 不限）。控制台列头显示「在途/上限」，用于判断号池负载。
+		InFlight       map[string]int `json:"in_flight,omitempty"`
+		MaxConcurrency int            `json:"max_concurrency,omitempty"`
 	}
 	out := resp{
 		Accounts:         []string{},
@@ -477,6 +568,7 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		Matrix:           map[string][]string{},
 		Cooldowns:        map[string]map[string]int{},
 		AccountCooldowns: map[string]int{},
+		InFlight:         map[string]int{},
 	}
 	seen := map[string]bool{}
 
@@ -510,8 +602,17 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return nil
 		}
-		res := &accountCooling{model: map[string]map[string]int{}, account: map[string]int{}}
+		res := &accountCooling{
+			model:    map[string]map[string]int{},
+			account:  map[string]int{},
+			inflight: map[string]int{},
+		}
 		for _, st := range lister.Statuses() {
+			// 在途负载：控制台列头显示「2/4」，一眼看出号池是被打满还是空闲。
+			res.inflight[st.Label] = st.InFlight
+			if st.MaxConcurrency > res.maxConc {
+				res.maxConc = st.MaxConcurrency
+			}
 			if len(st.ModelCooldowns) > 0 {
 				res.model[st.Label] = st.ModelCooldowns
 			}
@@ -546,6 +647,13 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 				// 账号级冷却挂到列头（用与矩阵列一致的 key）。
 				if cooling != nil && cooling.account[label] > 0 {
 					out.AccountCooldowns[key] = cooling.account[label]
+				}
+				// 在途负载同样挂列头 key（只对号池适配器有意义）。
+				if cooling != nil {
+					out.InFlight[key] = cooling.inflight[label]
+					if cooling.maxConc > 0 {
+						out.MaxConcurrency = cooling.maxConc
+					}
 				}
 			}
 			continue
