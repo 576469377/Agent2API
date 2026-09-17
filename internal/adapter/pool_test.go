@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 type fakeAd struct {
 	name string
 	err  error
+	// limitModel 指定该账号上哪些模型返回限流错误（模拟上游按模型限流）。
+	limitModel map[string]bool
 	// events 非空时作为流的回放内容（用于首帧探针测试）。
 	events []llm.ResponseEvent
 	// onStream 在每次 Stream 被调用时执行（用于计数）。
@@ -24,6 +27,9 @@ func (f *fakeAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respo
 	}
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.limitModel != nil && f.limitModel[req.Model] {
+		return nil, rateLimitedErr("model " + req.Model + " quota exceeded")
 	}
 	if len(f.events) > 0 {
 		return &fakeStream{events: f.events}, nil
@@ -100,8 +106,20 @@ func TestPoolCooldownsRateLimitedAndFailsOver(t *testing.T) {
 	if hits[1] != 4 {
 		t.Fatalf("健康账号应承接全部请求, hits_b=%d", hits[1])
 	}
-	if got := p.HealthyCount(); got != 1 {
-		t.Fatalf("健康账号应剩 1 个, got %d", got)
+	// 账号本身仍健康（限流是模型级的），但 model-x 在该账号上已冷却。
+	p.mu.Lock()
+	accA := p.accounts[0]
+	cooling := accA.modelCooling(time.Now(), "")
+	acctUsable := accA.accountUsable(time.Now())
+	p.mu.Unlock()
+	if !cooling {
+		t.Fatal("该账号上的空模型键应处于冷却（测试未传模型名）")
+	}
+	if !acctUsable {
+		t.Fatal("账号不应因单模型限流而整体不健康")
+	}
+	if got := p.HealthyCount(); got != 2 {
+		t.Fatalf("两个账号本身都应健康, got %d", got)
 	}
 }
 
@@ -112,17 +130,19 @@ func TestPoolCooldownExpires(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("x"), onStream: func() { hits++ }})
 	p.Add("b", &fakeAd{name: "test"})
 
-	// 触发 a 的冷却。
-	_, _ = p.Stream(context.Background(), llm.RequestMessages{})
-	if p.HealthyCount() != 1 {
-		t.Fatalf("限流后应只剩 1 个健康账号")
-	}
-	// 人为把冷却时间拨回过去，模拟到期。
+	// 触发 a 上 model-x 的冷却。
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
 	p.mu.Lock()
-	p.accounts[0].cooldownUntil = time.Now().Add(-time.Second)
+	coolingNow := p.accounts[0].modelCooling(time.Now(), "model-x")
+	// 人为把该模型冷却拨回过去，模拟到期。
+	p.accounts[0].modelCooldown["model-x"] = time.Now().Add(-time.Second)
+	coolingAfter := p.accounts[0].modelCooling(time.Now(), "model-x")
 	p.mu.Unlock()
-	if p.HealthyCount() != 2 {
-		t.Fatalf("冷却到期后应恢复 2 个健康账号")
+	if !coolingNow {
+		t.Fatal("model-x 应处于冷却中")
+	}
+	if coolingAfter {
+		t.Fatal("冷却到期后该模型应恢复可用")
 	}
 	_ = hits
 }
@@ -205,12 +225,10 @@ func TestPoolStatusesAndDescribe(t *testing.T) {
 	if len(sts) != 2 {
 		t.Fatalf("应有 2 条状态, got %d", len(sts))
 	}
+	// 模型级限流不改变账号健康：两个账号都应健康，Notes 不再罗列。
 	d := p.Describe()
 	if d.Status != "active" {
-		t.Fatalf("还有健康账号时不应 degraded: %+v", d)
-	}
-	if d.Notes == "" {
-		t.Fatal("有冷却账号时 Notes 应列出")
+		t.Fatalf("账号本身健康时不应 degraded: %+v", d)
 	}
 }
 
@@ -296,30 +314,34 @@ func TestPoolAllCoolingReturns429AndRetryAfter(t *testing.T) {
 
 // ───────────────── 多账号加固（参考 sub2api / CLIProxyAPI 后新增） ─────────────────
 
-// TestCooldownNeverShortens 是「并发冷却互相缩短」的回归测试。
-// 两个并发请求各自判定出不同时长时，后写者不得砍短已判定的窗口。
+// TestCooldownNeverShortens 是「并发冷却互相缩短」的回归测试（模型维度）。
+// 同一 (账号, 模型) 上，后写者不得砍短已判定的冷却窗口。
 func TestCooldownNeverShortens(t *testing.T) {
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{name: "test"})
 	acc := p.accounts[0]
 
-	p.cooldown(acc, 60*time.Second, reasonRateLimited, "long")
-	first := acc.cooldownUntil
+	p.cooldownModel(acc, "m1", 60*time.Second, "long")
+	first := acc.modelCooldown["m1"]
 
-	p.cooldown(acc, 5*time.Second, reasonRateLimited, "short")
-	if acc.cooldownUntil.Before(first) {
-		t.Fatalf("冷却被缩短了：%v → %v", first, acc.cooldownUntil)
+	p.cooldownModel(acc, "m1", 5*time.Second, "short")
+	if acc.modelCooldown["m1"].Before(first) {
+		t.Fatalf("冷却被缩短了：%v → %v", first, acc.modelCooldown["m1"])
 	}
 	// 更长的冷却必须能延长。
-	p.cooldown(acc, 120*time.Second, reasonRateLimited, "longer")
-	if !acc.cooldownUntil.After(first) {
-		t.Fatalf("更长的冷却未生效：%v", acc.cooldownUntil)
+	p.cooldownModel(acc, "m1", 120*time.Second, "longer")
+	if !acc.modelCooldown["m1"].After(first) {
+		t.Fatalf("更长的冷却未生效：%v", acc.modelCooldown["m1"])
 	}
 	// 过期后必须能正常写入新冷却（防「只延长」把过期值锁死）。
-	acc.cooldownUntil = time.Now().Add(-time.Second)
-	p.cooldown(acc, 30*time.Second, reasonRateLimited, "after-expiry")
-	if !acc.cooldownUntil.After(time.Now()) {
+	acc.modelCooldown["m1"] = time.Now().Add(-time.Second)
+	p.cooldownModel(acc, "m1", 30*time.Second, "after-expiry")
+	if !acc.modelCooldown["m1"].After(time.Now()) {
 		t.Fatal("过期后新冷却未写入")
+	}
+	// 不同模型互不影响。
+	if _, ok := acc.modelCooldown["m2"]; ok {
+		t.Fatal("m1 的冷却不应波及 m2")
 	}
 }
 
@@ -328,8 +350,8 @@ func TestCooldownCapsAtMax(t *testing.T) {
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{name: "test"})
 	acc := p.accounts[0]
-	p.cooldown(acc, 999*time.Hour, reasonRateLimited, "absurd")
-	if d := time.Until(acc.cooldownUntil); d > maxCooldown+time.Minute {
+	p.cooldownModel(acc, "m1", 999*time.Hour, "absurd")
+	if d := time.Until(acc.modelCooldown["m1"]); d > maxCooldown+time.Minute {
 		t.Fatalf("冷却未受上限约束: %v", d)
 	}
 }
@@ -351,21 +373,22 @@ func TestProbeFirstEventDetectsInBandError(t *testing.T) {
 	p.Add("bad", bad)
 	p.Add("good", good)
 
-	s, err := p.Stream(context.Background(), llm.RequestMessages{})
+	s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
 	if err != nil {
 		t.Fatalf("应换到健康账号: %v", err)
 	}
 	defer func() { _ = closeStream(s) }()
-	// 限流账号被冷却 → 只剩 1 个健康账号。
-	if got := p.HealthyCount(); got != 1 {
-		t.Fatalf("限流账号应被冷却, healthy=%d（want 1）", got)
+	// 限流是模型级的：该模型在 bad 账号上被冷却，账号本身仍健康。
+	p.mu.Lock()
+	cooling := p.accounts[0].modelCooling(time.Now(), "model-x")
+	p.mu.Unlock()
+	if !cooling {
+		t.Fatal("首帧报错的模型应被冷却")
 	}
-	// 被冷却的账号应带上限流原因，供控制台展示。
+	// 控制台可见：bad 账号的 ModelCooldowns 里有该模型。
 	for _, st := range p.Statuses() {
-		if st.Label == "bad" {
-			if st.State != "cooldown" || st.Reason != "rate_limited" {
-				t.Fatalf("冷却状态/原因不符: %+v", st)
-			}
+		if st.Label == "bad" && st.ModelCooldowns["model-x"] <= 0 {
+			t.Fatalf("应暴露该模型的冷却: %+v", st.ModelCooldowns)
 		}
 	}
 }
@@ -452,33 +475,33 @@ func TestRateLimitBackoffEscalates(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test"})
 	acc := p.accounts[0]
 
-	d1 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
-	p.cooldown(acc, d1, reasonRateLimited, "x")
+	d1 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
+	p.cooldownModel(acc, "m1", d1, "x")
 	// 窗口未关：不升级。
-	d2 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
+	d2 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
 	if d2 != d1 {
 		t.Fatalf("冷却窗口未关时不应升级: %v → %v", d1, d2)
 	}
 	// 窗口过期后再失败：升级。
-	acc.cooldownUntil = time.Now().Add(-time.Second)
-	d3 := p.nextRateLimitBackoff(acc, llm.NewFailure("rate_limited", "x", nil))
+	acc.modelCooldown["m1"] = time.Now().Add(-time.Second)
+	d3 := p.nextRateLimitBackoff(acc, "m1", llm.NewFailure("rate_limited", "x", nil))
 	if d3 <= d1 {
 		t.Fatalf("窗口过期后应升级: %v → %v", d1, d3)
 	}
 	// 上游给了精确时刻：完全信任，不动等级。
-	before := acc.backoffLevel
+	before := acc.backoffLevel["m1"]
 	withRA := llm.NewFailure("rate_limited", "x", nil)
 	withRA.RetryAfterSeconds = 42
-	if got := p.nextRateLimitBackoff(acc, withRA); got != 42*time.Second {
+	if got := p.nextRateLimitBackoff(acc, "m1", withRA); got != 42*time.Second {
 		t.Fatalf("应信任上游 Retry-After, got %v", got)
 	}
-	if acc.backoffLevel != before {
+	if acc.backoffLevel["m1"] != before {
 		t.Fatal("上游给了精确时刻时不应推进退避等级")
 	}
 	// 成功清零。
 	p.succeed(0)
-	if acc.backoffLevel != 0 {
-		t.Fatalf("成功后应清零, got %d", acc.backoffLevel)
+	if len(acc.backoffLevel) != 0 {
+		t.Fatalf("成功后应清零, got %+v", acc.backoffLevel)
 	}
 }
 
@@ -501,8 +524,11 @@ func TestStatusesExposeStateAndNext(t *testing.T) {
 	for _, st := range sts {
 		byLabel[st.Label] = st
 	}
-	if byLabel["a.json"].State != "cooldown" || byLabel["a.json"].Reason != "rate_limited" {
-		t.Fatalf("限流账号状态错误: %+v", byLabel["a.json"])
+	if !byLabel["a.json"].Healthy {
+		t.Fatalf("单模型限流不应让账号不健康: %+v", byLabel["a.json"])
+	}
+	if byLabel["a.json"].ModelCooldowns["(unknown)"] <= 0 {
+		t.Fatalf("应暴露被限模型的冷却: %+v", byLabel["a.json"].ModelCooldowns)
 	}
 	if byLabel["b.json"].State != "blocked" || byLabel["b.json"].Reason != "unauthorized" {
 		t.Fatalf("鉴权失效账号状态错误: %+v", byLabel["b.json"])
@@ -519,5 +545,117 @@ func TestStatusesExposeStateAndNext(t *testing.T) {
 	}
 	if nextCount != 1 {
 		t.Fatalf("is_next 应恰为 1 个, got %d", nextCount)
+	}
+}
+
+// ───────────────── 模型级冷却（限流按「账号 × 模型」维度） ─────────────────
+
+// TestRateLimitCooldownIsPerModel 是本次修复的核心回归：
+// 一个模型被限流，不得把同账号上其他模型一起冷掉。
+//
+// 依据是上游自己的提示：「您的使用量已超出频率限制，将在 …重置，
+// 您也可以切换其他模型继续使用」——限流是「账号 × 模型」维度的。
+// 旧实现按账号冷却，会把该账号其他模型的可用额度白扔（实测可达数小时）。
+func TestRateLimitCooldownIsPerModel(t *testing.T) {
+	// 账号 a 只在 model-x 上被限；model-y 正常应能继续用 a。
+	limited := map[string]bool{"model-x": true}
+	var hitsA, hitsB int
+	a := &fakeAd{name: "test", onStream: func() { hitsA++ }}
+	a.limitModel = limited
+	b := &fakeAd{name: "test", onStream: func() { hitsB++ }}
+
+	p := NewPool("test", nil)
+	p.Add("a", a)
+	p.Add("b", b)
+
+	// 第一次请求 model-x：a 被限 → 换到 b。
+	if _, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"}); err != nil {
+		t.Fatalf("model-x 应能换号成功: %v", err)
+	}
+
+	// 关键断言：a 上 model-x 已冷却，但 model-y 仍可用。
+	p.mu.Lock()
+	accA := p.accounts[0]
+	now := time.Now()
+	xCooling := accA.modelCooling(now, "model-x")
+	yAvailable := accA.available(now, "model-y")
+	acctHealthy := accA.available(now, "")
+	p.mu.Unlock()
+
+	if !xCooling {
+		t.Fatal("model-x 应处于冷却中")
+	}
+	if !yAvailable {
+		t.Fatal("model-y 不应受 model-x 限流影响（上游明确说可切换其他模型）")
+	}
+	if !acctHealthy {
+		t.Fatal("账号不应因单模型限流而整体不可用")
+	}
+}
+
+// TestModelCooldownDoesNotBlockOtherModelsInPool 端到端：
+// model-x 被限后，model-x 请求走 b；model-y 请求仍可用 a（轮询）。
+func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
+	a := &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}}
+	b := &fakeAd{name: "test"}
+
+	p := NewPool("test", nil)
+	p.Add("a", a)
+	p.Add("b", b)
+
+	// 触发 a 上 model-x 的冷却。
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+
+	// model-y：a 应该仍然参与轮询（两个账号都可用）。
+	seen := map[string]bool{}
+	for i := 0; i < 10; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-y"})
+		if err != nil {
+			t.Fatalf("model-y 不应失败: %v", err)
+		}
+		if l, ok := s.(interface{ AccountLabel() string }); ok {
+			seen[l.AccountLabel()] = true
+		}
+		_ = closeStream(s)
+	}
+	if !seen["a"] || !seen["b"] {
+		t.Fatalf("model-y 应在两个账号间轮询，实际用到: %v", seen)
+	}
+}
+
+// TestAllAccountsCoolingIsPerModel 验证全池冷却的错误消息指明是哪个模型。
+func TestAllAccountsCoolingIsPerModel(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("quota")})
+	p.Add("b", &fakeAd{name: "test", err: rateLimitedErr("quota")})
+
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	_, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	f := llm.Wrap(err)
+	if f.Code != "all_accounts_cooling" {
+		t.Fatalf("code=%s", f.Code)
+	}
+	if !strings.Contains(f.Message, "model-x") {
+		t.Fatalf("错误消息应指明被限的模型: %q", f.Message)
+	}
+}
+
+// TestStatusesExposeModelCooldowns 验证控制台能拿到「哪些模型在冷却」。
+func TestStatusesExposeModelCooldowns(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}})
+	p.Add("b", &fakeAd{name: "test"})
+	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+
+	for _, st := range p.Statuses() {
+		if st.Label != "a" {
+			continue
+		}
+		if st.ModelCooldowns["model-x"] <= 0 {
+			t.Fatalf("a 应暴露 model-x 的冷却: %+v", st.ModelCooldowns)
+		}
+		if !st.Healthy {
+			t.Fatal("账号本身应仍是健康的（只是某个模型被限）")
+		}
 	}
 }

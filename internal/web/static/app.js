@@ -44,6 +44,7 @@
       'acct.unauthorized': 'Auth failed', 'acct.disabled': 'Disabled',
       'acct.relogin': 'Re-login', 'acct.disable': 'Disable', 'acct.enable': 'Enable',
       'acct.reset': 'Reset cooldown', 'acct.state': 'State', 'acct.cool': 'Cooldown left',
+      'acct.modelslimited': 'models limited',
       'acct.usage': 'Usage', 'acct.success': 'Success rate', 'acct.lasterr': 'Last error',
       'acct.src': 'Source', 'acct.srcdesktop': 'Desktop client', 'acct.srcfile': 'Pool file',
       'login.ok': 'valid until', 'login.expiring': 'expiring soon (auto-refresh)',
@@ -92,6 +93,7 @@
       'acct.unauthorized': '鉴权失效', 'acct.disabled': '已停用',
       'acct.relogin': '重新登录', 'acct.disable': '停用', 'acct.enable': '启用',
       'acct.reset': '清除冷却', 'acct.state': '状态', 'acct.cool': '剩余冷却',
+      'acct.modelslimited': '个模型限流',
       'acct.usage': '用量', 'acct.success': '成功率', 'acct.lasterr': '最近错误',
       'acct.src': '来源', 'acct.srcdesktop': '桌面客户端', 'acct.srcfile': '号池文件',
       'login.ok': '有效至', 'login.expiring': '凭证即将过期（网关会自动刷新）',
@@ -331,7 +333,10 @@
   }
 
   function renderStatus(st) {
-    $('brandSub').textContent = st.platform + (st.account ? ' · ' + st.account : '');
+    // 品牌副行（平台名/账号）不再展示：单平台下是冗余信息，视觉上也突兀。
+    const bs = $('brandSub');
+    bs.textContent = '';
+    bs.style.display = 'none';
     $('sideMeta').textContent = 'v' + st.version + ' · ' + st.go_version;
     $('healthText').textContent = '运行中';
     setDot('ok');
@@ -757,6 +762,7 @@
 
   async function loadAccounts() {
     try {
+      // 账号是统一号池：一次拉取所有上游的账号，platform 只是账号属性。
       const [mgr, mt] = await Promise.all([
         get('/api/accounts/manage'),
         get('/api/metrics').catch(() => null),
@@ -781,13 +787,15 @@
 
     if (!list.length) {
       host.innerHTML = emptyPanel(t('acct.next') === '下一个使用' ? '还没有可用账号' : 'No accounts yet',
-        t('acct.next') === '下一个使用' ? '把凭证文件放进号池目录，或点「添加账号」走设备码登录。' : 'Put credential files into the pool directory, or use "Add account" for device-code login.');
+        t('acct.next') === '下一个使用' ? '把凭证文件放进号池目录，或点「添加账号」选择上游类型登录。' : 'Put credential files into the pool directory, or use "Add account".');
       $('acctSub').textContent = '号池为空';
       return;
     }
 
+    // 号池目录：多平台时逐个列出（去重、只显示非空项）。
+    const dirs = [...new Set(((d.platforms || []).map((p) => p.accounts_dir).filter(Boolean)))];
     $('acctSub').textContent =
-      `${d.healthy}/${d.total} 个账号可用` + (d.accounts_dir ? ` · 号池目录 ${d.accounts_dir}` : '')
+      `${d.healthy}/${d.total} 个账号可用` + (dirs.length ? ` · 号池目录 ${dirs.join('、')}` : '')
       + (m && m.by_account && m.by_account.length ? ` · 用量累计自进程启动` : '');
 
     const cards = list.map((a) => accountManageCard(a, usage[a.label])).join('');
@@ -799,10 +807,16 @@
     const id = a.identity || {};
     const lv = a.healthy ? 'ok' : (a.reason === 'rate_limited' ? 'warn'
       : a.reason === 'disabled' ? 'off' : 'err');
-    const stateTxt = a.healthy ? t('acct.ok')
+    // 模型级冷却：账号可能整体健康，但部分模型被限流（上游按模型限流）。
+    const mc = a.model_cooldowns || {};
+    const mcList = Object.entries(mc);
+    let stateTxt = a.healthy ? t('acct.ok')
       : a.reason === 'rate_limited' ? `${t('acct.ratelimited')} · ${fmtCountdown(a.cooldown_secs)}`
       : a.reason === 'unauthorized' ? t('acct.unauthorized')
       : a.reason === 'disabled' ? t('acct.disabled') : t('acct.ratelimited');
+    if (a.healthy && mcList.length) {
+      stateTxt = `${t('acct.ok')} · ${mcList.length} ${t('acct.modelslimited')}`;
+    }
 
     // 登录状态：refreshToken 过期是终态（必须重新登录）；access 过期网关会自查。
     let loginTxt = t('login.unknown'), loginLv = '';
@@ -828,8 +842,9 @@
     } else {
       acts.push(`<button class="btn btn-xs" data-acct="disable" data-label="${esc(a.label)}">停用</button>`);
     }
-    if (!a.healthy && a.reason === 'rate_limited') {
-      acts.push(`<button class="btn btn-xs" data-acct="reset" data-label="${esc(a.label)}">清除冷却</button>`);
+    // 账号级限流或有模型级冷却时都给「清除冷却」入口——上游提前恢复时手动解冻。
+    if ((!a.healthy && a.reason === 'rate_limited') || mcList.length) {
+      acts.push(`<button class="btn btn-xs" data-acct="reset" data-label="${esc(a.label)}">${esc(t('acct.reset'))}</button>`);
     }
     const reloginTip = id.source === 'desktop'
       ? t('acct.srcdesktop')
@@ -845,6 +860,7 @@
         <dt>来源</dt><dd>${srcBadge}</dd>
         <dt>登录</dt><dd class="${loginLv ? 'kv-' + loginLv : ''}" title="${esc(loginTxt)}">${esc(loginTxt)}</dd>
         ${usageRow}
+        ${mcList.length ? `<dt>${esc(t('acct.modelslimited'))}</dt><dd title="${esc(mcList.map(([m, s2]) => `${m} (${fmtCountdown(s2)})`).join('\n'))}">${esc(mcList.map(([m, s2]) => `${m} · ${fmtCountdown(s2)}`).join('、'))}</dd>` : ''}
         ${a.last_error ? `<dt>最近错误</dt><dd title="${esc(a.last_error)}">${esc(a.last_error)}</dd>` : ''}
       </dl>
       <div class="acct-acts">${acts.join('')}</div>
@@ -914,9 +930,9 @@
         if (s.status === 'pending') { $('loginState').textContent = '等待授权中…'; continue; }
         if (s.status === 'success') {
           $('loginState').textContent = '登录成功' + (s.account ? '：' + s.account : '');
-          // 凭证写到了哪里、怎么进号池——不提示这句话，新凭证就是「登录成功但没生效」。
+          // 号池监视器会自动捡起新凭证（≤10 秒），无需重启、无需手动配置。
           if (s.accounts_dir_used) {
-            toast(`凭证已写入 ${s.accounts_dir_used}。把它配为 accounts_dir（或下次启动前在工作目录建 auths/ 并复制进去）即可参与轮询`, 'success', 9000);
+            toast(`账号已添加${s.account ? '：' + s.account : ''}（凭证已写入 ${s.accounts_dir_used}，稍后自动入池）`, 'success', 6000);
           } else {
             toast('账号已添加' + (s.account ? '：' + s.account : ''), 'success');
           }
