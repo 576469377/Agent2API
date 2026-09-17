@@ -15,6 +15,9 @@ type fakeAd struct {
 	err  error
 	// limitModel 指定该账号上哪些模型返回限流错误（模拟上游按模型限流）。
 	limitModel map[string]bool
+	// retryAfter 是限流错误携带的精确重置秒数（>0 时模拟上游给出
+	// 「将在 HH:MM 重置」；0 表示上游未给——新策略下这类失败不锁定）。
+	retryAfter int
 	// events 非空时作为流的回放内容（用于首帧探针测试）。
 	events []llm.ResponseEvent
 	// onStream 在每次 Stream 被调用时执行（用于计数）。
@@ -29,7 +32,11 @@ func (f *fakeAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respo
 		return nil, f.err
 	}
 	if f.limitModel != nil && f.limitModel[req.Model] {
-		return nil, rateLimitedErr("model " + req.Model + " quota exceeded")
+		fl := rateLimitedFailure("model " + req.Model + " quota exceeded")
+		if f.retryAfter > 0 {
+			fl.RetryAfterSeconds = f.retryAfter
+		}
+		return nil, fl
 	}
 	if len(f.events) > 0 {
 		return &fakeStream{events: f.events}, nil
@@ -64,6 +71,12 @@ func rateLimitedFailure(msg string) *llm.Failure {
 	return f
 }
 
+// withRetryAfter 给限流错误附上精确重置秒数（模拟上游「将在 HH:MM 重置」）。
+func withRetryAfter(f *llm.Failure, secs int) *llm.Failure {
+	f.RetryAfterSeconds = secs
+	return f
+}
+
 // TestPoolRotatesAcrossHealthyAccounts 验证轮询：连续请求均匀落到各账号。
 func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 	var hits [2]int
@@ -71,15 +84,17 @@ func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test", onStream: func() { hits[0]++ }})
 	p.Add("b", &fakeAd{name: "test", onStream: func() { hits[1]++ }})
 
-	for i := 0; i < 6; i++ {
+	// 样本取 60：6 次的伯努利抽样有 ~20% 概率出现 [1 5]/[0 6] 型倾斜（实测偶发），
+	// 60 次下 P(份额 < 0.2) 约 1e-6，测试才稳定。
+	for i := 0; i < 60; i++ {
 		if _, err := p.Stream(context.Background(), llm.RequestMessages{}); err != nil {
 			t.Fatalf("第 %d 次请求不应失败: %v", i, err)
 		}
 	}
 	// 健康度加权随机：全健康时两账号同分，应接近均分（不是精确 50/50）。
 	total := hits[0] + hits[1]
-	if total != 6 {
-		t.Fatalf("6 次请求应全部成功, hits=%v", hits)
+	if total != 60 {
+		t.Fatalf("60 次请求应全部成功, hits=%v", hits)
 	}
 	for _, h := range hits {
 		if float64(h)/float64(total) < 0.2 {
@@ -88,46 +103,37 @@ func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 	}
 }
 
-// TestPoolCooldownsRateLimitedAndFailsOver 是号池的核心场景：
-// 一个账号被限流 → 冷却它 → 后续请求自动走其余账号。
-func TestPoolCooldownsRateLimitedAndFailsOver(t *testing.T) {
+// TestPoolRateLimitedFailsOverWithoutCooldown 是新调度策略的核心场景：
+// 账号被限流但上游未给精确重置时刻 → **不锁定**，换下一个账号继续，
+// 账号只降健康度、模型不进入冷却（修复「一个问题问完两个号都冷却」）。
+func TestPoolRateLimitedFailsOverWithoutCooldown(t *testing.T) {
 	var hits [2]int
 	p := NewPool("test", nil)
-	// 消息刻意避开「额度耗尽」等关键词——那会触发 QuotaExhausted 走账号级
-	// 冷却（另一条路径，有独立测试）；这里测的是普通频率限制的模型级冷却。
+	// 消息刻意避开「额度耗尽」等关键词——这里测普通频率限制。
 	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("too many requests"), onStream: func() { hits[0]++ }})
 	p.Add("b", &fakeAd{name: "test", onStream: func() { hits[1]++ }})
 
-	// 前若干次请求：首次先撞 a（限流→冷却）再 failover 到 b；之后全部直达 b。
-	for i := 0; i < 4; i++ {
+	// 选号是健康度加权随机，a 是「永远限流」的账号，被选中的次数不固定。
+	// 断言的本质是「请求始终成功（换号兜底）」+「a 从未被冷却」。
+	for i := 0; i < 30; i++ {
 		s, err := p.Stream(context.Background(), llm.RequestMessages{})
 		if err != nil {
-			t.Fatalf("b 可用，请求不应失败: %v", err)
+			t.Fatalf("b 可用，请求不应失败（第 %d 次）: %v", i, err)
 		}
-		if closer, ok := s.(interface{ Close() error }); ok {
-			_ = closer.Close()
+		_ = closeStream(s)
+		p.mu.Lock()
+		cooled := p.accounts[0].modelCooling(time.Now(), "")
+		p.mu.Unlock()
+		if cooled {
+			t.Fatal("上游未给精确重置时刻，限流不应冷却账号/模型")
 		}
 	}
-	// 选号是健康度加权随机，a 是「永远限流」的账号，被选中的次数不固定；
-	// 断言的本质是「a 被冷却过」+「请求全部由 b 成功承接」。
+	if hits[1] == 0 {
+		t.Fatalf("健康账号应承接请求, hits=%v", hits)
+	}
 	p.mu.Lock()
-	aCooled := p.accounts[0].modelCooling(time.Now(), "")
+	acctUsable := p.accounts[0].accountUsable(time.Now())
 	p.mu.Unlock()
-	if !aCooled {
-		t.Fatalf("限流的账号应被冷却, hits=%v", hits)
-	}
-	if hits[1] != 4 {
-		t.Fatalf("健康账号应承接全部请求, hits_b=%d（hits_a=%d）", hits[1], hits[0])
-	}
-	// 账号本身仍健康（限流是模型级的），但 model-x 在该账号上已冷却。
-	p.mu.Lock()
-	accA := p.accounts[0]
-	cooling := accA.modelCooling(time.Now(), "")
-	acctUsable := accA.accountUsable(time.Now())
-	p.mu.Unlock()
-	if !cooling {
-		t.Fatal("该账号上的空模型键应处于冷却（测试未传模型名）")
-	}
 	if !acctUsable {
 		t.Fatal("账号不应因单模型限流而整体不健康")
 	}
@@ -136,11 +142,36 @@ func TestPoolCooldownsRateLimitedAndFailsOver(t *testing.T) {
 	}
 }
 
+// TestPoolRateLimitedWithPreciseResetCools 是新策略的另一面：
+// 上游给出**精确重置时刻**时，尊重它——冷却该 (账号,模型) 到指定时刻。
+func TestPoolRateLimitedWithPreciseResetCools(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("too many requests"), 90)})
+	p.Add("b", &fakeAd{name: "test"})
+
+	// 循环直到 a 被选中并冷却（选号是加权随机的，最多 50 次必然轮到）。
+	for i := 0; i < 50; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{})
+		if err != nil {
+			t.Fatalf("b 可用，请求不应失败: %v", err)
+		}
+		_ = closeStream(s)
+		p.mu.Lock()
+		cooled := p.accounts[0].modelCooling(time.Now(), "")
+		p.mu.Unlock()
+		if cooled {
+			return
+		}
+	}
+	t.Fatal("上游给了精确重置时刻的限流应冷却该 (账号,模型)")
+}
+
 // TestPoolCooldownExpires 验证冷却到期后账号自动回到轮询。
 func TestPoolCooldownExpires(t *testing.T) {
 	var hits int
 	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("x"), onStream: func() { hits++ }})
+	// 上游给出精确重置时刻 → 该 (账号,模型) 被冷却（新策略下唯一的冷却来源）。
+	p.Add("a", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("x"), 60), onStream: func() { hits++ }})
 	p.Add("b", &fakeAd{name: "test"})
 
 	// 触发 a 上 model-x 的冷却（循环直到命中 a——选号是加权随机的）。
@@ -193,22 +224,38 @@ func TestPoolClientFixableFailsFast(t *testing.T) {
 	}
 }
 
-// TestPoolAllCooling 验证全部账号冷却时的语义化错误。
-func TestPoolAllCooling(t *testing.T) {
+// TestPoolAllRateLimitedNoPreciseResetReturnsLastError 验证新策略下「全部限流
+// 且无精确重置时刻」的语义：不锁定任何账号，全部真实尝试失败后返回
+// **真实上游错误**（而非 all_accounts_cooling——没有冷却就没有「全冷却」状态）。
+func TestPoolAllRateLimitedNoPreciseResetReturnsLastError(t *testing.T) {
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("x")})
 	p.Add("b", &fakeAd{name: "test", err: rateLimitedErr("y")})
 
-	// 第一次请求会尝试两个账号后失败。
-	_, err1 := p.Stream(context.Background(), llm.RequestMessages{})
-	if err1 == nil {
-		t.Fatal("全部限流时应失败")
+	for i := 0; i < 2; i++ {
+		_, err := p.Stream(context.Background(), llm.RequestMessages{})
+		if err == nil {
+			t.Fatal("全部限流时应失败")
+		}
+		f := llm.Wrap(err)
+		if f.Code == "all_accounts_cooling" {
+			t.Fatalf("未冷却不应出现 all_accounts_cooling, got %s", f.Code)
+		}
+		if !f.RateLimited {
+			t.Fatalf("应返回真实上游限流错误, got %+v", f)
+		}
 	}
-	// 两个账号都已冷却，第二次请求应立即得到 all_accounts_cooling。
-	_, err2 := p.Stream(context.Background(), llm.RequestMessages{})
-	f := llm.Wrap(err2)
-	if f.Code != "all_accounts_cooling" {
-		t.Fatalf("全冷却应返回 all_accounts_cooling, got %s", f.Code)
+	// 关键：账号/模型都未被锁定，后续请求仍会真实尝试所有账号。
+	p.mu.Lock()
+	usable := 0
+	for _, acc := range p.accounts {
+		if acc.available(time.Now(), "") {
+			usable++
+		}
+	}
+	p.mu.Unlock()
+	if usable != 2 {
+		t.Fatalf("限流后账号不应被锁定, 可用账号=%d", usable)
 	}
 }
 
@@ -329,8 +376,9 @@ func TestPoolFairRotationWithCoolingAccount(t *testing.T) {
 // 客户端 SDK 对 429 会按限流节奏退避；502/server_error 会被当成服务器故障处理。
 func TestPoolAllCoolingReturns429AndRetryAfter(t *testing.T) {
 	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("x")})
-	p.Add("b", &fakeAd{name: "test", err: rateLimitedErr("y")})
+	// 双双给出精确重置时刻：a 120s、b 60s → 双冷却，最早解冻的是 b。
+	p.Add("a", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("x"), 120)})
+	p.Add("b", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("y"), 60)})
 
 	_, _ = p.Stream(context.Background(), llm.RequestMessages{}) // 触发双冷却
 	_, err := p.Stream(context.Background(), llm.RequestMessages{})
@@ -344,8 +392,8 @@ func TestPoolAllCoolingReturns429AndRetryAfter(t *testing.T) {
 	if f.HTTPStatus() != 429 {
 		t.Fatalf("HTTPStatus=%d, want 429", f.HTTPStatus())
 	}
-	if f.RetryAfterSeconds <= 0 {
-		t.Fatalf("应携带最长剩余冷却秒数, got %d", f.RetryAfterSeconds)
+	if f.RetryAfterSeconds <= 0 || f.RetryAfterSeconds > 60 {
+		t.Fatalf("应携带最早解冻秒数（≈60s）, got %d", f.RetryAfterSeconds)
 	}
 }
 
@@ -399,9 +447,11 @@ func TestCooldownCapsAtMax(t *testing.T) {
 func TestProbeFirstEventDetectsInBandError(t *testing.T) {
 	// 首帧即错误 → 探测失败，池应换号。
 	// 注意生产侧必须显式置 RateLimited（httpError 就是这么做的）；
-	// 只靠消息文本匹配不到 "quota" 这类词，分类会落空。
+	// 这里附上精确重置时刻，使该 (账号,模型) 进入冷却（新策略下唯一的
+	// 冷却来源），便于断言「首帧报错同样能触发冷却 + 换号」。
+	badErr := withRetryAfter(rateLimitedFailure("quota exceeded"), 30)
 	bad := &fakeAd{name: "test", events: []llm.ResponseEvent{
-		{Type: llm.EventError, Error: rateLimitedFailure("quota exceeded")},
+		{Type: llm.EventError, Error: badErr},
 	}}
 	good := &fakeAd{name: "test", events: []llm.ResponseEvent{
 		{Type: llm.EventTextDelta, ContentIndex: 0, Delta: "ok"},
@@ -560,7 +610,7 @@ func TestStatusesExposeStateAndNext(t *testing.T) {
 	unauth := llm.NewFailure("unauthorized", "bad", nil)
 	unauth.Unauthorized = true
 	p := NewPool("test", nil)
-	p.Add("a.json", &fakeAd{name: "test", err: rateLimitedErr("quota")})
+	p.Add("a.json", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("quota"), 60)})
 	p.Add("b.json", &fakeAd{name: "test", err: unauth})
 	p.Add("c.json", &fakeAd{name: "test"})
 
@@ -617,11 +667,13 @@ func TestStatusesExposeStateAndNext(t *testing.T) {
 // 您也可以切换其他模型继续使用」——限流是「账号 × 模型」维度的。
 // 旧实现按账号冷却，会把该账号其他模型的可用额度白扔（实测可达数小时）。
 func TestRateLimitCooldownIsPerModel(t *testing.T) {
-	// 账号 a 只在 model-x 上被限；model-y 正常应能继续用 a。
+	// 账号 a 只在 model-x 上被限（附精确重置时刻 → 冷却该格子）；
+	// model-y 正常应能继续用 a。
 	limited := map[string]bool{"model-x": true}
 	var hitsA, hitsB int
 	a := &fakeAd{name: "test", onStream: func() { hitsA++ }}
 	a.limitModel = limited
+	a.retryAfter = 60
 	b := &fakeAd{name: "test", onStream: func() { hitsB++ }}
 
 	p := NewPool("test", nil)
@@ -667,6 +719,7 @@ func TestRateLimitCooldownIsPerModel(t *testing.T) {
 // model-x 被限后，model-x 请求走 b；model-y 请求仍可用 a（轮询）。
 func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
 	a := &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}}
+	a.retryAfter = 60
 	b := &fakeAd{name: "test"}
 
 	p := NewPool("test", nil)
@@ -705,8 +758,8 @@ func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
 // TestAllAccountsCoolingIsPerModel 验证全池冷却的错误消息指明是哪个模型。
 func TestAllAccountsCoolingIsPerModel(t *testing.T) {
 	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("quota")})
-	p.Add("b", &fakeAd{name: "test", err: rateLimitedErr("quota")})
+	p.Add("a", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("quota"), 60)})
+	p.Add("b", &fakeAd{name: "test", err: withRetryAfter(rateLimitedFailure("quota"), 60)})
 
 	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
 	_, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
@@ -722,7 +775,9 @@ func TestAllAccountsCoolingIsPerModel(t *testing.T) {
 // TestStatusesExposeModelCooldowns 验证控制台能拿到「哪些模型在冷却」。
 func TestStatusesExposeModelCooldowns(t *testing.T) {
 	p := NewPool("test", nil)
-	p.Add("a", &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}})
+	a := &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}}
+	a.retryAfter = 60
+	p.Add("a", a)
 	p.Add("b", &fakeAd{name: "test"})
 	// 循环直到 a 上 model-x 冷却（选号随机，不假设第一次命中 a）。
 	for i := 0; i < 50; i++ {
@@ -750,10 +805,11 @@ func TestStatusesExposeModelCooldowns(t *testing.T) {
 
 // ───────────────── 健康度感知路由（取代严格轮询） ─────────────────
 
-// TestQuotaExhaustedAccountLevelCooldown 是「额度耗尽冷却语义」的回归测试：
-// 账号 A 额度耗尽 → **整号**冷却 2h（不是按模型逐个试错）→ 换 B 承接。
-// 实测曾错误地按模型冷却，导致同账号三个模型各撞一次限流墙。
-func TestQuotaExhaustedAccountLevelCooldown(t *testing.T) {
+// TestQuotaExhaustedNoLockFailsOver 是「额度耗尽（14018）」在新策略下的语义：
+// 上游没有精确重置时刻（只说「购买加量包」），按「不锁定，换下一个」处理——
+// 不冷却账号/模型，只降健康度；同账号上其他模型与其他账号都继续可用，
+// 全部失败才返回真实错误（修复「一个问题问完两个号都冷却」）。
+func TestQuotaExhaustedNoLockFailsOver(t *testing.T) {
 	fl := llm.NewFailure("upstream_14018", "额度已用尽，请访问以下链接，购买加量包", nil)
 	fl.QuotaExhausted = true
 	fl.RateLimited = true
@@ -762,27 +818,26 @@ func TestQuotaExhaustedAccountLevelCooldown(t *testing.T) {
 	p.Add("A", &fakeAd{name: "wb", err: fl})
 	p.Add("B", &fakeAd{name: "wb"})
 
-	s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "deepseek-v4.1-flash"})
-	if err != nil {
-		t.Fatalf("B 应能承接: %v", err)
-	}
-	_ = closeStream(s)
-
-	p.mu.Lock()
-	accA := p.accounts[0]
-	acctCooled := !accA.accountUsable(time.Now())
-	dur := time.Until(accA.cooldownUntil)
-	noModelCooldown := len(accA.modelCooldown) == 0
-	p.mu.Unlock()
-
-	if !acctCooled {
-		t.Fatal("额度耗尽应触发账号级冷却")
-	}
-	if dur < time.Hour {
-		t.Fatalf("账号级冷却应 ≥1h（2h）, got %v", dur)
-	}
-	if !noModelCooldown {
-		t.Fatal("额度耗尽不应按模型分别冷却（那是要修的 bug）")
+	// 选号是加权随机，A 是「永远额度耗尽」的账号，被选中次数不固定。
+	// 断言：请求始终成功（换号兜底）+ A 从未被冷却/整号停摆。
+	for i := 0; i < 30; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "deepseek-v4.1-flash"})
+		if err != nil {
+			t.Fatalf("B 可用，请求不应失败（第 %d 次）: %v", i, err)
+		}
+		_ = closeStream(s)
+		p.mu.Lock()
+		for _, acc := range p.accounts {
+			if acc.modelCooling(time.Now(), "deepseek-v4.1-flash") {
+				p.mu.Unlock()
+				t.Fatal("额度耗尽（无精确重置时刻）不应冷却模型")
+			}
+		}
+		aUsable := p.accounts[0].accountUsable(time.Now())
+		p.mu.Unlock()
+		if !aUsable {
+			t.Fatal("额度耗尽不应整号冷却：免费/其他模型仍可用")
+		}
 	}
 }
 

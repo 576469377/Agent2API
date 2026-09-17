@@ -14,8 +14,26 @@ func TestDefaultValues(t *testing.T) {
 	if !cfg.Upstream.Sanitize {
 		t.Fatal("脱敏默认必须开启（接 Claude Code / Codex 必需）")
 	}
-	if cfg.Upstream.Platform != "workbuddy" {
-		t.Fatalf("默认平台=%q", cfg.Upstream.Platform)
+	// 零配置 = 自动集成：默认平台字段为空，ResolvePlatforms 返回内置平台列表
+	//（当前仅 workbuddy）。
+	if cfg.Upstream.Platform != "" {
+		t.Fatalf("默认 platform 应为空（自动集成）, got %q", cfg.Upstream.Platform)
+	}
+	pls := cfg.ResolvePlatforms()
+	if len(pls) != 1 || pls[0].ID != "workbuddy" {
+		t.Fatalf("自动集成应返回 workbuddy, got %+v", pls)
+	}
+	if !pls[0].Sanitize {
+		t.Fatal("自动集成应继承顶层脱敏开关（默认开启）")
+	}
+}
+
+func TestExplicitPlatformStaysSingle(t *testing.T) {
+	cfg := Default()
+	cfg.Upstream.Platform = "workbuddy"
+	pls := cfg.ResolvePlatforms()
+	if len(pls) != 1 || pls[0].ID != "workbuddy" {
+		t.Fatalf("显式 platform 应回退单平台, got %+v", pls)
 	}
 }
 

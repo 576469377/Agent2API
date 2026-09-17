@@ -78,6 +78,9 @@ func (f *mxAd) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 	if f.limitModel != "" && req.Model == f.limitModel {
 		fl := llm.NewFailure("rate_limited", "quota", nil)
 		fl.RateLimited = true
+		// 新调度策略：只有上游给出**精确重置时刻**才会冷却。
+		// 附上精确时刻以触发模型级冷却（真实上游限流响应即如此）。
+		fl.RetryAfterSeconds = 60
 		return nil, fl
 	}
 	return &mxStream{}, nil

@@ -585,6 +585,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 /* ───────────── 模型 × 账号矩阵 ───────────── */
 
 .table th.mx-acct { font-family: var(--mono); font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 列头整号冷却徽标：账号级冷却只在列头标一次，不进每个格子。 */
+.mx-acct-cool { color: var(--warn); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mx-acct-cool .mx-cd { font-family: var(--mono); font-size: 10px; }
 .table td.mx-cell { text-align: center; width: 1%; padding-left: 8px; padding-right: 8px; }
 .mx-yes { color: var(--ok); font-weight: 700; }
 .mx-no { color: var(--text-faint); opacity: .5; }

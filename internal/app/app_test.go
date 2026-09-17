@@ -148,7 +148,14 @@ func newTestApp(t *testing.T, adp *fakeAdapter) *App {
 	t.Helper()
 	cfg := config.Default()
 	cfg.MetricsFile = "" // 测试中不落盘
-	return New(cfg, adp, log.New(io.Discard, "", 0))
+	logger := log.New(io.Discard, "", 0)
+	// 测试适配器的模型目录为空 → 模型索引为空 → 未知模型透传默认平台。
+	// 这正是生产里「未知模型名交给上游处理」语义的镜像。
+	hub, err := NewHub([]*PlatformRuntime{{ID: "fake", Adapter: adp}}, logger)
+	if err != nil {
+		t.Fatalf("构造 hub: %v", err)
+	}
+	return New(cfg, hub, logger)
 }
 
 // TestStreamErrorInBandError 是端到端回归：

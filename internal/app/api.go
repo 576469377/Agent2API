@@ -437,6 +437,17 @@ type accountModelLister interface {
 	ModelsByAccount(ctx context.Context) map[string][]string
 }
 
+// accountCooling 把号池冷却按维度拆成两类，供矩阵分别渲染。
+//
+//	model   —— 模型级限流，粒度「账号 → 模型 → 剩余秒」，逐格标注；
+//	account —— 整号冷却，粒度「账号 → 剩余秒」，列头标注一次。
+//
+// 两者不要混进同一个 map：历史实现把 account 展开进每个格子导致整列同倒计时。
+type accountCooling struct {
+	model   map[string]map[string]int
+	account map[string]int
+}
+
 // apiAccountModels 返回模型×账号矩阵（全部平台合并：账号是列，模型是行）。
 //
 // 跨平台 label 冲突时用「平台/label」区分；单账号平台退化为单列。
@@ -448,26 +459,32 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		Accounts []string            `json:"accounts"`
 		Models   []string            `json:"models"`
 		Matrix   map[string][]string `json:"matrix"`
-		// Cooldowns 是「账号 → 模型 → 剩余冷却秒数」。
+		// Cooldowns 是「账号 → 模型 → 剩余冷却秒数」，只承载**模型级**限流
+		//（上游明确说可切换其他模型，同账号其他模型仍可用）。
 		//
-		// 限流是「账号 × 模型」维度的（上游明确说可切换其他模型），所以矩阵里
-		// 一个格子既可能「不支持」也可能「支持但暂时被限流」——后者必须能看到
-		// 还要等多久，否则用户会以为这个组合坏了。
+		// 账号级冷却（额度耗尽/鉴权失效/人工停用）是**整号**维度，不该塞进每个
+		// 格子——那样会让被冷账号的整列都显示同一个倒计时（实测出现「全是 2h」）。
+		// 账号级冷却走单独的 AccountCooldowns 字段，渲染时在**列头**标注一次。
 		Cooldowns map[string]map[string]int `json:"cooldowns,omitempty"`
+		// AccountCooldowns 是「账号 → 剩余冷却秒数」，只承载**账号级**冷却
+		//（额度耗尽/鉴权失效/人工停用）：整号不可用，与具体模型无关。
+		// 值为该账号的整号冷却剩余秒数；0 或不存在表示该账号无账号级冷却。
+		AccountCooldowns map[string]int `json:"account_cooldowns,omitempty"`
 	}
 	out := resp{
-		Accounts:  []string{},
-		Models:    []string{},
-		Matrix:    map[string][]string{},
-		Cooldowns: map[string]map[string]int{},
+		Accounts:         []string{},
+		Models:           []string{},
+		Matrix:           map[string][]string{},
+		Cooldowns:        map[string]map[string]int{},
+		AccountCooldowns: map[string]int{},
 	}
 	seen := map[string]bool{}
 
-	merge := func(key string, ids []string, cooling map[string]int) {
+	merge := func(key string, ids []string, modelCooling map[string]int) {
 		out.Accounts = append(out.Accounts, key)
 		out.Matrix[key] = ids
-		if len(cooling) > 0 {
-			out.Cooldowns[key] = cooling
+		if len(modelCooling) > 0 {
+			out.Cooldowns[key] = modelCooling
 		}
 		for _, id := range ids {
 			if !seen[id] {
@@ -477,43 +494,34 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// accountCooldowns 从号池状态取出每个账号的「模型 → 剩余冷却秒数」。
+	// accountCooldowns 从号池状态取出每个账号的冷却，按维度拆成两类：
 	//
-	// 两个来源合并：
-	//   1. ModelCooldowns：模型级限流（同账号其他模型仍可用）
-	//   2. 账号级冷却（鉴权失效/额度耗尽/人工停用）：整号不可用，
-	//      该账号的**所有模型**都标上剩余时间——否则矩阵显示 ✓ 用户一试
-	//      才知道整个号都被冷了（截图实测踩到）。
+	//   · model：模型级限流（上游明说可切换其他模型，同账号其他模型仍可用），
+	//     粒度「账号 → 模型 → 剩余秒数」，供矩阵**逐格**标注。
+	//   · account：整号冷却（额度耗尽/鉴权失效/人工停用），粒度「账号 → 剩余秒数」，
+	//     与具体模型无关，供矩阵在**列头**标注一次。
+	//
+	// 历史实现把账号级冷却展开进每个格子，导致被冷账号整列都显示同一个倒计时
+	//（实测「全是 2h」）。两类分开后，矩阵页既能逐格看模型级限流，又能从列头
+	// 一眼看出整号被冷——且两者不再互相污染。
 	// 非号池适配器没有这个概念，返回 nil。
-	accountCooldowns := func(adp adapter.Adapter) map[string]map[string]int {
+	accountCooldowns := func(adp adapter.Adapter) *accountCooling {
 		lister, ok := adp.(accountStatusLister)
 		if !ok {
 			return nil
 		}
-		// 先取各账号的模型清单（账号级冷却要标记到它的全部模型上）。
-		modelLists := map[string][]string{}
-		if ml, ok := adp.(accountModelLister); ok {
-			modelLists = ml.ModelsByAccount(context.Background())
-		}
-		out := map[string]map[string]int{}
+		res := &accountCooling{model: map[string]map[string]int{}, account: map[string]int{}}
 		for _, st := range lister.Statuses() {
-			merged := map[string]int{}
-			for m, secs := range st.ModelCooldowns {
-				merged[m] = secs
+			if len(st.ModelCooldowns) > 0 {
+				res.model[st.Label] = st.ModelCooldowns
 			}
-			// 账号级冷却：整号所有模型都不可用，剩余时间一致。
+			// 账号级冷却：整号不可用，与具体模型无关——只在列头标一次，
+			// 不要塞进每个格子（否则整列显示同一倒计时，毫无信息量）。
 			if !st.Healthy && st.CooldownSecs > 0 && st.State != "disabled" {
-				for _, id := range modelLists[st.Label] {
-					if _, exists := merged[id]; !exists || merged[id] < st.CooldownSecs {
-						merged[id] = st.CooldownSecs
-					}
-				}
-			}
-			if len(merged) > 0 {
-				out[st.Label] = merged
+				res.account[st.Label] = st.CooldownSecs
 			}
 		}
-		return out
+		return res
 	}
 
 	for _, rt := range a.hub.Platforms() {
@@ -530,7 +538,15 @@ func (a *App) apiAccountModels(w http.ResponseWriter, r *http.Request) {
 				if _, exists := out.Matrix[key]; exists {
 					key = rt.ID + "/" + label
 				}
-				merge(key, m[label], cooling[label])
+				var mc map[string]int
+				if cooling != nil {
+					mc = cooling.model[label]
+				}
+				merge(key, m[label], mc)
+				// 账号级冷却挂到列头（用与矩阵列一致的 key）。
+				if cooling != nil && cooling.account[label] > 0 {
+					out.AccountCooldowns[key] = cooling.account[label]
+				}
 			}
 			continue
 		}

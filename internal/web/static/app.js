@@ -58,6 +58,7 @@
       'mx.cooling': 'rate-limited cells', 'mx.ok': 'supported', 'mx.unsupported': 'not supported',
       'mx.ratelimited': 'rate limited (cooldown)', 'mx.nodata': 'No matrix data',
       'mx.nodatahint': 'Requires pool mode; switch back to list view for single-account mode',
+      'mx.accooled': 'accounts fully cooled', 'mx.acccool': 'whole account cooled (not per-model)',
       'mdl.id': 'Model ID', 'mdl.name': 'Name', 'mdl.ctx': 'Context', 'mdl.maxout': 'Max output',
       'mdl.cap': 'Capabilities', 'mdl.tools': 'tools', 'mdl.think': 'thinking', 'mdl.vision': 'vision',
       'mdl.default': 'default', 'mdl.nomodel': 'No models returned by upstream',
@@ -113,6 +114,7 @@
       'mx.cooling': '个格子限流中', 'mx.ok': '支持', 'mx.unsupported': '不支持',
       'mx.ratelimited': '限流冷却中', 'mx.nodata': '暂无矩阵数据',
       'mx.nodatahint': '需要号池模式；单账号模式请切回列表视图',
+      'mx.accooled': '个账号整号冷却', 'mx.acccool': '整号冷却（非按模型）',
       'mdl.id': '模型 ID', 'mdl.name': '名称', 'mdl.ctx': '上下文', 'mdl.maxout': '最大输出',
       'mdl.cap': '能力', 'mdl.tools': '工具', 'mdl.think': '思考', 'mdl.vision': '视觉',
       'mdl.default': '默认', 'mdl.nomodel': '上游未返回任何模型',
@@ -1065,30 +1067,43 @@
     }
     const q = state.modelsFilter.trim().toLowerCase();
     const models = q ? m.models.filter((x) => x.toLowerCase().includes(q)) : m.models;
-    const cool = m.cooldowns || {};
+    const cool = m.cooldowns || {};        // 模型级：账号 → 模型 → 剩余秒
+    const acctCool = m.account_cooldowns || {};  // 账号级：账号 → 剩余秒（整号）
 
-    // 统计被限的格子数，写进副标题——一眼看出池子健康度。
+    // 统计被限的格子数（仅模型级），写进副标题——一眼看出池子健康度。
     let coolingCells = 0;
     for (const a of m.accounts) {
       for (const k of Object.keys(cool[a] || {})) if (cool[a][k] > 0) coolingCells++;
     }
-    $('modelsSub').textContent = `${t('mx.title')} · ${m.accounts.length} ${t('mx.accounts')} / ${m.models.length} ${t('mx.models')}`
-      + (coolingCells ? ` · ${coolingCells} ${t('mx.cooling')}` : '');
+    // 账号级冷却的账号数（列头标注，不重复进格子）。
+    const acctCooled = m.accounts.filter((a) => (acctCool[a] || 0) > 0).length;
+    let sub = `${t('mx.title')} · ${m.accounts.length} ${t('mx.accounts')} / ${m.models.length} ${t('mx.models')}`;
+    if (coolingCells) sub += ` · ${coolingCells} ${t('mx.cooling')}`;
+    if (acctCooled) sub += ` · ${acctCooled} ${t('mx.accooled')}`;
+    $('modelsSub').textContent = sub;
 
     const has = {};
     for (const acc of m.accounts) has[acc] = new Set(m.matrix[acc] || []);
 
+    // 列头：账号名 + 若整号冷却则附上剩余时间（只标一次，不污染每个格子）。
     host.innerHTML = `
-      <thead><tr><th>${esc(t('mdl.id'))}</th>${m.accounts.map((a) => `<th class="mx-acct" title="${esc(a)}">${esc(a)}</th>`).join('')}</tr></thead>
+      <thead><tr><th>${esc(t('mdl.id'))}</th>${m.accounts.map((a) => {
+        const secs = acctCool[a] || 0;
+        const badge = secs > 0
+          ? ` <span class="mx-acct-cool" data-cool-until="${Date.now() + secs * 1000}" title="${esc(t('mx.acccool'))}">⏳ <span class="mx-cd">${fmtCountdown(secs)}</span></span>`
+          : '';
+        return `<th class="mx-acct" title="${esc(a)}">${esc(a)}${badge}</th>`;
+      }).join('')}</tr></thead>
       <tbody>${models.map((id) => `<tr>
         <td class="mono">${esc(id)}</td>
         ${m.accounts.map((a) => modelCell(id, has[a].has(id), (cool[a] || {})[id])).join('')}
       </tr>`).join('')}</tbody>`;
   }
 
-  // modelCell 渲染单个格子。
-  // 冷却态优先于 ✓：账号级冷却会把该账号全部模型标上剩余时间，
-  // 此时即使「支持」也要显示冷却——显示 ✓ 用户一试才知道整号被冷（实测踩到）。
+  // modelCell 渲染单个格子（模型级冷却）。
+  // 仅当该「账号 × 模型」被上游限流时显示倒计时；账号级冷却不进格子，
+  // 由列头统一标注（否则整列重复同一倒计时，实测「全是 2h」）。
+  // 冷却态优先于 ✓：支持但暂时被限的格子显示冷却而非 ✓。
   function modelCell(model, supported, coolSecs) {
     if (coolSecs > 0) {
       // data-cool-until 让倒计时能每秒自更新（见 tickMatrixCooldowns）。
@@ -1110,8 +1125,14 @@
     document.querySelectorAll('#modelTable [data-cool-until]').forEach((el) => {
       const left = Math.round((Number(el.dataset.coolUntil) - now) / 1000);
       if (left <= 0) {
-        // 冷却结束：恢复为该格子的常态。常态不是 ✓——若模型本身不被该账号
-        // 支持，应回到 ·。查矩阵数据判定（比重新渲染整个表轻）。
+        // 冷却结束：就地恢复，不重新拉接口。
+        //  · 格子（<td> 内）：常态是 ✓ 或 ·，按矩阵数据判定。
+        //  · 列头整号冷却徽标（<th> 内，无 td.mono）：整号恢复即可见常态，
+        //    直接摘除徽标，不要误渲染 ·（那是「不支持」语义）。
+        if (el.closest('th')) {
+          el.remove();
+          return;
+        }
         const m = state.matrix;
         const row = el.closest('tr');
         const model = row?.querySelector('td.mono')?.textContent;

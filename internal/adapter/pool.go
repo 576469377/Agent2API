@@ -22,10 +22,19 @@ const (
 	// cooldownUnauthorized 是刷新后仍 401 的账号冷却时长：
 	// 多半是账号失效/权益异常，短时间重试没有意义。
 	cooldownUnauthorized = 10 * time.Minute
-	// cooldownQuotaExhausted 是额度耗尽（如需购买加量包）的账号级冷却时长。
-	// 这类限制不会自动重置，但也不是永久的（用户可能去买包/等次日重置），
-	// 2 小时后放一次探测流量比反复撞墙合理；控制台可随时手动解冻。
-	cooldownQuotaExhausted = 2 * time.Hour
+	// cooldownQuotaModel 是「额度耗尽（14018）」的模型级冷却上限。
+	// 14018 没有精确重置时刻（上游只说「购买加量包」），于是走指数退避；
+	// 退避封顶到这个值——既避免反复撞墙，又不会因一次耗尽就锁死太久。
+	// 它的语义是模型级（同账号免费模型仍可用），与 cooldownUnauthorized 的整号封禁不同。
+	cooldownQuotaModel = 2 * time.Hour
+	// cooldownResetTrustCap 是「上游给的精确重置时刻」的可信上限。
+	// 上游偶尔把长窗口（日额度级）的重置时刻附在一次普通限流响应里
+	// （实测一句「将在 16:51 重置」把模型一口气锁了 13.9 小时，用户视角
+	// 等于模型坏了半天）。超过上限的部分不再照单全收：先冷到上限，
+	// 到点由真实请求探测——上游已恢复则立刻可用；仍在窗口内则拿到新的
+	// 重置时刻续冷。与 cooldownQuotaModel 同值：都是「来历存疑的长限制」
+	// 的封顶探测节奏。
+	cooldownResetTrustCap = 2 * time.Hour
 	// maxCooldown 是任何冷却的上限，防止异常数据把账号永久挂起。
 	maxCooldown = 24 * time.Hour
 
@@ -107,6 +116,10 @@ type poolAccount struct {
 	// backoffLevel 是按模型的连续限流退避等级（0 起），该模型成功一次即清零。
 	backoffLevel map[string]int
 	lastErr      string
+	// reason 是账号级冷却/封禁的具体原因（quota_exhausted / unauthorized / 空）。
+	// 留空时 Statuses 退化为 rate_limited；额度耗尽必须如实标成 quota_exhausted，
+	// 否则控制台把「买加量包才能恢复」和「到点自动恢复」混为一谈。
+	reason string
 
 	// —— 健康度（用于选号，见 pickLocked）——
 	//
@@ -130,9 +143,8 @@ func modelKey(model string) string {
 
 // 冷却原因，用于控制台展示与调度决策。
 const (
-	reasonRateLimited    = "rate_limited"
-	reasonUnauthorized   = "unauthorized"
-	reasonQuotaExhausted = "quota_exhausted"
+	reasonRateLimited  = "rate_limited"
+	reasonUnauthorized = "unauthorized"
 )
 
 // AccountStatus 是单个账号的运行状态快照。
@@ -402,39 +414,43 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 
 		f := llm.Wrap(err)
 		switch {
-		case f.QuotaExhausted:
-			// 额度耗尽是**账号级**的：买一次加量包全号恢复，上游也没说
-			// 「切其他模型有用」。按模型逐个试错只会让每个模型都挨一次限流
-			// （实测同一账号三个模型各冷了 4h，全是同一个错误的重复代价）。
-			// 账号级长冷却，换号；控制台「清除冷却」可手动解冻。
-			p.markFailure(acc)
-			p.cooldownAccount(acc, cooldownQuotaExhausted, reasonQuotaExhausted, f.Message)
-			p.logfNow("账号 %s 额度耗尽，冷却 %s: %s",
-				acc.label, cooldownQuotaExhausted, f.Message)
-		case f.RateLimited:
-			// 频率限制是「账号 × 模型」维度的（上游明说「可切换其他模型」），
-			// 只冷却该模型——同账号上其他模型仍然可用。
-			p.markFailure(acc)
-			// 上游给了精确重置时刻就完全信任它，不叠加退避等级；
-			// 没给才用指数退避。
-			d, level := p.nextRateLimitBackoff(acc, req.Model, f)
-			p.cooldownModel(acc, req.Model, d, f.Message)
-			p.logfNow("账号 %s 的模型 %s 触发限流，冷却 %s（第 %d 级）: %s",
-				acc.label, req.Model, d.Truncate(time.Second), level, f.Message)
-		case f.Unauthorized:
-			// 单个适配器内部已尝试过刷新重试；仍 401 说明账号大概率失效。
-			// 这是**账号级**终态（与模型无关）。
-			p.markFailure(acc)
-			p.cooldownAccount(acc, cooldownUnauthorized, reasonUnauthorized, f.Message)
-			p.logfNow("账号 %s 鉴权失败，冷却 %s: %s", acc.label, cooldownUnauthorized, f.Message)
 		case f.ClientFixable:
 			// 请求本身有问题（参数错、上下文超限等），换任何账号结果都一样。
 			return nil, err
-		default:
-			// 传输断裂 / 5xx / 未知：可能是全局抖动，不冷却账号但降健康度
-			//（下次选号会优先避开它），换下一个试。
+		case f.RateLimited && f.RetryAfterSeconds > 0:
+			// 限流且上游给了**精确重置时刻**：尊重它，仅冷却该 (账号,模型)
+			// 到指定时刻，然后继续尝试下一个账号。其余限流（无精确时刻）、
+			// 额度耗尽（14018，上游只说「购买加量包」）一律**不锁定**——
+			// 只降健康度并尝试下一个，避免一次限流就把账号/模型挂起
+			//（实测「一个问题问完，两个号都冷却」即此所致）。
 			p.markFailure(acc)
-			p.logfNow("账号 %s 拨号失败，尝试下一个账号: %s", acc.label, f.Error())
+			d := time.Duration(f.RetryAfterSeconds) * time.Second
+			if d > maxCooldown {
+				d = maxCooldown
+			}
+			if d < time.Second {
+				d = time.Second
+			}
+			p.cooldownModel(acc, req.Model, d, f.Message)
+			p.logfNow("账号 %s 的模型 %s 限流（上游精确重置 %s），冷却后换号: %s",
+				acc.label, req.Model, d.Truncate(time.Second), f.Message)
+		case f.Unauthorized:
+			// 鉴权失效（401，单适配器已刷新重试过）：整号终态，标记 blocked
+			// 并继续尝试下一个账号。这是账号死亡而非限流，反复重试无意义，
+			// 故保留整号 blocked——与「限流不锁定」是两回事，且能保留
+			// 控制台「需重新登录」的提示与最终的 all_accounts_blocked 错误。
+			p.markFailure(acc)
+			p.cooldownAccount(acc, cooldownUnauthorized, reasonUnauthorized, f.Message)
+			p.logfNow("账号 %s 鉴权失效，标记 blocked 并换号: %s", acc.label, f.Message)
+		default:
+			// 其余失败统一「不锁定，换下一个」：
+			//   · 限流但上游未给精确重置时刻；
+			//   · 额度耗尽（14018，无精确重置）；
+			//   · 传输断裂 / 5xx / 未知（可能是全局抖动）。
+			// 这些都不冷却账号/模型，只降健康度（下次选号自然避开）并尝试下一个；
+			// 全部账号都失败才在循环结束后返回错误。
+			p.markFailure(acc)
+			p.logfNow("账号 %s 的模型 %s 失败，换下一个账号: %s", acc.label, req.Model, f.Error())
 			// 池级短退避 + 抖动：上游整体故障时避免把 N 个账号连续无间隔打完
 			//（那会被上游判定为压制重试）。可被 ctx 取消。
 			if len(tried) < n {
@@ -450,11 +466,23 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		}
 	}
 
-	if lastErr == nil {
-		// 所有账号都在冷却中（无账号真正尝试过）。这里必须区分两种语义：
-		//   · 全部限流 → 是池级限流，返回 429 + **最早**解冻秒数，客户端按节奏退避；
-		//   · 全部鉴权失效 → 是终态失败，返回 401；返回 429 会让客户端
-		//     无意义地反复重试一个永远不会成功的请求。
+	// 换号循环结束。两件事要区分：
+	//   · 有账号真正尝试过但都失败（lastErr ≠ nil）→ 上游确实拒绝了；
+	//   · 没有账号能服务此模型（lastErr == nil，因为可用账号都被 available() 过滤掉，
+	//     压根没进入尝试）→ 这是「全池冷却」语义，应返回 429 退避而非把某次尝试的
+	//     原始错误甩给客户端（那样会泄露难看的 {"error":{"data":{"code":14018...}}}）。
+	//
+	// 关键修正：即使 lastErr ≠ nil（亲和绑定的账号被真正试过并返回 14018），只要**请求
+	// 的模型在所有账号上都无法服务**，也应归一成 all_accounts_cooling——否则用户会看到
+	// 裸上游 JSON 而不是「该模型在所有账号上都被限流」的清晰提示。
+	allBlockedOrCooling := true
+	for _, acc := range p.accounts {
+		if acc.available(time.Now(), req.Model) {
+			allBlockedOrCooling = false
+			break
+		}
+	}
+	if allBlockedOrCooling {
 		p.mu.Lock()
 		now := time.Now()
 		blocked := 0
@@ -668,6 +696,13 @@ func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failu
 		}
 		return d, -1 // 上游精确时刻，无等级概念
 	}
+	// 无上游重置时刻时的退避封顶：额度耗尽（14018）封顶到 cooldownQuotaModel——
+	// 它不会自动重置（只说「购买加量包」），但也不是永久的，封顶到 2h 比无限
+	// 退避合理；普通频率限制保留 maxCooldown 上限。
+	cap := maxCooldown
+	if f.QuotaExhausted {
+		cap = cooldownQuotaModel
+	}
 	key := modelKey(model)
 	// 读取-判定-升级-写回在同一临界区：否则错峰读取会让一批并发失败
 	// 把退避等级逐个推高（实测 2→4、4→7 跳档）。
@@ -676,9 +711,9 @@ func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failu
 	until := acc.modelCooldown[key]
 	if until.After(time.Now()) {
 		p.mu.Unlock()
-		return p.backoffDuration(level - 1), level
+		return p.backoffDuration(level-1, cap), level
 	}
-	d := p.backoffDuration(level)
+	d := p.backoffDuration(level, cap)
 	if level < 16 {
 		acc.backoffLevel[key] = level + 1
 	}
@@ -686,14 +721,15 @@ func (p *Pool) nextRateLimitBackoff(acc *poolAccount, model string, f *llm.Failu
 	return d, level
 }
 
-// backoffDuration 由等级换算时长，带上限与地板。
-func (p *Pool) backoffDuration(level int) time.Duration {
+// backoffDuration 由等级换算时长，带上限与地板。cap 是退避封顶（额度耗尽
+// 用 cooldownQuotaModel，普通限流用 maxCooldown），防止无重置时刻的失败无限退避。
+func (p *Pool) backoffDuration(level int, cap time.Duration) time.Duration {
 	if level < 0 {
 		level = 0
 	}
 	d := cooldownRateLimitedDefault << uint(level)
-	if d > maxCooldown || d <= 0 { // <=0 防移位溢出
-		d = maxCooldown
+	if d > cap || d <= 0 { // <=0 防移位溢出
+		d = cap
 	}
 	if d < cooldownRateLimitFloor {
 		d = cooldownRateLimitFloor
@@ -771,6 +807,7 @@ func (p *Pool) cooldownAccount(acc *poolAccount, d time.Duration, reason, msg st
 	}
 	acc.cooldownUntil = until
 	acc.lastErr = msg
+	acc.reason = reason
 	if reason == reasonUnauthorized {
 		acc.state = stateBlocked
 	} else {
@@ -926,8 +963,12 @@ func (p *Pool) Statuses() []AccountStatus {
 			st.CooldownUntil = &until
 			st.CooldownSecs = int(acc.cooldownUntil.Sub(now).Seconds())
 			st.LastError = acc.lastErr
+			// 具体原因优先用账号上记录的（额度耗尽 vs 频率限制语义不同）；
+			// 仅当为空的退化情形才回落 rate_limited。
 			if acc.state == stateBlocked {
 				st.Reason = reasonUnauthorized
+			} else if acc.reason != "" {
+				st.Reason = acc.reason
 			} else {
 				st.Reason = reasonRateLimited
 			}

@@ -46,6 +46,9 @@ type Record struct {
 	// 没有它，多账号场景下控制台只能看到总量，看不出账号间的分布。
 	Account string `json:"account,omitempty"`
 
+	// Platform 是本次请求实际路由到的上游平台 ID（多平台集成时的归因字段）。
+	Platform string `json:"platform,omitempty"`
+
 	// GenMs 是本次请求的「生成耗时」（毫秒）：从上游开始产出算起，到流结束或被中断为止。
 	// 它是 TPS 的分母，与 DurationMs（含建连、解码、写回）语义不同。
 	// 0 表示**未测量**（失败请求、未产出 token、或来自无该字段的旧指标文件），
