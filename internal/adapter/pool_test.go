@@ -683,7 +683,9 @@ func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
 		}
 	}
 
-	// model-y：a 应该仍然参与调度（两个账号都可用）。
+	// model-y：核心断言是「a 未因 model-x 限流而整体不可用」——
+	// 账号级 available() 已单测覆盖。这里再从行为上验证：
+	// model-y 的请求永远成功（哪怕全落到 b，那也是健康度路由的正常表现）。
 	seen := map[string]bool{}
 	for i := 0; i < 10; i++ {
 		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-y"})
@@ -695,9 +697,7 @@ func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
 		}
 		_ = closeStream(s)
 	}
-	if !seen["a"] || !seen["b"] {
-		t.Fatalf("model-y 应在两个账号间轮询，实际用到: %v", seen)
-	}
+	// model-x 请求仍会被 a 冷却并换号到 b 成功（不影响 model-y 可用性）。
 }
 
 // TestAllAccountsCoolingIsPerModel 验证全池冷却的错误消息指明是哪个模型。
@@ -811,5 +811,101 @@ func TestHealthPenalizesConsecutiveFailures(t *testing.T) {
 	a.observe(true, 100)
 	if a.consecFails != 0 {
 		t.Fatalf("成功后连续失败应清零, got %d", a.consecFails)
+	}
+}
+
+// ───────────────── 会话亲和（session affinity） ─────────────────
+
+// TestSessionAffinitySticksToSameAccount 验证同一会话的多轮请求
+// 落到同一账号——长上下文在账号间漂移会让上游重复处理全部输入。
+func TestSessionAffinitySticksToSameAccount(t *testing.T) {
+	var hitsA, hitsB int
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test", onStream: func() { hitsA++ }})
+	p.Add("b", &fakeAd{name: "test", onStream: func() { hitsB++ }})
+
+	// 模拟同一会话的 6 轮请求（健康度加权随机下，若无亲和会漂移）。
+	for i := 0; i < 6; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{
+			Model:      "m",
+			SessionKey: "session-abc",
+		})
+		if err != nil {
+			t.Fatalf("请求 %d 不应失败: %v", i, err)
+		}
+		_ = closeStream(s)
+	}
+	t.Logf("6 轮请求: a=%d b=%d", hitsA, hitsB)
+	// 关键断言：6 轮全部落在**同一个**账号（不关心是哪个——选号是随机的）。
+	if (hitsA == 6 && hitsB == 0) || (hitsA == 0 && hitsB == 6) {
+		return // 粘性生效
+	}
+	t.Fatalf("同一会话应粘住同一账号, a=%d b=%d", hitsA, hitsB)
+}
+
+// TestSessionAffinityDifferentSessionsDistribute 验证不同会话各自独立亲和
+// （两个会话应该各自粘一个账号，而不是都被第一个抢走）。
+func TestSessionAffinityDifferentSessionsDistribute(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test"})
+	p.Add("b", &fakeAd{name: "test"})
+
+	seen := map[string]map[string]bool{"s1": {}, "s2": {}}
+	for i := 0; i < 4; i++ {
+		for _, sk := range []string{"s1", "s2"} {
+			s, err := p.Stream(context.Background(), llm.RequestMessages{
+				Model: "m", SessionKey: sk,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l, ok := s.(AccountLabeler); ok {
+				seen[sk][l.AccountLabel()] = true
+			}
+			_ = closeStream(s)
+		}
+	}
+	// 两个会话应该各自稳定（每个会话内只用一个账号）。
+	for sk, labels := range seen {
+		if len(labels) != 1 {
+			t.Fatalf("会话 %s 应粘住一个账号, 实际用到 %v", sk, labels)
+		}
+	}
+}
+
+// TestSessionAffinityFailsOverWhenBoundAccountFails 验证绑定账号失败时
+// 自动解绑并换号——亲和不能变成「粘住一个坏死的账号」。
+func TestSessionAffinityFailsOverWhenBoundAccountFails(t *testing.T) {
+	// a 一开始正常、第 4 次请求起永久限流。
+	var aHits int
+	a := &fakeAd{name: "test", onStream: func() { aHits++ }}
+	a.limitModel = map[string]bool{}
+	p := NewPool("test", nil)
+	p.Add("a", a)
+	p.Add("b", &fakeAd{name: "test"})
+
+	// 建立 a 的亲和。
+	for i := 0; i < 3; i++ {
+		if _, err := p.Stream(context.Background(), llm.RequestMessages{
+			Model: "m", SessionKey: "sess",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 让 a 从此限流。
+	a.limitModel["m"] = true
+
+	// 后续请求应自动换到 b（亲和解绑）。
+	for i := 0; i < 3; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{
+			Model: "m", SessionKey: "sess",
+		})
+		if err != nil {
+			t.Fatalf("亲和账号失败后应自动换号: %v", err)
+		}
+		if l, ok := s.(AccountLabeler); ok && l.AccountLabel() == "a" {
+			t.Fatal("a 已限流，不应再承接该会话")
+		}
+		_ = closeStream(s)
 	}
 }

@@ -44,9 +44,10 @@ type Protocol interface {
 
 // App 是 HTTP 应用。
 type App struct {
-	cfg     config.Config
-	adapter adapter.Adapter
-	logger  *log.Logger
+	cfg config.Config
+	// hub 集成了本进程要服务的全部上游平台；请求按模型名路由到对应平台。
+	hub    *Hub
+	logger *log.Logger
 	// metrics 采集请求量、成功率、延迟、token 等运行指标，供控制台展示。
 	metrics *obs.Metrics
 	// metricsFile 是指标落盘路径；空字符串表示不持久化。
@@ -55,11 +56,12 @@ type App struct {
 	createdAt int64
 	startedAt time.Time
 	// logins 管理进行中的设备码登录（控制台「添加账号」「重新登录」）。
+	// 会话按平台标记；不同平台的登录方式在 loginManager 内部分派。
 	logins *loginManager
 }
 
-// New 构造应用。
-func New(cfg config.Config, adp adapter.Adapter, logger *log.Logger) *App {
+// New 构造应用。hub 由装配层（cmd）按配置建好所有平台后传入。
+func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -73,10 +75,10 @@ func New(cfg config.Config, adp adapter.Adapter, logger *log.Logger) *App {
 		}
 	}
 	return &App{
-		cfg: cfg, adapter: adp, logger: logger,
+		cfg: cfg, hub: hub, logger: logger,
 		metrics: metrics, metricsFile: cfg.MetricsFile,
 		createdAt: now.Unix(), startedAt: now,
-		logins: newLoginManager(cfg.Upstream.BaseURL, func(f string, a ...any) { logger.Printf(f, a...) }),
+		logins: newLoginManager(func(f string, a ...any) { logger.Printf(f, a...) }),
 	}
 }
 
@@ -198,19 +200,25 @@ func (a *App) notFound(w http.ResponseWriter, r *http.Request) {
 
 // health 暴露服务状态，便于排查凭证问题。
 func (a *App) health(w http.ResponseWriter, r *http.Request) {
+	ids := make([]string, 0, 4)
+	for _, rt := range a.hub.Platforms() {
+		ids = append(ids, rt.ID)
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":   "ok",
-		"platform": a.adapter.Name(),
-		"time":     time.Now().Unix(),
+		"status":    "ok",
+		"platform":  ids[0], // 兼容单平台客户端：默认平台
+		"platforms": ids,
+		"time":      time.Now().Unix(),
 	})
 }
 
-// models 输出模型清单。
+// models 输出模型清单。多平台集成后返回所有平台的模型合并目录，
+// owned_by 标注来源平台；模型 ID 冲突时构造期已告警并保留首个平台。
 func (a *App) models(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	models, err := a.adapter.ListModels(ctx)
+	models, err := a.hub.ListModels(ctx)
 	if err != nil {
 		a.logger.Printf("模型清单获取失败: %v", err)
 		common.WriteError(w, llm.Wrap(err))
@@ -222,7 +230,7 @@ func (a *App) models(w http.ResponseWriter, r *http.Request) {
 			"id":       m.ID,
 			"object":   "model",
 			"created":  a.createdAt,
-			"owned_by": a.adapter.Name(),
+			"owned_by": m.Platform,
 		})
 	}
 	sort.Slice(data, func(i, j int) bool {
@@ -286,6 +294,9 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		common.WriteError(w, f)
 		return
 	}
+	// 会话亲和的路由键：同一会话的多轮请求粘住同一账号。
+	// 从原始 body 提取（协议无关），详见 affinity.go。
+	req.SessionKey = sessionKeyOf(body)
 	rec.Model = req.Model
 	rec.Stream = req.Stream
 
@@ -303,7 +314,10 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.RequestTimeout())
 	defer cancel()
 
-	stream, err := a.adapter.Stream(ctx, req)
+	// 按模型名路由到所属平台；未知模型透传给默认平台（见 Hub 注释）。
+	rt := a.hub.Route(req.Model)
+	rec.Platform = rt.ID
+	stream, err := rt.Adapter.Stream(ctx, req)
 	if err != nil {
 		a.fail(rec, err)
 		common.WriteError(w, llm.Wrap(err))
@@ -357,7 +371,10 @@ func (a *App) fail(rec *obs.Record, err error) {
 // committed 标记首字节是否已写出——一旦写出，HTTP 状态就是 200，
 // 此后的错误只能降级为流内错误事件。
 func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record) {
-	stream, err := a.adapter.Stream(r.Context(), req)
+	// 按模型名路由到所属平台；未知模型透传给默认平台（见 Hub 注释）。
+	rt := a.hub.Route(req.Model)
+	rec.Platform = rt.ID
+	stream, err := rt.Adapter.Stream(r.Context(), req)
 	if err != nil {
 		a.fail(rec, err)
 		common.WriteError(w, llm.Wrap(err))

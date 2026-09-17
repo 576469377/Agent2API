@@ -70,7 +70,7 @@ func (s accountState) String() string {
 	}
 }
 
-// Pool 把同一平台的 N 个适配器包装成一个 Adapter：按轮询调度健康账号，
+// Pool 把同一平台的 N 个适配器包装成一个 Adapter：按健康度调度健康账号，
 // 失败时按错误类别决定「冷却该账号并换下一个」还是「直接失败」。
 //
 // 它只依赖 adapter.Adapter 接口与 llm.Failure 的分类字段，
@@ -82,7 +82,10 @@ type Pool struct {
 
 	mu       sync.Mutex
 	accounts []*poolAccount
-	next     int // 轮询游标，保证请求在健康账号间均匀分布
+	next     int // 同分裁决游标（健康度排序后的均分手段）
+	// affinity 是会话亲和表：同一会话粘住同一账号（避免长上下文在账号间
+	// 漂移导致上游重复处理全部输入）。
+	affinity *affinityTable
 }
 
 type poolAccount struct {
@@ -149,8 +152,8 @@ type AccountStatus struct {
 
 // NewPool 创建号池。name 是平台标识（账号必须同平台，模型目录才可互换）。
 // logf 可为 nil。
-func NewPool(name string, logf func(format string, args ...any)) *Pool {
-	return &Pool{name: name, logf: logf}
+func NewPool(name string, logf func(string, ...any)) *Pool {
+	return &Pool{name: name, logf: logf, affinity: newAffinityTable()}
 }
 
 // Add 向号池注册一个账号。label 用于日志与控制台展示（如凭证文件名）。
@@ -292,14 +295,49 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 	}
 	p.mu.Unlock()
 
-	// 选号按健康度而非固定顺序（见 pickLocked）。每轮重新选：
-	// 前一个账号失败后，它的健康度已下降，下一轮自然轮到别人。
+	// 会话亲和：同一会话优先粘住上次的账号（长上下文在账号间漂移会让
+	// 上游重复处理全部输入）。
 	//
-	// tried 记录本轮已试过的账号，避免同一个账号被重复挑中。
-	tried := map[int]bool{}
-
+	// 亲和失败（账号没了/首帧报错）时解绑并落入下方的正常换号循环，
+	// 错误作为 lastErr 起点参与后续分类。
+	var sk string
 	var lastErr error
+	tried := map[int]bool{}
+	if req.SessionKey != "" {
+		sk = req.SessionKey
+		p.mu.Lock()
+		bound, has := p.affinity.get(sk)
+		p.mu.Unlock()
+		if has {
+			for idx, acc := range p.accounts {
+				if acc.label != bound || !acc.available(time.Now(), req.Model) {
+					continue
+				}
+				tried[idx] = true
+				s, err := acc.adp.Stream(ctx, req)
+				if err == nil {
+					bs, probeErr := probeFirstEvent(ctx, s)
+					if probeErr == nil {
+						return &labeledStream{ResponseStream: bs, label: acc.label}, nil
+					}
+					_ = closeStream(s)
+					err = probeErr
+				}
+				// 亲和账号失败：解绑，错误带入正常换号循环。
+				lastErr = err
+				p.affinity.delete(sk)
+				break
+			}
+			if lastErr == nil {
+				// 绑定的账号不在池里或不可用：解绑走正常调度。
+				p.affinity.delete(sk)
+			}
+		}
+	}
+
+	// 正常换号循环（亲和失败或无绑定时进入）。tried 已含亲和尝试过的账号。
 	for len(tried) < n {
+
 		now := time.Now()
 		p.mu.Lock()
 		idx, acc := p.pickByHealthLocked(now, req.Model, tried)
@@ -317,6 +355,12 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			bs, probeErr := probeFirstEvent(ctx, s)
 			if probeErr == nil {
 				p.succeed(idx, float64(time.Since(now).Milliseconds()))
+				// 会话亲和回写：本次会话下次还来这个账号。
+				if sk != "" {
+					p.mu.Lock()
+					p.affinity.set(sk, acc.label)
+					p.mu.Unlock()
+				}
 				// 带上账号标签：app 层据此把请求归因到具体账号，
 				// 控制台才能回答「每个账号用了多少额度」。
 				return &labeledStream{ResponseStream: bs, label: acc.label}, nil
@@ -325,6 +369,15 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			err = probeErr
 		}
 		lastErr = err
+		// 会话亲和解绑：绑定的账号失败了，旧绑定已无意义
+		//（下次请求会按健康度重新选择并重建绑定）。
+		if sk != "" {
+			p.mu.Lock()
+			if bound, ok := p.affinity.get(sk); ok && bound == acc.label {
+				p.affinity.delete(sk)
+			}
+			p.mu.Unlock()
+		}
 
 		// 客户端已放弃：不再换号，原样返回。
 		if ctx.Err() != nil {

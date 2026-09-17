@@ -131,4 +131,12 @@ type RequestMessages struct {
 
 	// Dropped 记录解码期被丢弃或降级的下游字段，用于可观测性。
 	Dropped []string
+
+	// SessionKey 是会话亲和的**路由键**——同一会话的多次请求应落同一账号。
+	//
+	// 注意它与「会话 ID」是两回事：显式信号（metadata.user_id 等）优先；
+	// 没有显式信号时用「系统提示+首条 user 消息」的哈希兜底——它们在会话
+	// 内稳定，而完整消息列表逐轮增长，直接哈希会每轮变化。
+	// 空串表示无法确定会话（如纯 API 单轮调用），不做亲和。
+	SessionKey string
 }
