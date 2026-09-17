@@ -750,6 +750,42 @@ func TestStatusesExposeModelCooldowns(t *testing.T) {
 
 // ───────────────── 健康度感知路由（取代严格轮询） ─────────────────
 
+// TestQuotaExhaustedAccountLevelCooldown 是「额度耗尽冷却语义」的回归测试：
+// 账号 A 额度耗尽 → **整号**冷却 2h（不是按模型逐个试错）→ 换 B 承接。
+// 实测曾错误地按模型冷却，导致同账号三个模型各撞一次限流墙。
+func TestQuotaExhaustedAccountLevelCooldown(t *testing.T) {
+	fl := llm.NewFailure("upstream_14018", "额度已用尽，请访问以下链接，购买加量包", nil)
+	fl.QuotaExhausted = true
+	fl.RateLimited = true
+
+	p := NewPool("wb", nil)
+	p.Add("A", &fakeAd{name: "wb", err: fl})
+	p.Add("B", &fakeAd{name: "wb"})
+
+	s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatalf("B 应能承接: %v", err)
+	}
+	_ = closeStream(s)
+
+	p.mu.Lock()
+	accA := p.accounts[0]
+	acctCooled := !accA.accountUsable(time.Now())
+	dur := time.Until(accA.cooldownUntil)
+	noModelCooldown := len(accA.modelCooldown) == 0
+	p.mu.Unlock()
+
+	if !acctCooled {
+		t.Fatal("额度耗尽应触发账号级冷却")
+	}
+	if dur < time.Hour {
+		t.Fatalf("账号级冷却应 ≥1h（2h）, got %v", dur)
+	}
+	if !noModelCooldown {
+		t.Fatal("额度耗尽不应按模型分别冷却（那是要修的 bug）")
+	}
+}
+
 // TestHealthRoutePrefersHealthyAccount 验证核心收益：
 // 一个账号持续失败、另一个持续成功时，流量应明显偏向后者。
 // 严格轮询下两者各占一半 —— 这正是要修的不合理之处。
