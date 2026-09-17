@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -133,6 +134,10 @@ type AccountIdentity struct {
 	UID      string `json:"uid,omitempty"`
 	Nickname string `json:"nickname,omitempty"`
 	CredPath string `json:"credential_path,omitempty"`
+	// Source 标识凭证来源："desktop"（桌面客户端的登录态）或 "file"（独立凭证文件）。
+	// 两者是**同一类凭证**（都是本机账号的 token），差别只在存放位置；
+	// 但「重新登录」对桌面凭证会覆盖桌面端登录态，所以 UI 必须区分。
+	Source string `json:"source,omitempty"`
 	// ExpiresAt 是 access token 到期时刻（Unix 毫秒）；0 表示未知。
 	ExpiresAt int64 `json:"expires_at,omitempty"`
 	// RefreshExpAt 是 refresh token 到期时刻；它过期就只能重新登录。
@@ -150,6 +155,13 @@ func (a *Adapter) AccountIdentity() AccountIdentity {
 		UID: c.UID, Nickname: c.Nickname,
 		CredPath:  a.auth.CredentialPath(),
 		ExpiresAt: c.ExpiresAt, RefreshExpAt: c.RefreshExpAt,
+	}
+	// 来源判定：桌面客户端凭证固定放在 CodeBuddyExtension 目录下；
+	// 其余（号池文件、设备码登录产物）都算独立凭证文件。
+	if strings.Contains(id.CredPath, "CodeBuddyExtension") {
+		id.Source = "desktop"
+	} else if id.CredPath != "" {
+		id.Source = "file"
 	}
 	now := time.Now().UnixMilli()
 	id.NeedsRefresh = c.ExpiresAt > 0 && c.ExpiresAt < now+60_000

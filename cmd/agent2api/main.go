@@ -20,8 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/576469377/Agent2API/internal/adapter"
-	"github.com/576469377/Agent2API/internal/adapter/doubao"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
@@ -35,6 +33,9 @@ func main() {
 			return
 		case "models":
 			runModels(os.Args[2:])
+			return
+		case "dedupe":
+			runDedupe(os.Args[2:])
 			return
 		case "help", "-h", "--help":
 			printUsage()
@@ -51,6 +52,7 @@ func printUsage() {
   agent2api [flags]            启动网关服务
   agent2api login [flags]      设备码登录，获取上游凭证
   agent2api models [flags]     列出当前账号可用模型
+  agent2api dedupe [flags]     清理凭证目录里的重复与无效凭证
 
 启动参数:
 `)
@@ -87,7 +89,7 @@ func addServerFlags(fs *flag.FlagSet) *serverFlags {
 	fs.StringVar(&sf.accountsDir, "accounts-dir", "", "多账号号池目录；目录下每个 *.json 视为一个账号（agent2api login -out 攒凭证）")
 	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认 https://copilot.tencent.com")
 	fs.BoolVar(&sf.noSanitize, "no-sanitize", false, "关闭内容脱敏（接入 Claude Code/Codex 时不建议关闭）")
-	fs.StringVar(&sf.platform, "platform", "workbuddy", "上游平台，目前仅支持 workbuddy")
+	fs.StringVar(&sf.platform, "platform", "", "上游平台（当前仅支持 workbuddy；缺省自动探测）")
 	fs.StringVar(&sf.metricsFile, "metrics-file", "", "指标落盘路径；默认写到配置文件同目录的 metrics.json")
 	fs.BoolVar(&sf.noPersist, "no-persist", false, "关闭指标落盘（重启后统计清零）")
 	return sf
@@ -168,22 +170,25 @@ func runServer(args []string) {
 		}
 	}
 
-	switch cfg.Upstream.Platform {
-	case "workbuddy", "doubao":
-	default:
-		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / doubao）", cfg.Upstream.Platform)
+	// 平台合法性在 buildHub 里逐个校验（自动集成模式下 Platform 为空是正常的）。
+	// 这里只拦「显式写了不支持平台」的低级错误，快速失败。
+	if cfg.Upstream.Platform != "" && cfg.Upstream.Platform != "workbuddy" {
+		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy）", cfg.Upstream.Platform)
 	}
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
 
-	adp, pool, err := buildAdapter(cfg, logger)
+	hub, err := buildHub(cfg, logger)
 	if err != nil {
 		logger.Fatalf("初始化上游适配器失败: %v", err)
 	}
+	// 号池热加载：控制台「添加账号」或手动放入号池目录的新凭证，
+	// 运行期自动入池，无需重启。
+	startPoolWatchers(hub, cfg, logger)
 	// 注意：这里刻意**不**打印「上游平台=… 账号=…」——那些信息在下面的横幅里
 	// 有更可读的呈现，重复一行带时间戳前缀的日志只会干扰阅读。
 
-	application := app.New(cfg, adp, logger)
+	application := app.New(cfg, hub, logger)
 	application.StartMetricsPersistence(30 * time.Second)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
@@ -200,7 +205,7 @@ func runServer(args []string) {
 	}()
 
 	// 启动横幅直接写 stdout（不经过 logger，避免时间戳前缀干扰阅读与复制）。
-	printBanner(cfg, adp, pool)
+	printBanner(cfg, hub)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -233,88 +238,179 @@ func baseURL(cfg config.Config) string {
 	return fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
 }
 
-// platformSummary 汇总平台与账号信息，含一次轻量的模型探测。
-//
-// 探测失败不阻断启动，只是不显示模型数量——启动不该强依赖上游可用性。
-func platformSummary(adp adapter.Adapter, pool *adapter.Pool) string {
-	base := fmt.Sprintf("%s · 账号 %s", adp.Name(), summarizeAccounts(adp, pool))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	models, err := adp.ListModels(ctx)
-	if err != nil {
-		return base + " · 模型获取失败（上游不可达）"
+// ───────────────────────── 终端显示辅助 ─────────────────────────
+
+// dispWidth 估算字符串的终端显示宽度：CJK 等全角字符按 2 列计。
+// 横幅要列对齐中英文混排的内容，按 rune 数计算会错位。
+func dispWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w++
+		if r > 0x2E80 { // CJK 部首区起点，覆盖汉字/假名/谚文
+			w++
+		}
 	}
-	return fmt.Sprintf("%s · %d 个模型", base, len(models))
+	return w
+}
+
+// padRight 右侧补空格到指定显示宽度。
+func padRight(s string, w int) string {
+	if d := w - dispWidth(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // printBanner 打印启动横幅。
 //
-// 版式原则：一眼两个信息——控制台地址、账号状态；其余按重要度降级。
-// 接口列表只保留三个客户端真正会调的 v1 端点（models/health 在控制台
-// 与文档里都有，不值得占黄金位置）。
-func printBanner(cfg config.Config, adp adapter.Adapter, pool *adapter.Pool) {
+// 版式原则：**所有内容都从运行时状态生成**——上游、账号（友好名）、模型数
+// 全部来自 hub 探测，不写死任何平台或账号；接口只列路径（完整地址在头部
+// 出现一次，避免每行重复一长串）；提示区只放需要用户行动或知晓的事。
+func printBanner(cfg config.Config, hub *app.Hub) {
 	base := baseURL(cfg)
 	line := strings.Repeat("─", 62)
 
-	fmt.Println()
-	fmt.Println(line)
-	fmt.Printf("  Agent2API 控制台    %s/\n", base)
-	fmt.Printf("  %s\n", platformSummary(adp, pool))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	// 多账号时逐个列出账号状态，让「谁在冷却」一眼可见。
-	if pool != nil && pool.Len() > 1 {
-		for _, st := range pool.Statuses() {
-			flag := "✓"
-			detail := ""
-			if st.State == "disabled" {
-				flag = "⏸"
-				detail = " · 已停用"
-			} else if !st.Healthy {
-				flag = "⏳"
-				detail = fmt.Sprintf(" · 冷却 %ds · %s", st.CooldownSecs, truncate(st.LastError, 40))
+	type accountLine struct{ mark, label, detail string }
+	type upRow struct {
+		mark, id, account, models string
+		details                   []accountLine
+	}
+
+	var rows []upRow
+	totalModels, totalAccounts, healthyAccounts := 0, 0, 0
+	for _, rt := range hub.Platforms() {
+		sts := rt.AccountStatuses()
+		healthy := 0
+		names := make([]string, 0, len(sts))
+		row := upRow{id: rt.ID}
+		for _, st := range sts {
+			totalAccounts++
+			names = append(names, st.Label)
+			switch {
+			case st.State == "disabled":
+				row.details = append(row.details, accountLine{"⏸", st.Label, "已停用"})
+			case !st.Healthy:
+				detail := truncate(st.LastError, 46)
+				if detail == "" {
+					detail = "不可用"
+				}
+				if st.CooldownSecs > 0 {
+					detail = fmt.Sprintf("冷却 %ds · %s", st.CooldownSecs, detail)
+				}
+				row.details = append(row.details, accountLine{"⏳", st.Label, detail})
+			default:
+				healthy++
 			}
-			fmt.Printf("        %s %s%s\n", flag, st.Label, detail)
 		}
-	}
-	fmt.Println(line)
-	fmt.Println("  接口")
-	fmt.Printf("    POST  %s/v1/chat/completions   OpenAI Chat Completions\n", base)
-	fmt.Printf("    POST  %s/v1/responses          OpenAI Responses\n", base)
-	fmt.Printf("    POST  %s/v1/messages           Anthropic Messages\n", base)
-	fmt.Println(line)
+		healthyAccounts += healthy
 
-	// 提示区：只放需要用户行动或知晓的事，按重要度排序。
-	var tips []string
-	if cfg.Auth.APIKey == "" {
-		tips = append(tips, "未配置 API Key，网关对本机可访问者开放（启动时加 -api-key 设置）")
-	} else {
-		tips = append(tips, "访问鉴权已启用")
-	}
-	if cfg.Upstream.AccountsDir == "" {
-		tips = append(tips, "未配置号池目录：在控制台「添加账号」的凭证会写入 ~/.workbuddy；"+
-			"配置 -accounts-dir（或建 auths/）后新凭证自动入池")
-	}
-	if cfg.MetricsFile != "" {
-		tips = append(tips, fmt.Sprintf("指标持久化已开启（%s）", cfg.MetricsFile))
-	} else {
-		tips = append(tips, "指标持久化已关闭（重启后统计清零，加 -metrics-file 启用）")
-	}
-	for i, tip := range tips {
-		if i == 0 {
-			fmt.Printf("  提示  %s\n", tip)
+		row.account = strings.Join(names, "、")
+		if len(names) > 2 {
+			row.account = fmt.Sprintf("%s 等 %d 个账号", names[0], len(names))
+		}
+		switch {
+		case healthy == 0:
+			row.mark = "✗"
+		case healthy < len(sts):
+			row.mark = "◐"
+		default:
+			row.mark = "✓"
+		}
+		if ms, err := rt.Adapter.ListModels(ctx); err == nil {
+			row.models = fmt.Sprint(len(ms))
+			totalModels += len(ms)
 		} else {
-			fmt.Printf("        %s\n", tip)
+			row.models = "—"
+		}
+		rows = append(rows, row)
+	}
+
+	fmt.Println()
+	fmt.Println(line)
+	fmt.Println("  Agent2API · 统一网关与控制台")
+	fmt.Printf("  %s · %d 个上游 · %d 个账号（%d 可用）· %d 个模型\n",
+		base, len(rows), totalAccounts, healthyAccounts, totalModels)
+
+	// ── 上游区：列宽按内容自适应，中英文混排也对齐 ──
+	if len(rows) > 0 {
+		idW, accW := 0, 0
+		for _, r := range rows {
+			idW = maxInt(idW, dispWidth(r.id))
+			accW = maxInt(accW, dispWidth(r.account))
+		}
+		fmt.Println()
+		fmt.Println("  上游")
+		for _, r := range rows {
+			fmt.Printf("    %s %s  %s  %s 个模型\n", r.mark, padRight(r.id, idW), padRight(r.account, accW), r.models)
+			for _, d := range r.details {
+				fmt.Printf("        %s %s · %s\n", d.mark, d.label, d.detail)
+			}
 		}
 	}
-	fmt.Println("        Ctrl+C 停止服务")
+
+	// ── 接口区：完整地址只在头部出现一次，这里只列路径 ──
+	type endpoint struct{ method, path, desc string }
+	eps := []endpoint{
+		{"POST", "/v1/chat/completions", "OpenAI Chat 兼容"},
+		{"POST", "/v1/responses", "OpenAI Responses"},
+		{"POST", "/v1/messages", "Anthropic Messages 兼容"},
+		{"GET", "/v1/models", "模型清单"},
+	}
+	pw := 0
+	for _, e := range eps {
+		pw = maxInt(pw, len(e.method)+1+len(e.path))
+	}
 	fmt.Println()
+	fmt.Println("  接口")
+	for _, e := range eps {
+		fmt.Printf("    %s  %s\n", padRight(e.method+" "+e.path, pw), e.desc)
+	}
+	fmt.Println(line)
 }
 
-// newAdapter 构造单账号适配器（models 子命令等简单场景使用）。
-func newAdapter(cfg config.Config, logger *log.Logger) (adapter.Adapter, error) {
-	return newPlatformAdapter(cfg, cfg.Upstream.CredentialPath, func(format string, args ...any) {
-		logger.Printf(format, args...)
-	})
+// supportedPlatforms 是 buildHub 能装配的平台集合（与 newPlatformAdapter 工厂一致）。
+// 新增平台适配器后在此追加。
+var supportedPlatforms = map[string]bool{"workbuddy": true}
+
+// buildHub 按配置装配多平台枢纽。
+//
+// ResolvePlatforms 得到要集成的平台列表后，每个平台独立构建适配器/号池：
+// 单个平台失败（凭证缺失、文件损坏、不认识的平台）只跳过并告警，
+// 其余平台照常服务；全部失败才返回错误。
+// 多账号、凭证探测、号池冷却等逻辑全部复用 buildAdapter，只是按平台各跑一遍。
+func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
+	pcs := cfg.ResolvePlatforms()
+	var runtimes []*app.PlatformRuntime
+	var failures []string
+	for _, pc := range pcs {
+		if !supportedPlatforms[pc.ID] {
+			failures = append(failures, pc.ID+": 不支持的平台")
+			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy）", pc.ID)
+			continue
+		}
+		clone := cfg.CloneForPlatform(pc)
+		adp, pool, err := buildAdapter(clone, logger)
+		if err != nil {
+			failures = append(failures, pc.ID+": "+err.Error())
+			logger.Printf("平台 %s 初始化失败，已跳过: %v", pc.ID, err)
+			continue
+		}
+		runtimes = append(runtimes, &app.PlatformRuntime{ID: pc.ID, Adapter: adp, Pool: pool, Cfg: pc})
+	}
+	if len(runtimes) == 0 {
+		return nil, fmt.Errorf("所有平台初始化失败: %s", strings.Join(failures, "; "))
+	}
+	return app.NewHub(runtimes, logger)
 }
 
 // truncate 按字符截断长文本用于单行展示。
@@ -333,14 +429,7 @@ func runLogin(args []string) {
 	out := fs.String("out", "", "凭证输出路径，默认 ~/.workbuddy/session.json")
 	base := fs.String("base-url", workbuddy.DefaultBaseURL, "上游地址")
 	platform := fs.String("platform", "VSCode", "上报给上游的客户端标识")
-	upstream := fs.String("upstream", "workbuddy", "上游平台：workbuddy / doubao")
 	_ = fs.Parse(args)
-
-	// 豆包没有设备码登录：凭证就是桌面端的 Cookie，直接导出即可。
-	if *upstream == "doubao" {
-		runDoubaoLogin(*out)
-		return
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
@@ -367,28 +456,6 @@ func runLogin(args []string) {
 	fmt.Println("多账号提示: agent2api login -out auths/a.json 可把凭证存入号池目录，多号轮询使用")
 }
 
-// runDoubaoLogin 把本机 DoubaoWork 的登录态导出成 JSON 凭证文件。
-//
-// 用途：多账号号池（导出多份放进 accounts_dir）与无桌面端的机器部署。
-func runDoubaoLogin(out string) {
-	if out == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatalf("取不到用户主目录: %v", err)
-		}
-		out = filepath.Join(home, ".agent2api", "doubao.json")
-	}
-	cred, err := doubao.LoadCredential("")
-	if err != nil {
-		log.Fatalf("读取 DoubaoWork 凭证失败: %v（请先在客户端登录豆包）", err)
-	}
-	if err := doubao.SaveCredential(cred, out); err != nil {
-		log.Fatalf("保存凭证失败: %v", err)
-	}
-	fmt.Printf("已导出豆包凭证: %s（%d 个 Cookie）\n", out, len(cred.Cookies))
-	fmt.Println("把它放进号池目录后启动网关: agent2api -platform doubao -accounts-dir auths")
-}
-
 // ───────────────────────── 模型列表 ─────────────────────────
 
 func runModels(args []string) {
@@ -396,6 +463,7 @@ func runModels(args []string) {
 	configPath := fs.String("config", "", "配置文件路径")
 	credentialPath := fs.String("credential", "", "凭证文件路径")
 	baseURL := fs.String("base-url", "", "上游地址")
+	platform := fs.String("platform", "", "只列指定平台（缺省列出全部已集成平台）")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load(*configPath)
@@ -410,29 +478,60 @@ func runModels(args []string) {
 	}
 
 	logger := log.New(os.Stderr, "", 0)
-	adp, err := newAdapter(cfg, logger)
+	hub, err := buildHub(cfg, logger)
 	if err != nil {
 		log.Fatalf("初始化失败: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	models, err := adp.ListModels(ctx)
-	if err != nil {
-		log.Fatalf("获取模型失败: %v", err)
+	for _, rt := range hub.Platforms() {
+		if *platform != "" && rt.ID != *platform {
+			continue
+		}
+		models, err := rt.Adapter.ListModels(ctx)
+		if err != nil {
+			fmt.Printf("平台 %s 获取模型失败: %v\n", rt.ID, err)
+			continue
+		}
+		fmt.Printf("平台 %s · 共 %d 个可用模型：\n", rt.ID, len(models))
+		for _, m := range models {
+			flags := ""
+			if m.SupportsTools {
+				flags += " tools"
+			}
+			if m.SupportsThinking {
+				flags += " thinking"
+			}
+			if m.SupportsImages {
+				flags += " vision"
+			}
+			fmt.Printf("  %-24s %-22s ctx=%d%s\n", m.ID, m.DisplayName, m.ContextTokens, flags)
+		}
 	}
-	fmt.Printf("共 %d 个可用模型：\n", len(models))
-	for _, m := range models {
-		flags := ""
-		if m.SupportsTools {
-			flags += " tools"
-		}
-		if m.SupportsThinking {
-			flags += " thinking"
-		}
-		if m.SupportsImages {
-			flags += " vision"
-		}
-		fmt.Printf("  %-24s %-22s ctx=%d%s\n", m.ID, m.DisplayName, m.ContextTokens, flags)
+}
+
+// runDedupe 清理凭证目录里的重复与无效凭证。
+//
+//	agent2api dedupe            预览（不删）
+//	agent2api dedupe -yes       实际清理
+func runDedupe(args []string) {
+	fs := flag.NewFlagSet("dedupe", flag.ExitOnError)
+	dir := fs.String("dir", "", "凭证目录，默认 ~/.workbuddy")
+	yes := fs.Bool("yes", false, "实际执行删除（默认只预览）")
+	_ = fs.Parse(args)
+
+	target := *dir
+	if target == "" {
+		target = app.DefaultAccountsDir()
+	}
+	fmt.Printf("凭证目录: %s\n\n", target)
+
+	removed, kept := dedupeCredentialDir(target, !*yes, func(format string, a ...any) {
+		fmt.Printf("  %s\n", fmt.Sprintf(format, a...))
+	})
+	fmt.Printf("\n保留 %d 份，%s %d 份\n", kept, map[bool]string{true: "待删除", false: "已删除"}[!*yes], removed)
+	if !*yes && removed > 0 {
+		fmt.Println("\n这是预览。确认无误后加 -yes 实际执行。")
 	}
 }
