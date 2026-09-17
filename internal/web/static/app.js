@@ -28,7 +28,7 @@
       'sub.settings': 'Runtime options and effective configuration',
       'theme.auto': 'System', 'theme.light': 'Light', 'theme.dark': 'Dark',
       'group.ops': 'Operations', 'group.upstream': 'Upstream', 'group.tools': 'Tools',
-      'stat.total': 'Requests', 'stat.success': 'Success rate', 'stat.latency': 'Avg latency',
+      'stat.peak': 'Peak', 'stat.total': 'Requests', 'stat.success': 'Success rate', 'stat.latency': 'Avg latency',
       'stat.tps': 'Decode speed', 'stat.inflight': 'In flight', 'stat.in': 'Input tokens',
       'stat.out': 'Output tokens', 'stat.failed': 'failed', 'stat.rpm': 'last 1 min',
       'stat.all': 'all requests', 'stat.now': 'current concurrency',
@@ -66,6 +66,8 @@
       'toast.saved': 'Settings saved', 'toast.keyrefreshed': 'Model list refreshed',
       'toast.keysaved': 'Key saved', 'toast.keycleared': 'Key cleared',
       'time.now': 'now', 'time.ago': (m) => `-${m}m`,
+      'mx.minutesago': (m) => `${m} min ago`,
+      'tip.reqs': 'Requests',
     },
     zh: {
       'nav.overview': '概览', 'nav.requests': '调用日志', 'nav.accounts': '账号',
@@ -81,7 +83,7 @@
       'sub.settings': '运行期可调项与当前生效配置',
       'theme.auto': '跟随系统', 'theme.light': '浅色', 'theme.dark': '深色',
       'group.ops': '运营', 'group.upstream': '上游', 'group.tools': '工具',
-      'stat.total': '请求总数', 'stat.success': '成功率', 'stat.latency': '平均延迟',
+      'stat.peak': '峰值', 'stat.total': '请求总数', 'stat.success': '成功率', 'stat.latency': '平均延迟',
       'stat.tps': '解码速度', 'stat.inflight': '进行中', 'stat.in': '输入 Token',
       'stat.out': '输出 Token', 'stat.failed': '失败', 'stat.rpm': '近 1 分钟',
       'stat.all': '全部请求', 'stat.now': '当前并发',
@@ -119,6 +121,8 @@
       'toast.saved': '设置已生效', 'toast.keyrefreshed': '模型清单已刷新',
       'toast.keysaved': '密钥已保存', 'toast.keycleared': '密钥已清除',
       'time.now': '现在', 'time.ago': (m) => `-${m}m`,
+      'mx.minutesago': (m) => `${m} 分钟前`,
+      'tip.reqs': '请求',
     },
   };
 
@@ -320,7 +324,12 @@
 
   async function loadOverview(silent) {
     try {
-      const [st, mt] = await Promise.all([get('/api/status'), get('/api/metrics')]);
+      const [st, mt, acc] = await Promise.all([
+        get('/api/status'), get('/api/metrics'),
+        // 账号列表供「账号用量排行」过滤已删除的凭证残留。
+        get('/api/accounts').catch(() => null),
+      ]);
+      if (acc) state.accounts = acc;
       state.status = st;
       state.metrics = mt;
       renderStatus(st);
@@ -369,11 +378,11 @@
       { k: t('stat.latency'), v: fmtMs(m.avg_latency_ms), sub: t('stat.all') },
       { k: t('stat.tps'), v: tps.v, sub: tps.sub },
       { k: t('stat.inflight'), v: m.in_flight, sub: t('stat.now') },
-      { k: t('stat.in'), v: fmtNum(m.input_tokens), sub: '' },
-      { k: t('stat.out'), v: fmtNum(m.output_tokens), sub: m.reasoning_tokens ? `${t('stat.think')} ${fmtNum(m.reasoning_tokens)}` : '' },
+      { k: t('stat.in'), v: fmtNum(m.input_tokens), sub: '', tip: String(m.input_tokens) },
+      { k: t('stat.out'), v: fmtNum(m.output_tokens), sub: m.reasoning_tokens ? `${t('stat.think')} ${fmtNum(m.reasoning_tokens)}` : '', tip: String(m.output_tokens) },
     ];
     $('statGrid').innerHTML = cards
-      .map((c) => `<div class="stat ${c.cls || ''}">
+      .map((c) => `<div class="stat ${c.cls || ''}"${c.tip ? ` title="${esc(c.tip)}"` : ''}>
         <div class="k">${esc(c.k)}</div>
         <div class="v">${esc(String(c.v))}</div>
         <div class="sub">${esc(c.sub || '')}</div>
@@ -430,8 +439,14 @@
   function renderRanks(m) {
     $('rankProto').innerHTML = rankRows(m.by_protocol || []);
     $('rankModel').innerHTML = rankRows(m.by_model || []);
-    // 账号排行：仅号池模式（by_account 非空且不是单一的 (unknown)）才展示。
-    const acc = (m.by_account || []).filter((g) => g.key !== '(unknown)');
+    // 账号排行：仅号池模式才展示，且**只显示当前池里存在的账号**——
+    // 已删除凭证的历史用量（如 dedupe 清掉的重复号）不该继续占排行。
+    const current = new Set((state.accounts && state.accounts.accounts
+      ? state.accounts.accounts.map((a) => a.label)
+      : (m.by_account || []).map((g) => g.key)));
+    // accounts 页没加载时兜底放行（否则首次进概览会全隐藏）。
+    const acc = (m.by_account || []).filter((g) => g.key !== '(unknown)'
+      && (state.accounts ? current.has(g.key) : true));
     const panel = $('panelAcctRank');
     if (acc.length) {
       panel.style.display = '';
@@ -460,12 +475,14 @@
   }
 
   function recentRow(r) {
-    const t = new Date(r.time).toLocaleTimeString('zh-CN');
+    // 局部变量叫 timeStr 而非 t——全局的 t() 是翻译函数，遮蔽会让
+    // 新增的 t('req.acct') 调用变成「字符串不可调用」的运行时错误。
+    const timeStr = new Date(r.time).toLocaleTimeString('zh-CN');
     return `<div class="recent-row">
       <span class="badge ${r.ok ? 'ok' : 'err'}">${r.ok ? '成功' : r.status || '失败'}</span>
-      <span class="mono" style="min-width:56px;color:var(--text-faint)">${esc(t)}</span>
-      <span style="color:var(--text-dim)">${esc(r.protocol)}</span>
+      <span class="mono" style="min-width:56px;color:var(--text-faint)">${esc(timeStr)}</span>
       <span class="tag">${esc(r.model || '-')}</span>
+      <span class="tag" title="${esc(t('req.acct'))}: ${esc(r.account || '-')}">${esc(r.account || '—')}</span>
       <span class="spacer"></span>
       <span style="color:var(--text-faint)">${fmtMs(r.duration_ms)}</span>
     </div>`;
@@ -537,7 +554,7 @@
       <path d="${area}" fill="${opts.color}" opacity="0.10"/>
       <path d="${line}" fill="none" stroke="${opts.color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
       <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${opts.color}"/>
-      <text class="note" x="${W - PAD.r}" y="12" text-anchor="end">峰值 ${max}</text>
+      <text class="note" x="${W - PAD.r}" y="12" text-anchor="end">${esc(t('stat.peak'))} ${fmtNum(max)}</text>
       ${crosshair(box)}
     `, opts.label);
   }
@@ -567,7 +584,7 @@
     return svgWrap(box, `
       <line class="baseline" x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" vector-effect="non-scaling-stroke"/>
       ${bars}${legend}${xAxis(series, xyBars, box)}
-      <text class="note" x="${W - PAD.r}" y="11" text-anchor="end">峰值 ${fmtNum(max)}</text>
+      <text class="note" x="${W - PAD.r}" y="11" text-anchor="end">${esc(t('stat.peak'))} ${fmtNum(max)}</text>
       ${crosshair(box)}
     `, 'Token 消耗趋势');
   }
@@ -647,14 +664,14 @@
   function tipHTML(b, series) {
     const lastMin = series[series.length - 1].minute;
     const rel = lastMin - b.minute;
-    const t = new Date(b.minute * 60000);
-    const hh = String(t.getHours()).padStart(2, '0');
-    const mm = String(t.getMinutes()).padStart(2, '0');
-    const relLabel = rel === 0 ? '现在' : `${rel} 分钟前`;
+    const tm = new Date(b.minute * 60000);
+    const hh = String(tm.getHours()).padStart(2, '0');
+    const mm = String(tm.getMinutes()).padStart(2, '0');
+    const relLabel = rel === 0 ? t('time.now') : t('mx.minutesago')(rel);
     const rows = [
-      ['请求', `${fmtNum(b.total)} 次`],
-      ['输入', fmtNum(b.input_tokens)],
-      ['输出', fmtNum(b.output_tokens)],
+      [t('tip.reqs'), `${fmtNum(b.total)} ${t('req.acct') === '账号' ? '次' : ''}`],
+      [t('stat.in'), fmtNum(b.input_tokens)],
+      [t('stat.out'), fmtNum(b.output_tokens)],
       ['TPS', tpsLabel(b)],
     ];
     return `<div class="tip-time">${esc(relLabel)} · ${hh}:${mm}</div>` +
