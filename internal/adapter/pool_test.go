@@ -76,8 +76,15 @@ func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 			t.Fatalf("第 %d 次请求不应失败: %v", i, err)
 		}
 	}
-	if hits[0] != 3 || hits[1] != 3 {
-		t.Fatalf("轮询应均匀分布, hits=%v", hits)
+	// 健康度加权随机：全健康时两账号同分，应接近均分（不是精确 50/50）。
+	total := hits[0] + hits[1]
+	if total != 6 {
+		t.Fatalf("6 次请求应全部成功, hits=%v", hits)
+	}
+	for _, h := range hits {
+		if float64(h)/float64(total) < 0.2 {
+			t.Fatalf("流量严重倾斜（同健康度时应接近均分）: hits=%v", hits)
+		}
 	}
 }
 
@@ -99,12 +106,16 @@ func TestPoolCooldownsRateLimitedAndFailsOver(t *testing.T) {
 			_ = closer.Close()
 		}
 	}
-	if hits[0] != 1 {
-		t.Fatalf("限流账号应在首次失败后被冷却, hits_a=%d", hits[0])
+	// 选号是健康度加权随机，a 是「永远限流」的账号，被选中的次数不固定；
+	// 断言的本质是「a 被冷却过」+「请求全部由 b 成功承接」。
+	p.mu.Lock()
+	aCooled := p.accounts[0].modelCooling(time.Now(), "")
+	p.mu.Unlock()
+	if !aCooled {
+		t.Fatalf("限流的账号应被冷却, hits=%v", hits)
 	}
-	// 首次请求的 failover 记 1 次，其后 3 次直达，共 4 次。
 	if hits[1] != 4 {
-		t.Fatalf("健康账号应承接全部请求, hits_b=%d", hits[1])
+		t.Fatalf("健康账号应承接全部请求, hits_b=%d（hits_a=%d）", hits[1], hits[0])
 	}
 	// 账号本身仍健康（限流是模型级的），但 model-x 在该账号上已冷却。
 	p.mu.Lock()
@@ -130,8 +141,16 @@ func TestPoolCooldownExpires(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test", err: rateLimitedErr("x"), onStream: func() { hits++ }})
 	p.Add("b", &fakeAd{name: "test"})
 
-	// 触发 a 上 model-x 的冷却。
-	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	// 触发 a 上 model-x 的冷却（循环直到命中 a——选号是加权随机的）。
+	for i := 0; i < 50; i++ {
+		_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+		p.mu.Lock()
+		done := p.accounts[0].modelCooling(time.Now(), "model-x")
+		p.mu.Unlock()
+		if done {
+			break
+		}
+	}
 	p.mu.Lock()
 	coolingNow := p.accounts[0].modelCooling(time.Now(), "model-x")
 	// 人为把该模型冷却拨回过去，模拟到期。
@@ -152,17 +171,20 @@ func TestPoolCooldownExpires(t *testing.T) {
 func TestPoolClientFixableFailsFast(t *testing.T) {
 	bad := llm.NewFailure("bad_request", "参数错误", nil)
 	bad.ClientFixable = true
+	// 两个账号都返回 ClientFixable：无论选中谁都应立即失败、不换号。
+	// （若只让一个账号坏，加权随机可能先选中健康的那个而成功，
+	//   那样测的就不是"不换号"这件事了。）
 	var hits [2]int
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{name: "test", err: bad, onStream: func() { hits[0]++ }})
-	p.Add("b", &fakeAd{name: "test", onStream: func() { hits[1]++ }})
+	p.Add("b", &fakeAd{name: "test", err: bad, onStream: func() { hits[1]++ }})
 
 	_, err := p.Stream(context.Background(), llm.RequestMessages{})
 	if err == nil {
 		t.Fatal("参数错误应直接失败")
 	}
-	if hits[0] != 1 || hits[1] != 0 {
-		t.Fatalf("ClientFixable 错误不应换号: hits=%v", hits)
+	if total := hits[0] + hits[1]; total != 1 {
+		t.Fatalf("ClientFixable 错误不应换号（应只尝试 1 次）: hits=%v", hits)
 	}
 	if p.HealthyCount() != 2 {
 		t.Fatalf("参数错误不应冷却账号")
@@ -283,8 +305,21 @@ func TestPoolFairRotationWithCoolingAccount(t *testing.T) {
 			t.Fatalf("请求不应失败: %v", err)
 		}
 	}
-	if hits[0] != 15 || hits[2] != 15 {
-		t.Fatalf("两个健康账号应均分流量, hits=%v（b 的冷却不得造成倾斜）", hits)
+	// 选号是健康度加权随机，不保证精确均分；断言「大致均衡 + 冷却账号绝不被用」。
+	// 关键回归点：修复前是 [30 0 0]（后继承受双倍流量），现应接近均分。
+	if hits[1] != 0 {
+		t.Fatalf("冷却中的账号不应被使用, hits=%v", hits)
+	}
+	total := hits[0] + hits[2]
+	if total != 30 {
+		t.Fatalf("两个健康账号应承接全部请求, hits=%v", hits)
+	}
+	// 各占 30%~70% 视为均衡（随机波动 + 加权随机的合理范围）。
+	for _, i := range []int{0, 2} {
+		share := float64(hits[i]) / float64(total)
+		if share < 0.3 || share > 0.7 {
+			t.Fatalf("流量严重倾斜: hits=%v（修复前是 [30 0 0]）", hits)
+		}
 	}
 }
 
@@ -373,9 +408,21 @@ func TestProbeFirstEventDetectsInBandError(t *testing.T) {
 	p.Add("bad", bad)
 	p.Add("good", good)
 
-	s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
-	if err != nil {
-		t.Fatalf("应换到健康账号: %v", err)
+	// 循环直到 bad 账号上 model-x 被冷却（选号是加权随机的）。
+	var s llm.ResponseStream
+	for i := 0; i < 50; i++ {
+		var err error
+		s, err = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+		if err != nil {
+			t.Fatalf("应换到健康账号: %v", err)
+		}
+		p.mu.Lock()
+		cooling := p.accounts[0].modelCooling(time.Now(), "model-x")
+		p.mu.Unlock()
+		if cooling {
+			break
+		}
+		_ = closeStream(s)
 	}
 	defer func() { _ = closeStream(s) }()
 	// 限流是模型级的：该模型在 bad 账号上被冷却，账号本身仍健康。
@@ -499,7 +546,7 @@ func TestRateLimitBackoffEscalates(t *testing.T) {
 		t.Fatal("上游给了精确时刻时不应推进退避等级")
 	}
 	// 成功清零。
-	p.succeed(0)
+	p.succeed(0, 100)
 	if len(acc.backoffLevel) != 0 {
 		t.Fatalf("成功后应清零, got %+v", acc.backoffLevel)
 	}
@@ -515,7 +562,18 @@ func TestStatusesExposeStateAndNext(t *testing.T) {
 	p.Add("b.json", &fakeAd{name: "test", err: unauth})
 	p.Add("c.json", &fakeAd{name: "test"})
 
-	_, _ = p.Stream(context.Background(), llm.RequestMessages{})
+	// 反复请求，直到 a 上该模型冷却、b 因 401 进入 blocked
+	//（选号是加权随机的，不能假设单次请求就命中）。
+	for i := 0; i < 100; i++ {
+		_, _ = p.Stream(context.Background(), llm.RequestMessages{})
+		p.mu.Lock()
+		aCooled := p.accounts[0].modelCooling(time.Now(), "")
+		bBlocked := p.accounts[1].state == stateBlocked
+		p.mu.Unlock()
+		if aCooled && bBlocked {
+			break
+		}
+	}
 	sts := p.Statuses()
 	if len(sts) != 3 {
 		t.Fatalf("应有 3 条, got %d", len(sts))
@@ -568,9 +626,19 @@ func TestRateLimitCooldownIsPerModel(t *testing.T) {
 	p.Add("a", a)
 	p.Add("b", b)
 
-	// 第一次请求 model-x：a 被限 → 换到 b。
-	if _, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"}); err != nil {
-		t.Fatalf("model-x 应能换号成功: %v", err)
+	// 反复请求 model-x 直到 a 上该模型进入冷却（选号是健康度加权随机的，
+	// 不能假设第一次一定选中 a）。至多 20 次必然覆盖到。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"}); err != nil {
+			t.Fatalf("model-x 应能换号成功: %v", err)
+		}
+		p.mu.Lock()
+		cooling := p.accounts[0].modelCooling(time.Now(), "model-x")
+		p.mu.Unlock()
+		if cooling {
+			break
+		}
 	}
 
 	// 关键断言：a 上 model-x 已冷却，但 model-y 仍可用。
@@ -603,10 +671,19 @@ func TestModelCooldownDoesNotBlockOtherModelsInPool(t *testing.T) {
 	p.Add("a", a)
 	p.Add("b", b)
 
-	// 触发 a 上 model-x 的冷却。
-	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	// 触发 a 上 model-x 的冷却（循环直到命中 a，选号是随机加权的）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+		p.mu.Lock()
+		done := p.accounts[0].modelCooling(time.Now(), "model-x")
+		p.mu.Unlock()
+		if done {
+			break
+		}
+	}
 
-	// model-y：a 应该仍然参与轮询（两个账号都可用）。
+	// model-y：a 应该仍然参与调度（两个账号都可用）。
 	seen := map[string]bool{}
 	for i := 0; i < 10; i++ {
 		s, err := p.Stream(context.Background(), llm.RequestMessages{Model: "model-y"})
@@ -645,7 +722,16 @@ func TestStatusesExposeModelCooldowns(t *testing.T) {
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{name: "test", limitModel: map[string]bool{"model-x": true}})
 	p.Add("b", &fakeAd{name: "test"})
-	_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+	// 循环直到 a 上 model-x 冷却（选号随机，不假设第一次命中 a）。
+	for i := 0; i < 50; i++ {
+		_, _ = p.Stream(context.Background(), llm.RequestMessages{Model: "model-x"})
+		p.mu.Lock()
+		ok := p.accounts[0].modelCooling(time.Now(), "model-x")
+		p.mu.Unlock()
+		if ok {
+			break
+		}
+	}
 
 	for _, st := range p.Statuses() {
 		if st.Label != "a" {
@@ -657,5 +743,73 @@ func TestStatusesExposeModelCooldowns(t *testing.T) {
 		if !st.Healthy {
 			t.Fatal("账号本身应仍是健康的（只是某个模型被限）")
 		}
+	}
+}
+
+// ───────────────── 健康度感知路由（取代严格轮询） ─────────────────
+
+// TestHealthRoutePrefersHealthyAccount 验证核心收益：
+// 一个账号持续失败、另一个持续成功时，流量应明显偏向后者。
+// 严格轮询下两者各占一半 —— 这正是要修的不合理之处。
+func TestHealthRoutePrefersHealthyAccount(t *testing.T) {
+	var good, bad int
+	p := NewPool("test", nil)
+	p.Add("bad", &fakeAd{name: "test", err: rateLimitedErr("always"), onStream: func() { bad++ }})
+	p.Add("good", &fakeAd{name: "test", onStream: func() { good++ }})
+
+	for i := 0; i < 40; i++ {
+		if _, err := p.Stream(context.Background(), llm.RequestMessages{Model: "m"}); err != nil {
+			t.Fatalf("good 账号应能承接: %v", err)
+		}
+	}
+	t.Logf("成功 40 次: good=%d bad=%d", good, bad)
+	if good <= bad {
+		t.Fatalf("应明显偏向健康账号, good=%d bad=%d", good, bad)
+	}
+}
+
+// TestHealthScoreShrinksWithFewSamples 验证冷启动平滑：
+// 样本少时分数接近中性，不会因「第一次成功」就跳到满分并正反馈锁死流量
+// （实测曾出现 hits=[5 1] 的倾斜）。
+func TestHealthScoreShrinksWithFewSamples(t *testing.T) {
+	a := &poolAccount{}
+	if got := a.healthScore(); got < 0.49 || got > 0.51 {
+		t.Fatalf("零样本应接近中性分 0.5, got %.3f", got)
+	}
+	a.observe(true, 100)
+	after1 := a.healthScore()
+	a.observe(true, 100)
+	after2 := a.healthScore()
+	t.Logf("1 样本=%.3f, 2 样本=%.3f", after1, after2)
+	if after2 <= after1 {
+		t.Fatalf("连续成功应提升分数: %.3f -> %.3f", after1, after2)
+	}
+	if after1 > 0.7 {
+		t.Fatalf("1 个样本不应接近满分（会造成正反馈）, got %.3f", after1)
+	}
+	for i := 0; i < 40; i++ {
+		a.observe(true, 100)
+	}
+	if a.healthScore() < 0.85 {
+		t.Fatalf("充分样本后应接近满分, got %.3f", a.healthScore())
+	}
+}
+
+// TestHealthPenalizesConsecutiveFailures 验证连续失败会降权，成功一次即清零。
+func TestHealthPenalizesConsecutiveFailures(t *testing.T) {
+	a := &poolAccount{}
+	for i := 0; i < 40; i++ {
+		a.observe(true, 100)
+	}
+	healthy := a.healthScore()
+	for i := 0; i < 3; i++ {
+		a.observe(false, 0)
+	}
+	if a.healthScore() >= healthy {
+		t.Fatalf("连续失败应降权: %.3f -> %.3f", healthy, a.healthScore())
+	}
+	a.observe(true, 100)
+	if a.consecFails != 0 {
+		t.Fatalf("成功后连续失败应清零, got %d", a.consecFails)
 	}
 }

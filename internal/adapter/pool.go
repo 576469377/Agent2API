@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"sort"
 	"sync"
 	"time"
@@ -23,6 +24,18 @@ const (
 	cooldownUnauthorized = 10 * time.Minute
 	// maxCooldown 是任何冷却的上限，防止异常数据把账号永久挂起。
 	maxCooldown = 24 * time.Hour
+
+	// ewmaAlpha 是健康度指标的更新权重：越大越看重最近的表现。
+	// 0.3 意味着「最近约 3 次」主导判断——既能快速反映劣化，
+	// 又不会因单次抖动就把账号判死。
+	ewmaAlpha = 0.3
+	// healthWarmup 是冷启动样本数：样本不足时不参与排序比较，
+	// 避免「只跑过一次就定终身」。
+	healthWarmup = 3
+	// latencyCeilingMs 是延迟评分的饱和值：超过它一律视为最慢。
+	latencyCeilingMs = 60_000.0
+	// consecFailPenalty 是每次连续失败扣的分（相对 0..1 的成功率分）。
+	consecFailPenalty = 0.15
 )
 
 // accountState 是账号的调度状态。
@@ -87,6 +100,16 @@ type poolAccount struct {
 	// backoffLevel 是按模型的连续限流退避等级（0 起），该模型成功一次即清零。
 	backoffLevel map[string]int
 	lastErr      string
+
+	// —— 健康度（用于选号，见 pickLocked）——
+	//
+	// 严格轮询的问题：谁被选中与谁更该被选中无关。刚出过问题的账号
+	// 照样轮到，快慢差异也不被利用。这里维护三个轻量指标，
+	// 选号时按分数排序，轮询仅作为同分时的均分手段。
+	successEWMA float64 // 成功率指数加权移动平均（0..1）
+	latencyEWMA float64 // 延迟 EWMA（毫秒）
+	samples     int64   // 累计样本数（用于冷启动判断）
+	consecFails int     // 连续失败次数（成功即清零）
 }
 
 // modelKey 归一化模型名作为冷却键。空模型名不该出现，但防御性地给一个键，
@@ -157,17 +180,103 @@ func (p *Pool) logfNow(format string, args ...any) {
 	}
 }
 
-// pickLocked 返回下一个健康账号；全部冷却中时返回 nil。
+// healthScore 返回账号的健康度评分（0..1，越高越好）。
+//
+// 三个因子合成：
+//   - 成功率 EWMA（权重最大，占 0.6）
+//   - 延迟 EWMA（越快分越高，占 0.4）
+//   - 连续失败惩罚（每次 -0.15）
+//
+// 冷启动（样本不足 healthWarmup）返回中性分 0.5。注意这个中性分与
+// 「全成功」的分数（1.0）有明显的距离，所以冷启动期不会偏向谁；
+// 但样本刚满 warmup 时分数会立刻跳到真实水平——为避免因此独占流量，
+// pickByHealthLocked 用**加权随机**而非取最大值。
+//
+// 调用方必须持有 p.mu。
+func (a *poolAccount) healthScore() float64 {
+	// 原始健康分。
+	lat := 1.0
+	if a.latencyEWMA > 0 {
+		lat = 1.0 - (a.latencyEWMA / latencyCeilingMs)
+		if lat < 0 {
+			lat = 0
+		}
+	}
+	raw := a.successEWMA*0.6 + lat*0.4
+	raw -= float64(a.consecFails) * consecFailPenalty
+	if raw < 0 {
+		raw = 0
+	}
+	if raw > 1 {
+		raw = 1
+	}
+	// 向中性分 0.5 收缩：样本越少，越接近中性。
+	//
+	// 为什么不用硬阈值（samples < N 就返回 0.5）：那会在跨过阈值时产生阶跃，
+	// 一个刚攒够样本的账号分数会突然跳高并锁死流量（实测 hits=[1 5]）。
+	// 连续收缩让「证据强度」平滑反映到分数上：1 个样本只能推动很少，
+	// 20 个样本才基本等同原始分。
+	const prior = 0.5
+	const priorWeight = 8.0 // 相当于「8 个中性样本」的先验
+	w := float64(a.samples)
+	return (raw*w + prior*priorWeight) / (w + priorWeight)
+}
+
+// pickLocked 按健康度选下一个账号。
+//
+// 取代严格轮询：先把可用账号按健康度排序，取分最高的；分数相同（含全部
+// 冷启动的中性分）时按游标做均分——这样「同样健康」的账号仍被公平使用，
+// 而「明显更差」的账号会被自然地降级。
+//
+// 轮询游标保留为同分裁决手段，不再是主策略。
 // 调用方必须持有 p.mu。
 func (p *Pool) pickLocked(now time.Time, model string) *poolAccount {
 	n := len(p.accounts)
+	if n == 0 {
+		return nil
+	}
+	// 收集可用账号及其下标（下标用于同分时的轮询裁决）。
+	type cand struct {
+		acc   *poolAccount
+		idx   int
+		score float64
+	}
+	cands := make([]cand, 0, n)
 	for i := 0; i < n; i++ {
-		acc := p.accounts[(p.next+i)%n]
+		acc := p.accounts[i]
 		if acc.available(now, model) {
-			return acc
+			cands = append(cands, cand{acc: acc, idx: i, score: acc.healthScore()})
 		}
 	}
-	return nil
+	if len(cands) == 0 {
+		return nil
+	}
+	// 选出最高分；同分时取「轮询游标之后最先遇到的那个」，保持均分。
+	best := 0
+	for i := 1; i < len(cands); i++ {
+		if cands[i].score > cands[best].score+1e-9 {
+			best = i
+		}
+	}
+	// 同分集合里按游标裁决。
+	bestScore := cands[best].score
+	start := p.next % n
+	chosen := -1
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		acc := p.accounts[idx]
+		if !acc.available(now, model) {
+			continue
+		}
+		if acc.healthScore() >= bestScore-1e-9 {
+			chosen = idx
+			break
+		}
+	}
+	if chosen < 0 {
+		chosen = cands[best].idx
+	}
+	return p.accounts[chosen]
 }
 
 // Stream 实现 adapter.Adapter：在健康账号间轮询，失败按类别换号或直接失败。
@@ -181,22 +290,24 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		p.mu.Unlock()
 		return nil, &llm.Failure{Code: "no_account", Message: "号池为空：未配置任何可用账号", ClientFixable: true}
 	}
-	start := p.next % n
 	p.mu.Unlock()
 
+	// 选号按健康度而非固定顺序（见 pickLocked）。每轮重新选：
+	// 前一个账号失败后，它的健康度已下降，下一轮自然轮到别人。
+	//
+	// tried 记录本轮已试过的账号，避免同一个账号被重复挑中。
+	tried := map[int]bool{}
+
 	var lastErr error
-	for i := 0; i < n; i++ {
-		// 冷却判定每轮重取时间：换号链上前一个账号的拨号+退避可能耗时数秒，
-		// 用入口快照会把「刚刚解冻」的账号错误跳过。
+	for len(tried) < n {
 		now := time.Now()
-		idx := (start + i) % n
 		p.mu.Lock()
-		acc := p.accounts[idx]
-		usable := acc.available(now, req.Model)
+		idx, acc := p.pickByHealthLocked(now, req.Model, tried)
 		p.mu.Unlock()
-		if !usable {
-			continue
+		if acc == nil {
+			break // 没有未试过且可用的账号了
 		}
+		tried[idx] = true
 
 		s, err := acc.adp.Stream(ctx, req)
 		if err == nil {
@@ -205,7 +316,7 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			// 事后置流的账号无法被换掉（请求体已被上游消费，重放不安全）。
 			bs, probeErr := probeFirstEvent(ctx, s)
 			if probeErr == nil {
-				p.succeed(idx)
+				p.succeed(idx, float64(time.Since(now).Milliseconds()))
 				// 带上账号标签：app 层据此把请求归因到具体账号，
 				// 控制台才能回答「每个账号用了多少额度」。
 				return &labeledStream{ResponseStream: bs, label: acc.label}, nil
@@ -225,6 +336,7 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		case f.RateLimited:
 			// 限流是「账号 × 模型」维度的，只冷却该模型——同账号上其他模型
 			// 仍然可用（上游提示原话：「您也可以切换其他模型继续使用」）。
+			p.markFailure(acc)
 			// 上游给了精确重置时刻就完全信任它，不叠加退避等级；
 			// 没给才用指数退避。
 			d := p.nextRateLimitBackoff(acc, req.Model, f)
@@ -234,18 +346,21 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		case f.Unauthorized:
 			// 单个适配器内部已尝试过刷新重试；仍 401 说明账号大概率失效。
 			// 这是**账号级**终态（与模型无关）。
+			p.markFailure(acc)
 			p.cooldownAccount(acc, cooldownUnauthorized, reasonUnauthorized, f.Message)
 			p.logfNow("账号 %s 鉴权失败，冷却 %s: %s", acc.label, cooldownUnauthorized, f.Message)
 		case f.ClientFixable:
 			// 请求本身有问题（参数错、上下文超限等），换任何账号结果都一样。
 			return nil, err
 		default:
-			// 传输断裂 / 5xx / 未知：可能是全局抖动，不冷却账号，换下一个试。
+			// 传输断裂 / 5xx / 未知：可能是全局抖动，不冷却账号但降健康度
+			//（下次选号会优先避开它），换下一个试。
+			p.markFailure(acc)
 			p.logfNow("账号 %s 拨号失败，尝试下一个账号: %s", acc.label, f.Error())
 			// 池级短退避 + 抖动：上游整体故障时避免把 N 个账号连续无间隔打完
 			//（那会被上游判定为压制重试）。可被 ctx 取消。
-			if i < n-1 {
-				if err := sleepCtx(ctx, ditherBackoff(i)); err != nil {
+			if len(tried) < n {
+				if err := sleepCtx(ctx, ditherBackoff(len(tried))); err != nil {
 					return nil, err
 				}
 			}
@@ -360,15 +475,103 @@ func (a *poolAccount) earliestModelThaw(now time.Time) time.Time {
 //
 // 游标对齐的必要性：若只按槽位轮转再跳过冷却账号，冷却账号的后继承受
 // 双倍流量，反而加速它触发限流（连锁冷却）。
-func (p *Pool) succeed(idx int) {
+func (p *Pool) succeed(idx int, latencyMs float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	a := p.accounts[idx]
 	p.next = (idx + 1) % len(p.accounts)
 	// 成功一次即清零该账号所有模型的退避等级（整号可达已被证实）。
-	p.accounts[idx].backoffLevel = map[string]int{}
-	if p.accounts[idx].state == stateCooldown {
-		p.accounts[idx].state = stateReady
+	a.backoffLevel = map[string]int{}
+	if a.state == stateCooldown {
+		a.state = stateReady
 	}
+	// 健康度更新：成功率走高、延迟 EWMA 跟上。
+	a.observe(true, latencyMs)
+}
+
+// observe 用一次请求结果更新健康度 EWMA。
+// 调用方必须持有 p.mu（或确保独占）。
+func (a *poolAccount) observe(ok bool, latencyMs float64) {
+	// 首样本从中性分 0.5 出发而非 1.0：直接落满分会让「第一个成功的账号」
+	// 立刻获得压倒性优势，形成正反馈把流量锁死在它身上（实测 hits=[5 1]）。
+	target := 0.0
+	if ok {
+		target = 1.0
+	}
+	if a.samples == 0 {
+		a.successEWMA = 0.5
+		a.latencyEWMA = latencyMs
+	} else {
+		a.successEWMA = a.successEWMA*(1-ewmaAlpha) + target*ewmaAlpha
+		if latencyMs > 0 {
+			a.latencyEWMA = a.latencyEWMA*(1-ewmaAlpha) + latencyMs*ewmaAlpha
+		}
+	}
+	a.samples++
+	if ok {
+		a.consecFails = 0
+	} else {
+		a.consecFails++
+	}
+}
+
+// markFailure 记一次失败（用于健康度降级）。调用方持有 p.mu。
+func (a *poolAccount) markFailure() {
+	a.observe(false, 0)
+}
+
+// pickByHealthLocked 在「未试过」的账号里按健康度**加权随机**选一个。
+//
+// 为什么不是「取最高分」：那会让分数略高的账号独占全部流量（哪怕只是
+// 0.5001 vs 0.5），健康度路由退化成「永远用最好的那个」——被冷落的账号
+// 永远拿不到新样本，健康度无从更新，也无法分摊限流风险。
+//
+// 加权随机既利用了健康差异（分高者更容易被选中），又保证每个账号都有
+// 机会被验证与分摊。冷启动时大家同分，退化为均匀轮询——正是期望行为。
+//
+// 随机源用当前纳秒，避免引入 rand 全局锁；选号本就不要求密码学强度。
+// 调用方必须持有 p.mu。
+func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]bool) (int, *poolAccount) {
+	n := len(p.accounts)
+	if n == 0 {
+		return -1, nil
+	}
+	// 收集候选与权重（权重下限保证「很差但可用」的账号仍有机会）。
+	type cand struct {
+		idx    int
+		acc    *poolAccount
+		weight float64
+	}
+	cands := make([]cand, 0, n)
+	total := 0.0
+	for i, acc := range p.accounts {
+		if tried[i] || !acc.available(now, model) {
+			continue
+		}
+		w := acc.healthScore()
+		if w < 0.05 {
+			w = 0.05 // 下限：不被完全饿死，否则永远拿不到新样本
+		}
+		cands = append(cands, cand{idx: i, acc: acc, weight: w})
+		total += w
+	}
+	if len(cands) == 0 {
+		return -1, nil
+	}
+	// 加权随机。
+	//
+	// 随机源刻意用 math/rand 而非 time.Now().UnixNano()：后者在 macOS 上
+	// 精度约 1 微秒，同一微秒内的连续调用会读到完全相同的值——高并发下
+	// 等于确定性选择，所有请求砸向同一个账号（实测 hits=[0 6]）。
+	r := rand.Float64() * total
+	acc := 0.0
+	for _, c := range cands {
+		acc += c.weight
+		if r <= acc {
+			return c.idx, c.acc
+		}
+	}
+	return cands[len(cands)-1].idx, cands[len(cands)-1].acc
 }
 
 // nextRateLimitBackoff 计算某账号上某模型的限流冷却时长并推进其退避等级。
@@ -837,3 +1040,10 @@ var (
 	_ Configurable   = (*Pool)(nil)
 	_ PoolController = (*Pool)(nil)
 )
+
+// markFailure 记一次账号失败，降低其健康度。调用方不得持有 p.mu。
+func (p *Pool) markFailure(acc *poolAccount) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	acc.markFailure()
+}

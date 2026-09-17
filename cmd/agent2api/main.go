@@ -185,6 +185,7 @@ func runServer(args []string) {
 	// 号池热加载：控制台「添加账号」或手动放入号池目录的新凭证，
 	// 运行期自动入池，无需重启。
 	startPoolWatchers(hub, cfg, logger)
+	startKeepalive(hub, logger)
 	// 注意：这里刻意**不**打印「上游平台=… 账号=…」——那些信息在下面的横幅里
 	// 有更可读的呈现，重复一行带时间戳前缀的日志只会干扰阅读。
 
