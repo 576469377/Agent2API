@@ -16,7 +16,7 @@ make run        # 编译并运行
 make test       # go test ./...
 make vet        # go vet ./...
 make fmt        # gofmt -w .
-make check      # vet + test（提交前请跑这个）
+make check      # fmt + vet + test（提交前请跑这个）
 make cover      # 覆盖率
 make test-race  # 竞态检测（CI 也跑）
 ```
@@ -48,11 +48,13 @@ make test-race  # 竞态检测（CI 也跑）
 
 ### 当前测试缺口
 
-欢迎优先补这些（目前覆盖率为 0.0%）：
+`internal/app`、`internal/api/openai/chat`、`internal/config` 此前长期无测试，**现已补齐**（`app_test.go` / `matrix_test.go`、`chat_test.go`、`config_test.go`）。
 
-- [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate`）
-- [`internal/api/openai/chat`](internal/api/openai/chat/) —— Chat 编解码器（**最常用且完全无测试**）
-- [`internal/config`](internal/config/) —— 配置加载与校验
+当前真正偏低、欢迎优先补的（数字来自 `make cover`，会随代码漂移，动手前请以本地实测为准）：
+
+- [`internal/web`](internal/web/) —— 控制台（**目前唯一完全无测试的包，0.0%**）
+- [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate` 路径），约 38%
+- [`cmd/agent2api`](cmd/agent2api/) —— 启动装配、子命令、号池监视与保活，约 7%
 
 ## 新增上游平台
 

@@ -10,7 +10,7 @@ body:
         **请勿粘贴真实凭证、token、账号昵称、上游请求 ID 或完整的 system 提示词。**
         如需展示，请用占位值替换。
 
-        也请先查看 README 的[已知限制](https://github.com/)章节 —— 部分问题已被记录。
+        也请先查看 README 的[已知限制](https://github.com/576469377/Agent2API/blob/main/README.md#已知限制)章节 —— 部分问题已被记录。
 
   - type: checkboxes
     id: no-secrets

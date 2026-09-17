@@ -39,7 +39,7 @@ Claude Code / Codex / any OpenAI client
 - **Reasoning**: upstream `delta.reasoning_content` → `reasoning_content` / `thinking` blocks / reasoning summary
 - **Tool calls**: native `tool_calls` channel, with fragment reassembly
 - **Credential reuse**: reads your desktop client's existing login — no re-authentication
-- **Multi-account pool**: put several accounts in a pool and it round-robins, swapping on rate limits
+- **Multi-account pool**: put several accounts in a pool and it routes across them by account health, swapping on rate limits
 - **Content sanitization**: dodges upstream keyword review (required for Claude Code / Codex)
 - **Built-in console**: compiled in via `go:embed`, no frontend build step, i18n + light/dark themes
 
@@ -75,7 +75,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 export ANTHROPIC_API_KEY=anything    # not validated when no gateway key is set
 ```
 
-**Codex CLI**: point base_url / API key at `http://127.0.0.1:8787` with any value (uses `/v1/responses`).
+**Codex CLI**: set base_url to `http://127.0.0.1:8787` and the API key to any value (it uses `/v1/responses`).
 
 **Any OpenAI SDK**: set base_url to `http://127.0.0.1:8787/v1`.
 
@@ -102,7 +102,7 @@ curl http://127.0.0.1:8787/v1/responses \
 
 ## Web Console
 
-Compiled into the binary with `go:embed` — no frontend build, no CDN dependencies, hand-drawn SVG charts. Visit `http://127.0.0.1:8787`:
+Compiled into the binary with `go:embed` — no frontend build, no CDN dependencies, native SVG charts. Visit `http://127.0.0.1:8787`:
 
 | Page | What it shows |
 |---|---|
@@ -122,7 +122,7 @@ Compiled into the binary with `go:embed` — no frontend build, no CDN dependenc
 
 ## Multi-Account Pool
 
-One account not enough quota? Put several credentials in a pool directory — the gateway round-robins and swaps accounts on rate limits.
+One account not enough quota? Put several credentials in a pool directory — the gateway routes across them by account health and swaps accounts on rate limits.
 
 ```bash
 agent2api login -out auths/account-a.json    # log in one by one
@@ -136,14 +136,14 @@ You can also **add accounts** from the console's Accounts page (device-code logi
 
 | Situation | Behavior |
 |---|---|
-| Rotation | Requests spread evenly across healthy accounts |
-| Rate limited (429) | Cool that account down and swap; the cooldown parses the upstream's exact reset time (e.g. "resets at 23:21:31") and thaws on schedule — falls back to 60s when unparseable |
-| Auth failed (401 after refresh) | 10-minute cooldown |
+| Routing | Requests are picked by **weighted random** over account health (success-rate EWMA×0.6 + latency EWMA×0.4, consecutive failures penalized; scores shrink toward neutral on few samples) — healthier accounts are picked more but never hog traffic, and a fresh pool degrades to even rotation. Sessions also **stick to one account** (identified via `metadata.user_id` / `user`), so long contexts don't drift between accounts |
+| Rate limited (429) | Cool down **that model on that account** and swap (other models on the same account keep working); the cooldown parses the upstream's exact reset time (e.g. "resets at 23:21:31") and thaws on schedule — exponential backoff otherwise (10s floor, 60s base, 24h cap) |
+| Auth failed (401 after refresh) | 10-minute cooldown of the whole account |
 | Request fault (context too long, …) | Fail fast — rotating accounts can't help |
 | Transport error / 5xx | Swap but don't cool down (could be a global blip), with pool-level backoff and jitter |
 | All cooling | Return 429 with the **earliest** thaw time; all auth-failed returns 401 (retrying can never succeed) |
 
-**Account management in the console**: per-account scheduling state (▸ marks the next one used), login state and credential expiry, per-account usage (persisted across restarts); supports **disable/enable** (temporarily pull an account out of rotation), **reset cooldown** (when upstream recovers early), and **re-login** (device-code login for a dropped account, writing back to the same file).
+**Account management in the console**: per-account scheduling state (▸ marks the next one used), login state and credential expiry, per-account usage (persisted across restarts); supports **disable/enable** (temporarily pull an account out of scheduling), **reset cooldown** (when upstream recovers early), and **re-login** (device-code login for a dropped account, writing back to the same file).
 
 > Desktop-client credentials and pool files can coexist — each account card is labeled with its source. The desktop client going offline **does not affect** the gateway: credentials are read once at startup and refreshed by the gateway itself.
 
@@ -180,8 +180,12 @@ Precedence: CLI flags > environment variables > config file > built-in defaults.
 | `-metrics-file` | — | Metrics persistence path |
 | `-no-persist` | — | Disable metrics persistence |
 | `-no-sanitize` | — | Disable content sanitization |
+| `-platform` | — | Force a specific upstream platform (only `workbuddy` today; auto-detect by default, for debugging) |
 
-Subcommands: `agent2api` (serve), `agent2api login` (device-code login), `agent2api models` (list models).
+Subcommands: `agent2api` (serve), `agent2api login` (device-code login), `agent2api models` (list models), `agent2api dedupe` (remove duplicate/invalid credentials from a credential directory; previews by default, deletes with `-yes`, defaults to `~/.workbuddy`, override with `-dir`).
+
+> [!NOTE]
+> `server.write_timeout_sec` and `log.level` / `log.format` are **not read** at the moment (streaming responses deliberately have no write timeout; log level/format are not implemented yet) — kept for backward compatibility.
 
 ---
 
@@ -230,7 +234,7 @@ go test ./... -race
 
 Protocol translation uses **golden-frame replay**: sanitized real upstream samples live in [`fixtures/`](fixtures/) and are fed to the parser frame by frame, asserting the resulting **IR event sequence** rather than bytes — fully offline, never hitting upstream.
 
-12 packages, 106 test cases, `-race` clean. Core package coverage: `common` 94%, `obs` 94%, `llm` 89%, `adapter` 63%, `config` 58%, `workbuddy` 55%.
+12 packages, 123 test cases, `-race` clean. Core package coverage: `common` 94%, `obs` 94%, `llm` 89%, `adapter` 65%, `config` 58%, `app` 38%, `workbuddy` 55%.
 
 ---
 
@@ -241,7 +245,8 @@ Protocol translation uses **golden-frame replay**: sanitized real upstream sampl
 - **Upstream does not support non-streaming requests**: non-streaming responses are aggregated proxy-side, so TTFB matches streaming
 - **Single process, single instance**: cooldown state lives in memory; multiple instances cool down independently and will hammer upstream
 - **Quota query endpoint not implemented**: that upstream route requires enterprise privileges (403)
-- **DSML text-mode tool-call fallback not implemented**: upstream currently uses native `tool_calls`
+- **DSML text-mode tool-call fallback not implemented**: upstream currently uses native `tool_calls`; it must be added if upstream ever regresses
+- **Reasoning is one-way**: the upstream only emits `reasoning_content` on responses and without a signature — Anthropic `thinking` blocks always carry `"signature": ""`, and assistant thinking is never replayed upstream (each turn re-reasons from scratch); revisit if the upstream ever validates signatures
 
 **Other behavior**
 

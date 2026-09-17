@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔒 报告安全漏洞
-    url: https://github.com/
+    url: https://github.com/576469377/Agent2API/security/advisories/new
     about: 请勿用公开 Issue 报告安全漏洞，改用 GitHub Security Advisory（详见 SECURITY.md）
   - name: 📖 先读文档
-    url: https://github.com/
+    url: https://github.com/576469377/Agent2API#readme
     about: README 的「已知限制」章节已列出当前确认的缺陷与设计限制
