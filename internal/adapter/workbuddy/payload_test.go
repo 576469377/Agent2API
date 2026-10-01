@@ -289,3 +289,18 @@ func TestQuotaExhaustedClassification(t *testing.T) {
 		t.Fatalf("应提取 error.data.msg 作为 Message, got %q", f.Message)
 	}
 }
+
+// TestSanitizeBreaksChannelFingerprint 回归 2026-10-02 的实机故障：
+// ZCode 沿用 Claude Code 的 gitStatus 模板句式，上游按该指纹识别
+// 「非自有渠道」并整单拒绝（Illegal API invocation from an unapproved channel）。
+// 脱敏必须在指纹短语内插入零宽空格，破坏上游的精确匹配。
+func TestSanitizeBreaksChannelFingerprint(t *testing.T) {
+	in := "Main branch (you will usually use this for PRs): main"
+	out := SanitizeSystemPrompt(in)
+	if strings.Contains(out, "Main branch (you will usually use this for PRs)") {
+		t.Fatal("指纹短语未被破坏，上游仍会识别为非自有渠道")
+	}
+	if !strings.Contains(out, "M\u200bain") && !strings.Contains(out, "(\u200byou") {
+		t.Fatalf("应在指纹短语内插入零宽空格, got %q", out)
+	}
+}

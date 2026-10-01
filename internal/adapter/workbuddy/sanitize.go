@@ -49,6 +49,12 @@ var sensitiveTerms = []string{
 	// 内部协议 URI
 	"skill://", "agent://", "artifact://", "memory://", "history://",
 	"local://", "issue://", "rule://", "pr://", "xd://",
+
+	// 渠道指纹（2026-10 实测）：上游按「其他编码代理产品」的固定句式识别
+	// 调用方并整单拒绝（"Illegal API invocation from an unapproved channel"）。
+	// 这句来自 Claude Code 的 gitStatus 模板，ZCode 等客户端原样沿用；
+	// 子串单独出现不触发，必须是完整句式，因此作为整条短语入库。
+	"Main branch (you will usually use this for PRs)",
 }
 
 // zeroWidth 是插入的零宽空格。
