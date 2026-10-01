@@ -707,8 +707,12 @@ func (s *slotStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
 }
 
 func (s *slotStream) Close() error {
+	// 先关内层流、再释放槽位——顺序不能反：先释放会立刻唤醒排队请求
+	// 开始使用该账号，而上一条流的上游连接可能还在拆除中。
+	// （回归测试用「在途计数」抓到过这个窗口：计数先于槽位归还，峰值读到 3。）
+	err := closeStream(s.ResponseStream)
 	s.release()
-	return closeStream(s.ResponseStream)
+	return err
 }
 
 // succeed 记录一次成功：游标对齐到「实际服务的账号」之后。

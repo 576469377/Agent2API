@@ -52,6 +52,7 @@ type fakeStream struct {
 	events  []llm.ResponseEvent
 	pos     int
 	onClose func()
+	closeOn sync.Once // Close 契约允许重复调用：回调只执行一次（与真实流一致）
 }
 
 func (s *fakeStream) Recv(context.Context) (llm.ResponseEvent, error) {
@@ -65,7 +66,7 @@ func (s *fakeStream) Recv(context.Context) (llm.ResponseEvent, error) {
 
 func (s *fakeStream) Close() error {
 	if s.onClose != nil {
-		s.onClose()
+		s.closeOn.Do(s.onClose)
 	}
 	return nil
 }
@@ -359,18 +360,22 @@ func TestPoolFairRotationWithCoolingAccount(t *testing.T) {
 	p.accounts[1].cooldownUntil = time.Now().Add(time.Hour)
 	p.mu.Unlock()
 
-	for i := 0; i < 30; i++ {
+	// 样本量取 150：这是**统计**断言，样本量决定误报率。
+	// 30 次时 30%~70% 区间的越界概率约 1.8%（CI 上偶发挂掉，实测如此）；
+	// 150 次时同一区间越界概率降到 ~1e-6，而回归点（修复前 [150 0 0]）
+	// 仍会被 100% 检出。运行代价可忽略（假适配器无 IO）。
+	for i := 0; i < 150; i++ {
 		if _, err := p.Stream(context.Background(), llm.RequestMessages{}); err != nil {
 			t.Fatalf("请求不应失败: %v", err)
 		}
 	}
 	// 选号是健康度加权随机，不保证精确均分；断言「大致均衡 + 冷却账号绝不被用」。
-	// 关键回归点：修复前是 [30 0 0]（后继承受双倍流量），现应接近均分。
+	// 关键回归点：修复前是 [150 0 0]（后继承受双倍流量），现应接近均分。
 	if hits[1] != 0 {
 		t.Fatalf("冷却中的账号不应被使用, hits=%v", hits)
 	}
 	total := hits[0] + hits[2]
-	if total != 30 {
+	if total != 150 {
 		t.Fatalf("两个健康账号应承接全部请求, hits=%v", hits)
 	}
 	// 各占 30%~70% 视为均衡（随机波动 + 加权随机的合理范围）。
@@ -1041,10 +1046,15 @@ func TestSessionAffinityFailsOverWhenBoundAccountFails(t *testing.T) {
 func TestPoolMaxConcurrencyIsEnforced(t *testing.T) {
 	var mu sync.Mutex
 	live, maxLive := 0, 0
+	// started 记录「已进入 Stream（必然已占住槽位）」的次数。
+	// 这是去时序化的关键：收到 2 个信号后，必然有 2 个槽位被占住——
+	// 槽位要到流关闭才归还，哪怕对应 goroutine 已经把流塞进 channel。
+	started := make(chan struct{}, 6)
 	p := NewPool("test", nil)
 	p.Add("a", &fakeAd{
 		name: "test",
 		onStream: func() {
+			started <- struct{}{}
 			mu.Lock()
 			live++
 			if live > maxLive {
@@ -1076,6 +1086,22 @@ func TestPoolMaxConcurrencyIsEnforced(t *testing.T) {
 		}()
 	}
 
+	// 等 2 个请求真正进入 Stream（此刻 2 个槽位必然都被占住），再断言
+	// Statuses 的在途/上限读数（控制台展示依赖这两个字段）。
+	// 不能「收到第一个流就读」：那时第二个请求可能还没走到占槽位那一步
+	//（CI 上实测因此偶发 in_flight=1）。
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("只等到 %d 个「进入 Stream」信号（等待并发槽位超时）", i)
+		}
+	}
+	if st := p.Statuses()[0]; st.InFlight != 2 || st.MaxConcurrency != 2 {
+		t.Fatalf("Statuses 应反映在途/上限, got in_flight=%d max=%d",
+			st.InFlight, st.MaxConcurrency)
+	}
+
 	// 逐个收流并关闭：每关一个，排队的请求才补位。
 	// 这条循环本身就是「无死锁 + 无槽位泄漏」的证明——任何一处泄漏都会超时。
 	for i := 0; i < total; i++ {
@@ -1090,14 +1116,6 @@ func TestPoolMaxConcurrencyIsEnforced(t *testing.T) {
 		mu.Unlock()
 		if cur > 2 {
 			t.Fatalf("同时在途 %d 超过上限 2", cur)
-		}
-		if i == 0 {
-			// 满员时应能读到在途数与上限（控制台展示依赖这两个字段）。
-			st := p.Statuses()[0]
-			if st.InFlight != 2 || st.MaxConcurrency != 2 {
-				t.Fatalf("Statuses 应反映在途/上限, got in_flight=%d max=%d",
-					st.InFlight, st.MaxConcurrency)
-			}
 		}
 		_ = closeStream(s)
 	}
