@@ -11,6 +11,7 @@
 
 ### 新增
 
+- **ZCode 接入指南**（README/README.en「接入客户端」）：自定义供应商的协议/Base URL/密钥填值、模型清单来源、手动编辑 `provider_config.json` 的路径与严格 schema 警示，以及「网关需 2026-10-02 之后构建否则被渠道指纹拒绝」的版本要求；脱敏 TIP 同步覆盖 ZCode
 - **每账号并发上限与在途可视化**（`max_concurrency_per_account`，默认 4，0 = 不限）：
   - `adapter.Pool` 给每个账号加并发槽位（`acquireSlot`/`releaseSlot`），槽位在**流的整个生命周期**内占用——流关闭或读到结尾才归还；超限的请求**排队等槽位**（受 ctx 约束）而不是失败或换号，因为上游并没有拒绝我们
   - 选号优先挑「还有余量」的账号（`pickByHealthLocked` 先按容量过滤再算权重），全部满员时才真正排队；亲和路径同样受此约束，避免绑定把某个账号打爆

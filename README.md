@@ -95,8 +95,24 @@ export ANTHROPIC_API_KEY=任意值     # 未配置网关密钥时不会校验
 
 **任意 OpenAI SDK**：base_url 设为 `http://127.0.0.1:8787/v1`。
 
+**ZCode（桌面客户端）**
+
+在 **设置 → 供应商 → 添加自定义供应商**：
+
+| 项 | 值 |
+|---|---|
+| 协议 | Anthropic Messages（与 Claude Code 同链路，工具/思考支持最完整） |
+| Base URL | `http://127.0.0.1:8787/v1` |
+| API Key | 随意填（网关未配置密钥时不校验） |
+| 模型 | 逐个添加，清单以 `agent2api models` 或控制台「模型」页为准 |
+
+不走 UI 也可以直接编辑 `~/.zcode/v2/provider_config.json`：在 `providerRules` 追加一条规则（`api.type: "anthropic-messages"`、`api.baseUrl`、`personalModelIds` 填模型清单），并把它加进 `providerOrder`，重启 ZCode 生效。改前备份该文件——schema 是严格校验的，字段名写错整份配置会被拒。
+
+> [!WARNING]
+> ZCode 的 system 模板沿用了 Claude Code 的 gitStatus 句式，**网关需为 2026-10-02 之后的构建**（`4b33284`）：旧版脱敏词表未覆盖该指纹短语，上游会以 `Illegal API invocation from an unapproved channel` 整单拒绝。报这个错就是网关该升级了。
+
 > [!TIP]
-> 接 Claude Code / Codex 时**不要关闭脱敏**：它们的 system 模板含大量安全声明用语，会被上游审核误判拦截。
+> 接 Claude Code / Codex / ZCode 时**不要关闭脱敏**：它们的 system 模板含大量安全声明用语与客户端指纹句式，会被上游审核/渠道识别误判拦截。
 
 ### 调用示例
 

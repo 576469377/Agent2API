@@ -95,8 +95,24 @@ export ANTHROPIC_API_KEY=anything    # not validated when no gateway key is set
 
 **Any OpenAI SDK**: set base_url to `http://127.0.0.1:8787/v1`.
 
+**ZCode (desktop client)**
+
+In **Settings → Providers → Add custom provider**:
+
+| Field | Value |
+|---|---|
+| Protocol | Anthropic Messages (same path as Claude Code; fullest tool/reasoning support) |
+| Base URL | `http://127.0.0.1:8787/v1` |
+| API Key | any value (not validated when no gateway key is set) |
+| Models | add them one by one; use `agent2api models` or the console's Models page as the source of truth |
+
+Alternatively, edit `~/.zcode/v2/provider_config.json` directly: append a rule to `providerRules` (`api.type: "anthropic-messages"`, `api.baseUrl`, model list in `personalModelIds`) and register it in `providerOrder`, then restart ZCode. Back the file up first — the schema is strictly validated, and one misspelled field gets the whole config rejected.
+
+> [!WARNING]
+> ZCode's system template reuses Claude Code's gitStatus wording. **The gateway must be a build after 2026-10-02** (`4b33284`): older sanitization wordlists miss that fingerprint phrase, and upstream rejects the whole request with `Illegal API invocation from an unapproved channel`. Seeing that error means the gateway needs upgrading.
+
 > [!TIP]
-> **Do not disable sanitization** when using Claude Code / Codex: their system templates contain security wording that upstream review misclassifies.
+> **Do not disable sanitization** when using Claude Code / Codex / ZCode: their system templates contain security wording and client-fingerprint phrases that upstream review / channel detection misclassify.
 
 ### Examples
 
