@@ -106,7 +106,7 @@ export ANTHROPIC_API_KEY=任意值     # 未配置网关密钥时不会校验
 | API Key | 随意填（网关未配置密钥时不校验） |
 | 模型 | 逐个添加，清单以 `agent2api models` 或控制台「模型」页为准 |
 
-不走 UI 也可以直接编辑 `~/.zcode/v2/provider_config.json`：在 `providerRules` 追加一条规则（`api.type: "anthropic-messages"`、`api.baseUrl`、`personalModelIds` 填模型清单），并把它加进 `providerOrder`，重启 ZCode 生效。改前备份该文件——schema 是严格校验的，字段名写错整份配置会被拒。
+不走 UI 也可以直接编辑 `~/.zcode/v2/provider_config.json`：在 `providerRules` 追加一条规则（`api.type: "anthropic-messages"`、`api.baseUrl`、`personalModelIds` 填模型清单），并把它加进 `providerOrder`——客户端每 60s 热加载，无需重启。改前备份该文件：schema 是严格校验的，字段缺失/多余/嵌套错位都会**整份配置被拒**（UI 里所有个人供应商消失），排错与完整字段清单见 [`docs/research/03-ZCode供应商配置逆向.md`](docs/research/03-ZCode供应商配置逆向.md)；模型元数据（真实上下文窗口等）的同步方法同见该文。
 
 > [!WARNING]
 > ZCode 的 system 模板沿用了 Claude Code 的 gitStatus 句式，**网关需为 2026-10-02 之后的构建**（`4b33284`）：旧版脱敏词表未覆盖该指纹短语，上游会以 `Illegal API invocation from an unapproved channel` 整单拒绝。报这个错就是网关该升级了。

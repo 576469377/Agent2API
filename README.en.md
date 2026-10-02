@@ -106,7 +106,7 @@ In **Settings → Providers → Add custom provider**:
 | API Key | any value (not validated when no gateway key is set) |
 | Models | add them one by one; use `agent2api models` or the console's Models page as the source of truth |
 
-Alternatively, edit `~/.zcode/v2/provider_config.json` directly: append a rule to `providerRules` (`api.type: "anthropic-messages"`, `api.baseUrl`, model list in `personalModelIds`) and register it in `providerOrder`, then restart ZCode. Back the file up first — the schema is strictly validated, and one misspelled field gets the whole config rejected.
+Alternatively, edit `~/.zcode/v2/provider_config.json` directly: append a rule to `providerRules` (`api.type: "anthropic-messages"`, `api.baseUrl`, model list in `personalModelIds`) and register it in `providerOrder` — the client hot-reloads the file every 60s, no restart needed. Back the file up first: the schema is strictly validated, and missing/extra/mis-nested fields get the **whole config rejected** (all personal providers vanish from the UI). See [`docs/research/03-ZCode供应商配置逆向.md`](docs/research/03-ZCode供应商配置逆向.md) for the full field reference, the silent-failure troubleshooting path, and how to sync real context-window metadata.
 
 > [!WARNING]
 > ZCode's system template reuses Claude Code's gitStatus wording. **The gateway must be a build after 2026-10-02** (`4b33284`): older sanitization wordlists miss that fingerprint phrase, and upstream rejects the whole request with `Illegal API invocation from an unapproved channel`. Seeing that error means the gateway needs upgrading.

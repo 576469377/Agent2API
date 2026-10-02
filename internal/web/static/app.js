@@ -48,6 +48,7 @@
       'acct.inflight': 'in-flight / limit',
       'acct.usage': 'Usage', 'acct.success': 'Success rate', 'acct.lasterr': 'Last error',
       'acct.src': 'Source', 'acct.srcdesktop': 'Desktop client', 'acct.srcfile': 'Pool file',
+      'login.unknown': 'Login state unknown',
       'login.ok': 'valid until', 'login.expiring': 'expiring soon (auto-refresh)',
       'login.dead': 'Login expired, re-login required',
       'req.time': 'Time', 'req.status': 'Status', 'req.proto': 'Protocol', 'req.model': 'Model',
@@ -64,6 +65,10 @@
       'mdl.id': 'Model ID', 'mdl.name': 'Name', 'mdl.ctx': 'Context', 'mdl.maxout': 'Max output',
       'mdl.cap': 'Capabilities', 'mdl.tools': 'tools', 'mdl.think': 'thinking', 'mdl.vision': 'vision',
       'mdl.default': 'default', 'mdl.nomodel': 'No models returned by upstream',
+      // mdl.nomatch 是函数型词条：筛选无结果时带查询词。
+      // 缺了它 t() 会回退回字符串，调用方写成 t(...)(q) 就会抛
+      //「t(...) is not a function」——整个 renderModels 中断。
+      'mdl.nomatch': (q) => `No model matches "${q}"`,
       'set.runtime': 'Runtime switches', 'set.effective': 'Effective configuration',
       'set.access': 'Access endpoints', 'set.note': 'Listen address, upstream URL and timeouts require a restart — the console does not fake it.',
       'toast.saved': 'Settings saved', 'toast.keyrefreshed': 'Model list refreshed',
@@ -106,6 +111,7 @@
       'acct.inflight': '在途/并发上限',
       'acct.usage': '用量', 'acct.success': '成功率', 'acct.lasterr': '最近错误',
       'acct.src': '来源', 'acct.srcdesktop': '桌面客户端', 'acct.srcfile': '号池文件',
+      'login.unknown': '登录状态未知',
       'login.ok': '有效至', 'login.expiring': '凭证即将过期（网关会自动刷新）',
       'login.dead': '登录已失效，需重新登录',
       'req.time': '时间', 'req.status': '状态', 'req.proto': '协议', 'req.model': '模型',
@@ -122,6 +128,7 @@
       'mdl.id': '模型 ID', 'mdl.name': '名称', 'mdl.ctx': '上下文', 'mdl.maxout': '最大输出',
       'mdl.cap': '能力', 'mdl.tools': '工具', 'mdl.think': '思考', 'mdl.vision': '视觉',
       'mdl.default': '默认', 'mdl.nomodel': '上游未返回任何模型',
+      'mdl.nomatch': (q) => `没有匹配「${q}」的模型`,
       'set.runtime': '运行期开关', 'set.effective': '当前生效配置',
       'set.access': '接入方式', 'set.note': '监听地址、上游地址、超时等需要重启生效，请用配置文件或启动参数修改，控制台不做假动作。',
       'toast.saved': '设置已生效', 'toast.keyrefreshed': '模型清单已刷新',
@@ -136,6 +143,10 @@
   const THEME_KEY = 'agent2api_theme';
 
   // t 取当前语言的文案；函数型词条支持参数；缺键回落中文原文。
+  //
+  // 函数型词条（如 'mx.minutesago': (m) => ...）在这里就已被展开，
+  // 调用方必须写成 t('mx.minutesago', rel)。写成 t('mx.minutesago')(rel)
+  // 会得到「展开后的字符串」再当函数调用 —— TypeError: t(...) is not a function。
   function t(key, ...args) {
     const v = (I18N[LANG] && I18N[LANG][key]) ?? I18N.zh[key];
     return typeof v === 'function' ? v(...args) : (v ?? key);
@@ -673,7 +684,7 @@
     const tm = new Date(b.minute * 60000);
     const hh = String(tm.getHours()).padStart(2, '0');
     const mm = String(tm.getMinutes()).padStart(2, '0');
-    const relLabel = rel === 0 ? t('time.now') : t('mx.minutesago')(rel);
+    const relLabel = rel === 0 ? t('time.now') : t('mx.minutesago', rel);
     const rows = [
       [t('tip.reqs'), `${fmtNum(b.total)} ${t('req.acct') === '账号' ? '次' : ''}`],
       [t('stat.in'), fmtNum(b.input_tokens)],
@@ -1173,7 +1184,7 @@
     if (state.modelsLoading && !all.length) return skeletonRows(5, 7);
     if (state.modelsError && !all.length) return emptyRow(5, '模型清单加载失败', state.modelsError);
     if (!all.length) return emptyRow(5, t('mdl.nomodel'), t('btn.reload'));
-    if (!rows.length) return emptyRow(5, t('mdl.nomatch')(q), '');
+    if (!rows.length) return emptyRow(5, t('mdl.nomatch', q), '');
     return rows.map((m) => `
         <tr>
           <td class="mono">${esc(m.id)}</td>

@@ -11,6 +11,7 @@
 
 ### 新增
 
+- **ZCode 供应商配置逆向报告**（`docs/research/03-ZCode供应商配置逆向.md`）：`provider_config.json` 完整结构与两处 strict schema 的必填清单、60s 轮询热加载、静默降级的表现与真正的报错日志位置（`~/.zcode/v2/logs/`）、三连坑实录（缺必填字段 / `maxOutputTokens` 多余键 / `modelConfigRules` 嵌套层级）、模型清单与上下文元数据的同步流程；README 中英版 ZCode 小节同步链接
 - **ZCode 接入指南**（README/README.en「接入客户端」）：自定义供应商的协议/Base URL/密钥填值、模型清单来源、手动编辑 `provider_config.json` 的路径与严格 schema 警示，以及「网关需 2026-10-02 之后构建否则被渠道指纹拒绝」的版本要求；脱敏 TIP 同步覆盖 ZCode
 - **每账号并发上限与在途可视化**（`max_concurrency_per_account`，默认 4，0 = 不限）：
   - `adapter.Pool` 给每个账号加并发槽位（`acquireSlot`/`releaseSlot`），槽位在**流的整个生命周期**内占用——流关闭或读到结尾才归还；超限的请求**排队等槽位**（受 ctx 约束）而不是失败或换号，因为上游并没有拒绝我们

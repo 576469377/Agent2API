@@ -40,11 +40,28 @@ func Index(w http.ResponseWriter, r *http.Request) {
 }
 
 // Static 返回静态资源处理器（对应 /static/ 前缀）。
+//
+// 必须加 no-cache：go:embed 的文件 ModTime 恒为零值（实测），
+// http.FileServer 因此既不发 Last-Modified 也不发 ETag，只能靠
+// Cache-Control 阻止浏览器缓存。而 index.html 引用 app.js 时没有版本
+// 查询串 —— 一旦 JS 被缓存，升级网关后就会出现「新 HTML 调新字段、
+// 旧 JS 读旧字段」的混搭，这类故障最难定位。
 func Static() http.Handler {
 	fsys, err := sub()
 	if err != nil {
 		// embed 路径是编译期常量，这里理论上不可达。
 		return http.NotFoundHandler()
 	}
-	return http.FileServer(http.FS(fsys))
+	return noCache(http.FileServer(http.FS(fsys)))
+}
+
+// noCache 给响应加上「每次都要重新校验」的缓存头。
+//
+// 用 no-cache 而非 no-store：静态文件本身可以留在磁盘缓存里，
+// 只是每次使用前必须向服务端确认，既避免混搭又不牺牲重复加载速度。
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
