@@ -13,6 +13,12 @@ auths/
 *.info
 .env
 *.env.local
+# 常见凭证文件名兜底（如 login -out 的自选路径、手工导出的凭据）
+cred*.json
+*credential*.json
+*credentials*.json
+*.pem
+*.key
 
 # ── 指标落盘（运行期自动生成，含真实调用统计）────────────────
 metrics.json
