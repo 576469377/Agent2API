@@ -31,7 +31,7 @@ Windows 无需安装 Make，直接使用以下跨平台命令：
 go build -trimpath -o bin/agent2api-dev.exe ./cmd/agent2api
 go test ./...
 go vet ./...
-node --test scripts/test-console-core.mjs
+node --test scripts/test-console-core.mjs scripts/test-console-monitor.mjs
 python -m unittest discover -s scripts -p test_sync_zcode.py
 python scripts/check-secrets.py --staged
 python -m unittest discover -s scripts -p test_check_secrets.py
@@ -70,7 +70,7 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 
 可优先补充以下覆盖；覆盖率会随代码变化，请先运行 `make cover` 获取当前结果：
 
-- [`internal/web`](internal/web/) —— 静态入口；前端逻辑另有 `scripts/test-console-core.mjs` 离线测试，页面交互仍需浏览器验证
+- [`internal/web`](internal/web/) —— 静态入口；前端流式处理与监控统计分别有 `scripts/test-console-core.mjs`、`scripts/test-console-monitor.mjs` 离线测试，页面交互仍需浏览器验证
 - [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate` 路径）
 - [`cmd/agent2api`](cmd/agent2api/) —— 启动装配、子命令、号池监视与保活
 - [`cmd/console`](cmd/console/) —— 独立控制台的代理、路径与 SSE；已有离线测试，可补充异常网络场景

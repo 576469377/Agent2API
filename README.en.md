@@ -26,7 +26,7 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 | Routing | Platform prefixes, aliases, optional same-name fallback before stream acceptance |
 | Accounts | Region isolation, credential discovery and refresh, pools, affinity, concurrency limits |
 | Conversations | Text, image input, reasoning and native tool calls; model capabilities vary |
-| Management | Seven-page console, English / Chinese, themes, logs, availability matrix, Prometheus |
+| Management | Nine-page console, interactive trends, usage analytics, combined log filters, account tables, client setup, English / Chinese and themes |
 
 ## Quick start
 
@@ -95,7 +95,7 @@ The catalog is account-dependent. **Catalog support, scheduling readiness and re
 
 ## Web console
 
-Overview, request logs, accounts, platforms, models, playground and settings share the same gateway data. Inspect routing, account and model cooldowns, concurrency, streaming output and actual errors.
+Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share the same gateway data. Interactive trends, diagnostics and cumulative rankings link to filtered logs. Switch between account tables and cards, or copy real gateway endpoints and request examples for all three protocols.
 
 The UI is embedded in the gateway; no frontend build is required. A standalone console can load updated assets **without restarting a gateway in use or changing client endpoints**. See the [console guide](docs/console.md). Ordinary pages use local resources; math loads KaTeX on demand and falls back to source text offline.
 
@@ -150,7 +150,7 @@ Protocol codecs communicate with upstream adapters through a dependency-free IR.
 ```bash
 go test ./...
 go vet ./...
-node --test scripts/test-console-core.mjs
+node --test scripts/test-console-core.mjs scripts/test-console-monitor.mjs
 python -m unittest discover -s scripts -p test_sync_zcode.py
 ```
 

@@ -26,7 +26,7 @@
 | 路由 | 平台前缀、模型别名、可选的建流前同名回退 |
 | 账号 | 区域隔离、凭证自动发现与刷新、多账号调度、会话亲和、并发上限 |
 | 对话 | 文本、图片输入、思考输出、原生工具调用；具体能力以模型目录为准 |
-| 管理 | 七页控制台、中英文、深浅主题、调用记录、可用性矩阵、Prometheus 指标 |
+| 管理 | 九页控制台、交互趋势与用量分析、组合日志筛选、账号表格、客户端接入、中英文与深浅主题 |
 
 ## 快速开始
 
@@ -93,7 +93,7 @@ python scripts/sync-zcode.py --config config.json
 
 ## 网页控制台
 
-概览、调用日志、账号管理、平台连接、模型目录、模型测试和设置统一管理已接入平台，目前包含 WorkBuddy 国内版与国际版。可查看路由策略、账号冷却、模型冷却、并发、流式输出及真实调用错误。
+概览、调用日志、用量分析、账号管理、平台连接、模型目录、模型测试、客户端接入和设置统一管理已接入平台，目前包含 WorkBuddy 国内版与国际版。交互趋势、运行诊断与累计排行可联动查看调用日志；账号支持表格和卡片，接入页提供三种协议的真实网关地址与请求示例。
 
 界面随网关嵌入，无前端构建步骤。已有网关正在使用时，独立控制台可从磁盘加载新版界面，**无需重启原反代或修改客户端地址**。见[控制台使用说明](docs/console.md)。常规页面使用本地资源；数学公式按需加载 KaTeX，离线时显示原文。
 
@@ -146,7 +146,7 @@ python scripts/sync-zcode.py --config config.json
 ```bash
 go test ./...
 go vet ./...
-node --test scripts/test-console-core.mjs
+node --test scripts/test-console-core.mjs scripts/test-console-monitor.mjs
 python -m unittest discover -s scripts -p test_sync_zcode.py
 ```
 

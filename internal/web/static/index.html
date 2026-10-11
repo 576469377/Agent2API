@@ -15,7 +15,7 @@
           localStorage.getItem("agent2api_theme") || "auto";
       } catch {}
     </script>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/style.css?v=operations-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,6 +60,7 @@
             ><strong id="breadcrumb">概览</strong>
           </div>
           <div class="topbar-actions">
+            <button class="quick-search" id="quickSearch" data-action="command-search" aria-label="搜索与快捷跳转"></button>
             <span class="connection-badge" id="connectionBadge"
               >正在连接网关</span
             ><button class="button small" id="copyEndpoint"></button>
@@ -74,7 +75,7 @@
             </div>
             <div class="page-actions">
               <span class="updated-at" id="updatedAt"></span
-              ><button class="button" id="refreshButton"></button>
+              ><select id="autoRefresh" class="select" aria-label="自动刷新间隔"></select><button class="button" id="refreshButton"></button>
             </div>
           </header>
           <div
@@ -100,6 +101,6 @@
     </dialog>
     <dialog id="modal" class="modal"><div id="modalContent"></div></dialog>
     <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
-    <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/app.js?v=operations-1"></script>
   </body>
 </html>

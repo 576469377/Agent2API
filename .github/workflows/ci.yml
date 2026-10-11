@@ -10,6 +10,20 @@ permissions:
   contents: read
 
 jobs:
+  frontend-check:
+    name: console metrics / streaming tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 前端语法与离线行为
+        run: |
+          node --check internal/web/static/app.js
+          node --check internal/web/static/monitor.js
+          node --test scripts/test-console-*.mjs
+
   secret-check:
     name: credential guard
     runs-on: ubuntu-latest

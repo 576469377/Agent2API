@@ -11,6 +11,7 @@ import {
   markdown,
 } from "./core.js";
 import { renderMath } from "./math.js";
+import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "./monitor.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -36,20 +37,28 @@ const s = {
   authRequired: false,
   trend: "requests",
   usage: "by_model",
+  trendMinutes: 30,
+  refreshEvery: [0, 10, 30, 60].includes(Number(saved("agent2api_refresh", "10"))) ? Number(saved("agent2api_refresh", "10")) : 10,
+  lastPoll: Date.now(),
+  analytics: { dimension: "by_model", sort: "total", query: "" },
+  connectionModel: "",
+  connectionProtocol: "openai-chat",
   models: {
     query: "",
     platform: "all",
     capability: "all",
     view: "list",
     page: 1,
+    sort: "name",
   },
-  accounts: { query: "", platform: "all", status: "all" },
+  accounts: { query: "", platform: "all", status: "all", view: saved("agent2api_account_view", "table") },
   requests: {
     query: "",
     platform: "all",
     status: "all",
     protocol: "all",
     page: 1,
+    range: "all", account: "all", model: "all", sort: "time", size: 20,
   },
   chat: {
     model: saved("agent2api_chat_model"),
@@ -68,10 +77,12 @@ const L = (zh, en) => (s.lang === "en" ? en : zh);
 const names = {
   overview: () => L("网关概览", "Gateway overview"),
   requests: () => L("调用日志", "Request logs"),
+  analytics: () => L("用量分析", "Usage analytics"),
   accounts: () => L("账号管理", "Accounts"),
   platforms: () => L("平台连接", "Platforms"),
   models: () => L("模型目录", "Model catalog"),
   chat: () => L("模型测试", "Playground"),
+  connection: () => L("客户端接入", "Client setup"),
   settings: () => L("网关设置", "Settings"),
 };
 const descriptions = {
@@ -85,10 +96,12 @@ const descriptions = {
       "查看实际路由、用量与错误，定位每一次调用。",
       "Inspect actual routes, usage and errors for each request.",
     ),
+  analytics: () => L("按模型、协议和账号分析累计用量，定位失败与高消耗来源。", "Explore cumulative usage by model, protocol and account."),
+  connection: () => L("选择模型与协议，复制实际网关地址和请求示例。", "Choose a model and protocol, then copy gateway URLs and request examples."),
   accounts: () =>
     L(
-      "国内版与国际版账号统一管理，登录状态与调用状态分别展示。",
-      "Manage regional accounts together, with separate credential and request status.",
+      "统一管理各平台账号，查看调度状态、并发和实际用量。",
+      "Manage platform accounts, scheduling, concurrency and recorded usage.",
     ),
   platforms: () =>
     L(
@@ -114,6 +127,8 @@ const descriptions = {
 const eyebrows = {
   overview: "WORKSPACE OVERVIEW",
   requests: "REQUEST ACTIVITY",
+  analytics: "USAGE ANALYTICS",
+  connection: "CLIENT CONNECTIONS",
   accounts: "ACCOUNT MANAGEMENT",
   platforms: "CONNECTED PLATFORMS",
   models: "MODEL CATALOG",
@@ -132,6 +147,8 @@ const endpoints = {
 const pageKeys = {
   overview: ["status", "metrics", "accounts", "models"],
   requests: ["metrics"],
+  analytics: ["metrics"],
+  connection: ["config", "models"],
   accounts: ["accounts", "metrics"],
   platforms: ["platforms", "accounts", "models"],
   models: ["models"],
@@ -158,12 +175,13 @@ const regionName = (id) =>
     ? L("国内版", "China")
     : id === "workbuddy-global"
       ? L("国际版", "Global")
-      : id || "—";
+      : id === "(别名)" ? L("别名", "Alias") : id || "—";
+const platformMark = (id) => id === "workbuddy" ? "CN" : id === "workbuddy-global" ? "GL" : String(id || "AP").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const regionTag = (id) =>
   `<span class="tag ${id === "workbuddy-global" ? "green" : "blue"}">${e(regionName(id))}</span>`;
 const routeId = (model) =>
   model.routing_id ||
-  (model.platform ? `${model.platform}/${model.id}` : model.id);
+  (platforms().some((p) => p.id === model.platform) ? `${model.platform}/${model.id}` : model.id);
 const gatewayURL = () => {
   const listen = s.cache.status?.listen || s.cache.config?.listen;
   if (!listen) return "";
@@ -253,6 +271,7 @@ async function refresh(keys = pageKeys[s.page], manual = false) {
     (key) => !s.busy.has(key),
   );
   if (!needed.length) return;
+  s.lastPoll = Date.now();
   if (manual) $("refreshButton").classList.add("refreshing");
   needed.forEach((key) => s.busy.add(key));
   await Promise.allSettled(
@@ -288,12 +307,11 @@ function chrome() {
   $("navCaption").textContent = L("工作空间", "WORKSPACE");
   const navSignature = `${s.page}|${s.lang}|${models().length}|${accounts().length}`;
   if (chrome.navSignature !== navSignature)
-    $("nav").innerHTML = Object.keys(names)
-      .map(
-        (page, index) =>
-          `${index === 5 ? '<div class="nav-divider"></div>' : ""}<a class="nav-item ${page === s.page ? "active" : ""}" href="#${page}" ${page === s.page ? 'aria-current="page"' : ""}>${icon(page)}<span>${e(page === "overview" ? L("概览", "Overview") : names[page]())}</span>${page === "models" && s.cache.models ? `<span class="nav-count">${models().length}</span>` : ""}${page === "accounts" && s.cache.accounts ? `<span class="nav-count">${accounts().length}</span>` : ""}</a>`,
-      )
-      .join("");
+    $("nav").innerHTML = [
+      [L("运行监控", "MONITORING"), ["overview", "requests", "analytics"]],
+      [L("资源管理", "RESOURCES"), ["accounts", "platforms", "models"]],
+      [L("工具与配置", "TOOLS & SETTINGS"), ["chat", "connection", "settings"]],
+    ].map(([title, pages]) => `<div class="nav-group-label">${e(title)}</div>${pages.map((page) => `<a class="nav-item ${page === s.page ? "active" : ""}" href="#${page}" ${page === s.page ? 'aria-current="page"' : ""}>${icon(page === "analytics" ? "activity" : page === "connection" ? "external" : page)}<span>${e(page === "overview" ? L("概览", "Overview") : names[page]())}</span>${["models", "accounts"].includes(page) && s.cache[page] ? `<span class="nav-count">${page === "models" ? models().length : accounts().length}</span>` : ""}</a>`).join("")}`).join("");
   chrome.navSignature = navSignature;
   $("sidebarShortcut").innerHTML =
     icon("bolt") + e(L("快速测试模型", "Try a model")) + icon("arrow");
@@ -307,6 +325,10 @@ function chrome() {
   $("pageDescription").textContent = descriptions[s.page]();
   $("pageEyebrow").textContent = eyebrows[s.page];
   $("refreshButton").innerHTML = icon("refresh") + e(L("刷新", "Refresh"));
+  $("quickSearch").innerHTML = icon("search") + `<span>${e(L("搜索 / 快捷跳转", "Search / jump to"))}</span><kbd>Ctrl K</kbd>`;
+  $("quickSearch").setAttribute("aria-label", L("搜索与快捷跳转", "Search and navigation"));
+  $("autoRefresh").innerHTML = options([["0", L("手动刷新", "Manual refresh")], ["10", L("每 10 秒刷新", "Every 10s")], ["30", L("每 30 秒刷新", "Every 30s")], ["60", L("每 60 秒刷新", "Every 60s")]], String(s.refreshEvery));
+  $("autoRefresh").setAttribute("aria-label", L("自动刷新间隔", "Auto-refresh interval"));
   $("footerText").textContent = L(
     "一个入口，连接全部平台。",
     "One gateway. Every platform.",
@@ -400,6 +422,7 @@ function draw(force = false) {
   if (s.page === "models") updateModelTable();
   if (s.page === "requests") updateRequestTable();
   if (s.page === "accounts") updateAccountCards();
+  if (s.page === "analytics") updateAnalyticsTable();
   if (s.page === "chat") {
     updateChatModels();
     renderMessages();
@@ -412,7 +435,7 @@ function metricCard(label, glyph, value, note, unit = "") {
   return `<article class="card stat-card"><div class="stat-heading">${icon(glyph)}${e(label)}</div><div class="stat-value">${e(value)}${unit ? `<small>${e(unit)}</small>` : ""}</div><div class="stat-note">${note}</div></article>`;
 }
 function chart(series, kind = "requests") {
-  const values = series || [];
+  const values = selectTrend(series, s.trendMinutes);
   if (!values.length)
     return empty(
       L("尚无趋势数据", "No trend data"),
@@ -457,7 +480,9 @@ function chart(series, kind = "requests") {
         `<circle class="chart-point" cx="${x(index)}" cy="${y(a[index])}" r="2" fill="var(--accent)"><title>${e(timestamp(row.minute * 60000))} · ${e(kind === "requests" ? L("成功 / 失败", "Success / Failed") : L("输入 / 输出 Token", "Input / output tokens"))}: ${a[index]} / ${b[index]}</title></circle>`,
     )
     .join("");
-  return `<svg class="chart" viewBox="0 0 610 200" role="img" aria-label="${e(kind === "requests" ? L("最近 30 分钟调用趋势", "Request activity over the last 30 minutes") : L("最近 30 分钟 Token 趋势", "Token activity over the last 30 minutes"))}">${axis}<path class="chart-area" d="${line(a)} L588,161 L36,161 Z"/><path class="chart-line" d="${line(a)}"/><path class="chart-line red" d="${line(b)}"/>${points}${times}</svg>`;
+  const width = 552 / Math.max(1, values.length - 1);
+  const hits = values.map((row, index) => `<rect class="chart-hit" tabindex="0" role="button" aria-label="${e(`${timestamp(row.minute * 60000)} · ${a[index]} / ${b[index]}`)}" data-chart-point="${index}" data-x="${x(index)}" data-time="${e(timestamp(row.minute * 60000))}" data-a="${a[index]}" data-b="${b[index]}" data-kind="${kind}" x="${Math.max(36, x(index) - width / 2)}" y="20" width="${Math.min(width, 588 - Math.max(36, x(index) - width / 2))}" height="148"/>`).join("");
+  return `<div class="chart-shell"><svg class="chart" viewBox="0 0 610 200" aria-label="${e(L(`最近 ${s.trendMinutes} 分钟趋势`, `Last ${s.trendMinutes} minutes`))}">${axis}<path class="chart-area" d="${line(a)} L588,161 L36,161 Z"/><path class="chart-line" d="${line(a)}"/><path class="chart-line red" d="${line(b)}"/>${points}${times}<line class="chart-crosshair" x1="36" x2="36" y1="20" y2="161" hidden/>${hits}</svg><div class="chart-tooltip" hidden role="status"></div></div>`;
 }
 function platformSummary() {
   return (
@@ -465,7 +490,7 @@ function platformSummary() {
       .map((p) => {
         const pool = accounts().filter((a) => a.platform === p.id),
           ready = pool.filter((a) => a.healthy).length;
-        return `<a class="platform-summary" href="#platforms"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${p.id === "workbuddy-global" ? "GL" : "CN"}</div><div class="platform-label"><strong>${e(platformName(p.id))}</strong><small>${n(models().filter((m) => m.platform === p.id).length || p.models || 0)} ${e(L("个模型", "models"))} · ${ready}/${pool.length} ${e(L("账号就绪", "accounts ready"))}</small></div>${tag(pool.length ? (ready ? L("可调度", "Ready") : L("需关注", "Attention")) : L("待加载", "Loading"), ready ? "green" : "amber", true)}</a>`;
+        return `<a class="platform-summary" href="#platforms"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${e(platformMark(p.id))}</div><div class="platform-label"><strong>${e(platformName(p.id))}</strong><small>${n(models().filter((m) => m.platform === p.id).length || p.models || 0)} ${e(L("个模型", "models"))} · ${ready}/${pool.length} ${e(L("账号就绪", "accounts ready"))}</small></div>${tag(pool.length ? (ready ? L("可调度", "Ready") : L("需关注", "Attention")) : L("待加载", "Loading"), ready ? "green" : "amber", true)}</a>`;
       })
       .join("") || empty(L("暂无平台", "No platforms"))
   );
@@ -481,18 +506,28 @@ function overview() {
   const m = s.cache.metrics || {},
     status = s.cache.status || {},
     ready = accounts().filter((a) => a.healthy).length;
+  const currentRPM = m.series?.at(-1)?.total ?? m.last_minute_rpm;
   const recent = [...(m.recent || [])]
     .sort((a, b) => new Date(b.time) - new Date(a.time))
-    .slice(0, 5);
-  return `<div class="stats-grid">
-    ${metricCard(L("累计调用", "Total requests"), "activity", n(m.total), `${e(L("最近一分钟", "Last minute"))} <strong>${n(m.last_minute_rpm)}</strong> RPM`)}
+    .slice(0, 4);
+  const sample = summarizeRequests(m.recent || []);
+  const attention = accounts().filter((a) => !a.healthy && a.state !== "disabled");
+  const failures = recentRequests().filter((row) => !row.ok).slice(0, 3);
+  const enabled = accounts().filter((a) => a.state !== "disabled");
+  const capacity = !enabled.length ? "—" : enabled.some((a) => !a.max_concurrency) ? L("不限", "Unlimited") : enabled.reduce((sum, a) => sum + a.max_concurrency, 0);
+  return `<div class="runtime-strip"><span class="runtime-live"><span class="status-dot ${s.errors.status ? "offline" : "online"}"></span>${e(s.errors.status ? L("连接异常", "Connection issue") : L("网关在线", "Gateway online"))}</span><span>${e(L("实时并发", "In flight"))}<strong>${n(m.in_flight)}</strong></span><span>${e(L("本分钟调用", "Current minute"))}<strong>${n(currentRPM)}</strong></span><span>${e(L("账号就绪", "Ready accounts"))}<strong>${ready}/${accounts().length}</strong></span><span>${e(L("运行时间", "Uptime"))}<strong>${e(countdown(status.uptime_sec || 0))}</strong></span><a href="#connection">${icon("external")}${e(L("接入客户端", "Connect a client"))}</a></div>
+  <div class="section-heading"><h2>${e(L("累计用量", "Cumulative usage"))}</h2><span>${e(L("累计指标可跨网关重启保留，趋势按最近分钟展示", "Persisted totals · recent minute-based trends"))}</span></div>
+  <div class="stats-grid operations-stats">
+    ${metricCard(L("累计调用", "Total requests"), "activity", n(m.total), `${e(L("当前分钟已完成", "Completed this minute"))} <strong>${n(currentRPM)}</strong>`)}
     ${metricCard(L("调用成功率", "Success rate"), "check", m.total ? `${(m.success_rate * 100).toFixed(1)}%` : "—", `<span class="positive">${n(m.ok)} ${e(L("成功", "successful"))}</span><span>·</span><span>${n(m.failed)} ${e(L("失败", "failed"))}</span>`)}
     ${metricCard(L("平均响应耗时", "Average duration"), "clock", m.total ? (m.avg_latency_ms / 1000).toFixed(2) : "—", e(L("包含连接与完整生成时间", "Includes connection and full generation")), m.total ? "s" : "")}
-    ${metricCard(L("处理中的请求", "Active requests"), "bolt", n(m.in_flight), `${ready}/${accounts().length} ${e(L("账号就绪", "accounts ready"))} · ${e(L("运行", "Uptime"))} ${e(countdown(status.uptime_sec || 0))}`)}
+    ${metricCard(L("输入 Token", "Input tokens"), "tokens", compact(m.input_tokens), `<span title="${n(m.input_tokens)}">${n(m.input_tokens)} tokens</span>`)}
+    ${metricCard(L("输出 Token", "Output tokens"), "tokens", compact(m.output_tokens), `${e(L("思考 Token", "Reasoning tokens"))} ${n(m.reasoning_tokens)}`)}
+    ${metricCard(L("平均生成速度", "Generation speed"), "bolt", m.tps_samples ? Number(m.avg_tps).toFixed(1) : "—", `${n(m.tps_samples)} ${e(L("个有效测速样本", "measured samples"))}`, m.tps_samples ? "tok/s" : "")}
   </div>
   <div class="overview-grid"><section class="card">${cardHead(
     L("流量趋势", "Traffic activity"),
-    L("最近 30 分钟 · 每分钟聚合", "Last 30 minutes · per-minute buckets"),
+    L(`最近 ${s.trendMinutes} 分钟 · 每分钟聚合`, `Last ${s.trendMinutes} minutes · per-minute buckets`),
     `<div class="chart-caption"><span><i class="legend-dot"></i>${e(s.trend === "requests" ? L("成功", "Success") : L("输入", "Input"))}</span><span><i class="legend-dot red"></i>${e(s.trend === "requests" ? L("失败", "Failed") : L("输出", "Output"))}</span><select id="trendSelect" class="select" aria-label="${e(L("趋势类型", "Trend type"))}">${options(
       [
         ["requests", L("调用", "Requests")],
@@ -500,7 +535,7 @@ function overview() {
       ],
       s.trend,
     )}</select></div>`,
-  )}<div class="card-body">${chart(m.series, s.trend)}</div><div class="summary-metrics"><div><small>${e(L("输入 Token", "Input tokens"))}</small><strong>${n(m.input_tokens)}</strong></div><div><small>${e(L("输出 Token", "Output tokens"))}</small><strong>${n(m.output_tokens)}</strong><small>${e(L("思考", "Reasoning"))} ${n(m.reasoning_tokens)}</small></div><div><small>${e(L("平均生成速度", "Average generation"))}</small><strong>${m.tps_samples ? `${Number(m.avg_tps).toFixed(1)} tok/s` : "—"}</strong></div></div></section>
+  )}<div class="chart-controls"><div class="segmented">${[15, 30].map((minutes) => `<button data-action="trend-range" data-value="${minutes}" aria-pressed="${s.trendMinutes === minutes}" class="${s.trendMinutes === minutes ? "active" : ""}">${minutes} ${e(L("分钟", "min"))}</button>`).join("")}</div><span>${e(L("悬停或聚焦查看每分钟读数", "Hover or focus for minute details"))}</span></div><div class="card-body">${chart(m.series, s.trend)}</div><div class="summary-metrics"><div><small>${e(L("记录样本", "Sample size"))}</small><strong>${n(sample.total)}</strong><small>${e(L("最近最多 200 条", "Latest 200 at most"))}</small></div><div><small>${e(L("完整耗时 P50", "Duration P50"))}</small><strong>${e(duration(sample.p50))}</strong></div><div><small>${e(L("完整耗时 P95", "Duration P95"))}</small><strong>${e(duration(sample.p95))}</strong></div></div></section>
   <section class="card">${cardHead(L("平台与账号", "Platforms & accounts"), L("统一入口，按平台独立调度", "One endpoint, independent platform pools"), `<a class="text-link" href="#platforms">${e(L("管理", "Manage"))} →</a>`)}<div class="card-body">${platformSummary()}<div class="subtle-strip"><span>${e(L("平台", "Platforms"))} <strong>${platforms().length}</strong></span><span>${e(L("模型条目", "Model entries"))} <strong>${models().length}</strong></span><span>${e(L("账号", "Accounts"))} <strong>${accounts().length}</strong></span></div></div>${cardHead(
     L("调用分布", "Usage breakdown"),
     L("累计调用次数", "Cumulative requests"),
@@ -513,12 +548,52 @@ function overview() {
       s.usage,
     )}</select>`,
   )}<div class="card-body">${ranking(s.usage === "by_protocol" ? (m.by_protocol || []).map((row) => ({ ...row, key: protocolName(row.key) })) : m[s.usage])}</div></section></div>
-  <section class="card">${cardHead(L("最近调用", "Recent requests"), L("展示实际使用的平台与模型", "Shows the platform and model actually used"), `<a class="text-link" href="#requests">${e(L("查看全部", "View all"))} →</a>`)}${requestTable(recent, false)}</section>`;
+  <section class="card operations-attention">${cardHead(L("运行诊断", "Operational checks"), L("账号调度与最近记录中的失败", "Account scheduling and failures in the recent sample"), `<button class="button small" data-action="inspect-failures">${e(L("查看失败调用", "Inspect failures"))}${icon("arrow")}</button>`)}<div class="diagnostic-grid"><div class="diagnostic-summary"><span class="diagnostic-icon ${attention.length ? "negative" : "positive"}">${icon(attention.length ? "info" : "check")}</span><div><strong>${e(attention.length ? L(`${attention.length} 个账号需要关注`, `${attention.length} accounts need attention`) : enabled.length ? L("全部启用账号可调度", "Enabled accounts are ready") : L("没有已启用账号", "No enabled accounts"))}</strong><p>${e(L(`账号槽位 ${capacity} · ${failures.length ? "最近记录存在失败调用" : "最近记录未发现失败"}`, `Account slots ${capacity} · ${failures.length ? "Recent failures found" : "No failures in recent records"}`))}</p></div></div><div class="diagnostic-items">${attention.slice(0, 2).map((a) => `<button data-action="account-detail" data-index="${accounts().indexOf(a)}">${regionTag(a.platform)}<span>${e(a.identity?.nickname || a.label)}</span>${tag(...accountStatus(a))}${icon("chevron")}</button>`).join("")}${failures.slice(0, 2).map((row) => `<button data-action="request-detail" data-key="${e(requestKey(row))}">${tag(String(row.status), "red")}<span class="truncate">${e(row.model)} · ${e(row.error || L("调用失败", "Request failed"))}</span>${icon("chevron")}</button>`).join("")}${!attention.length && !failures.length ? `<a href="#models">${icon("models")}${e(L("查看模型与账号可用性", "Review model availability"))}${icon("arrow")}</a>` : ""}</div></div></section>
+  <section class="card">${cardHead(L("最近调用", "Recent requests"), L("实际路由、账号与完整耗时", "Actual route, account and full duration"), `<a class="text-link" href="#requests">${e(L("查看全部", "View all"))} →</a>`)}${requestTable(recent, false)}</section>`;
 }
 
 function platformTabs(kind, selected) {
   const all = kind === "models" ? models() : accounts();
   return `<div class="segmented" aria-label="${e(L("平台筛选", "Platform filter"))}">${[["all", L("全部平台", "All platforms")], ...platforms().map((p) => [p.id, regionName(p.id)])].map(([id, label]) => `<button data-action="${kind}-platform" data-value="${e(id)}" class="${selected === id ? "active" : ""}" aria-pressed="${selected === id}">${e(label)}<span class="count">${id === "all" ? all.length : all.filter((item) => item.platform === id).length}</span></button>`).join("")}</div>`;
+}
+function analyticsPage() {
+  const m = s.cache.metrics || {};
+  return `<div class="stats-grid">${metricCard(L("累计调用", "Requests"), "activity", n(m.total), e(L("含已持久化记录", "Includes persisted counts")))}${metricCard(L("累计 Token", "Total tokens"), "tokens", compact((m.input_tokens || 0) + (m.output_tokens || 0)), `${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}`)}${metricCard(L("累计失败", "Failed requests"), "info", n(m.failed), m.total ? `${((m.failed / m.total) * 100).toFixed(2)}% ${e(L("失败率", "failure rate"))}` : "—")}${metricCard(L("平均完整耗时", "Average duration"), "clock", e(duration(m.total ? m.avg_latency_ms : null)), e(L("包含连接与完整生成", "Connection and generation included")))}</div>
+  <section class="card analytics-card">${cardHead(L("用量分布", "Usage distribution"), L("累计统计，不受最近 200 条记录的限制", "Cumulative aggregates, beyond the 200-record sample"), `<div class="segmented">${[["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]].map(([key, name]) => `<button data-action="analytics-dimension" data-value="${key}" class="${s.analytics.dimension === key ? "active" : ""}" aria-pressed="${s.analytics.dimension === key}">${e(name)}</button>`).join("")}</div>`)}<div id="analyticsDistribution"></div></section>
+  <div class="toolbar"><div class="toolbar-group">${search("analyticsSearch", s.analytics.query, L("搜索统计项…", "Search usage groups…"))}<select class="select" id="analyticsSort" aria-label="${e(L("用量排序", "Usage sort"))}">${options([["total", L("调用量优先", "Most requests")], ["tokens", L("Token 用量优先", "Most tokens")], ["failed", L("失败量优先", "Most failures")], ["avg_latency_ms", L("耗时优先", "Longest duration")]], s.analytics.sort)}</select></div>${button(L("导出统计", "Export usage"), "export-usage", "", "requests")}</div><section class="card" id="analyticsResults"></section><p class="scope-note">${e(L("统计按网关原始模型名与账号标识聚合；同名跨平台项可能合并。点击查看记录可进一步按平台筛选，记录页只保留最近 200 条。", "Aggregates use original model names and account labels; identical names across platforms can be combined. Request drill-down retains the latest 200 records."))}</p>`;
+}
+function usageRows() {
+  const q = s.analytics.query.trim().toLowerCase();
+  return sortUsage(s.cache.metrics?.[s.analytics.dimension] || [], s.analytics.sort).filter((row) => `${row.key} ${s.analytics.dimension === "by_protocol" ? protocolName(row.key) : ""}`.toLowerCase().includes(q));
+}
+function updateAnalyticsTable() {
+  if (!$("analyticsResults")) return;
+  const all = s.cache.metrics?.[s.analytics.dimension] || [], rows = usageRows();
+  const total = all.reduce((sum, row) => sum + row.total, 0);
+  const colors = ["#6384f4", "#37b7a5", "#a087ee", "#e5ae56", "#dc798e", "#7387a3"];
+  const top = sortUsage(all).slice(0, 5), other = total - top.reduce((sum, row) => sum + row.total, 0);
+  const parts = [...top.map((row) => row.total), ...(other > 0 ? [other] : [])];
+  let offset = 0;
+  const gradient = parts.map((count, index) => { const start = offset; offset += count / total * 100; return `${colors[index]} ${start}% ${offset}%`; }).join(",");
+  const name = (row) => s.analytics.dimension === "by_protocol" ? protocolName(row.key) : row.key || L("未记录", "Unrecorded");
+  $("analyticsDistribution").innerHTML = total ? `<div class="distribution-layout"><div class="usage-donut" style="--distribution:conic-gradient(${gradient})" role="img" aria-label="${e(L("累计调用占比分布", "Cumulative request distribution"))}"><div><span>${e(L("累计调用", "Requests"))}</span><strong>${compact(total)}</strong></div></div><div class="distribution-legend">${top.map((row, i) => `<button data-action="usage-requests" data-value="${e(row.key)}" data-kind="${s.analytics.dimension}"><i style="background:${colors[i]}"></i><span class="truncate mono" title="${e(name(row))}">${e(name(row))}</span><strong>${n(row.total)}</strong><span>${((row.total / total) * 100).toFixed(1)}%</span>${icon("chevron")}</button>`).join("")}${other ? `<div class="legend-other"><i style="background:${colors[5]}"></i><span>${e(L("其他", "Other"))}</span><strong>${n(other)}</strong><span>${((other / total) * 100).toFixed(1)}%</span></div>` : ""}</div></div>` : empty(L("尚无统计数据", "No usage data"), L("请求完成后显示真实用量。", "Completed requests populate usage."), "activity");
+  $("analyticsResults").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${e(L("统计项", "Group"))}</th><th class="num">${e(L("调用次数", "Requests"))}</th><th class="num">${e(L("成功率", "Success rate"))}</th><th class="num">${e(L("平均耗时", "Avg duration"))}</th><th class="num">${e(L("输入 Token", "Input tokens"))}</th><th class="num">${e(L("输出 Token", "Output tokens"))}</th><th class="num">${e(L("失败", "Failed"))}</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td class="usage-label mono" title="${e(name(row))}">${e(name(row))}<div class="usage-bar"><i style="width:${total ? row.total / total * 100 : 0}%"></i></div></td><td class="num numeric">${n(row.total)}</td><td class="num"><span class="${row.failed ? "negative" : "positive"}">${row.total ? (row.success_rate * 100).toFixed(1) + "%" : "—"}</span></td><td class="num mono">${e(duration(row.total ? row.avg_latency_ms : null))}</td><td class="num numeric">${n(row.input_tokens)}</td><td class="num numeric">${n(row.output_tokens)}</td><td class="num numeric ${row.failed ? "negative" : "muted"}">${n(row.failed)}</td><td><button class="button small" data-action="usage-requests" data-kind="${s.analytics.dimension}" data-value="${e(row.key)}">${e(L("记录", "Logs"))}${icon("arrow")}</button></td></tr>`).join("")}</tbody></table></div><div class="table-footer">${rows.length} ${e(L("个统计项", "groups"))} · ${e(L("累计统计", "Cumulative aggregates"))}</div>` : empty(L("没有匹配的统计项", "No matching groups"));
+}
+function connectionPage() {
+  const selected = models().find((m) => routeId(m) === s.connectionModel) || models().find((m) => m.routing_id) || models()[0];
+  s.connectionModel = selected ? routeId(selected) : "";
+  const origin = gatewayURL(), protocol = s.connectionProtocol;
+  const url = protocol === "anthropic-messages" ? origin : `${origin}/v1`;
+  return `<div class="connection-layout"><section class="card">${cardHead(L("连接配置", "Connection configuration"), L("使用网关地址，支持同一入口接入多个平台", "One gateway endpoint for all connected platforms"))}<div class="card-body"><div class="protocol-choices">${[["openai-chat", "Chat Completions", L("OpenAI 兼容客户端", "OpenAI-compatible clients")], ["openai-responses", "Responses", L("Responses 兼容客户端", "Responses-compatible clients")], ["anthropic-messages", "Anthropic Messages", "Claude Code / ZCode"]].map(([id, name, note]) => `<button data-action="connection-protocol" data-value="${id}" class="${protocol === id ? "active" : ""}" aria-pressed="${protocol === id}"><span>${e(name)}</span><small>${e(note)}</small>${protocol === id ? icon("check") : ""}</button>`).join("")}</div><label class="field"><span>${e(L("使用模型", "Model"))}</span><select class="select" id="connectionModel">${models().length ? options(models().map((m) => [routeId(m), routeId(m)]), s.connectionModel) : '<option>—</option>'}</select></label><div class="field"><span>Base URL</span><div class="endpoint-box"><code>${e(origin ? url : "—")}</code><button class="icon-button" data-action="copy-connection-url" aria-label="${e(L("复制接入地址", "Copy connection URL"))}">${icon("copy")}</button></div></div>${protocol === "anthropic-messages" ? `<p class="scope-note">${e(L("Claude Code 使用上方根地址；ZCode 的 Anthropic 供应商 Base URL 填写根地址 + /v1。", "Claude Code uses the origin above. ZCode's Anthropic provider uses the origin plus /v1."))}</p>` : ""}<dl class="details-list">${detailItem(L("模型路由", "Model route"), s.connectionModel || "—", "mono")}${detailItem(L("鉴权", "Authentication"), s.cache.config?.auth_enabled ? L("填写你配置的网关 API Key", "Use your configured gateway API key") : L("未启用校验；客户端必填时使用 agent2api-local", "Not enabled; use agent2api-local if required"))}</dl><div class="detail-actions"><button class="button primary" data-action="try-model" data-model="${e(s.connectionModel)}" ${!selected ? "disabled" : ""}>${icon("chat")}${e(L("测试所选模型", "Try selected model"))}</button>${button(L("查看路由策略", "Routing policy"), "open-platforms", "")}</div></div></section><section class="card connection-example">${cardHead(L("请求示例", "Request example"), L("适用于 macOS / Linux shell", "For macOS / Linux shells"), button(L("复制示例", "Copy example"), "copy-connection-example", "small", "copy"))}<div class="card-body"><pre><code>${e(connectionExample())}</code></pre><p class="scope-note">${e(L("启用鉴权时，将 YOUR_GATEWAY_KEY 换成你配置的网关密钥。示例不读取或展示浏览器保存的密钥。", "When authentication is enabled, replace YOUR_GATEWAY_KEY with your configured gateway key. Saved browser keys are never included in examples."))}</p><div class="connection-checklist"><strong>${e(L("接入检查", "Connection checklist"))}</strong><p>${icon("check")}${e(L("客户端指向网关 8787，而非管理控制台 8788", "Use gateway port 8787, not console port 8788"))}</p><p>${icon("check")}${e(L("使用平台前缀明确模型来源", "Use a platform prefix for an explicit route"))}</p><p>${icon("check")}${e(L("先在模型测试中确认真实回复", "Confirm a reply in the playground first"))}</p></div></div></section></div>`;
+}
+function connectionExample() {
+  const protocol = s.connectionProtocol, model = s.connectionModel || "YOUR_ROUTING_ID";
+  const path = protocol === "openai-responses" ? "responses" : protocol === "anthropic-messages" ? "messages" : "chat/completions";
+  const payload = protocol === "openai-responses" ? { model, input: "Hello", stream: true } : { model, ...(protocol === "anthropic-messages" ? { max_tokens: 1024 } : {}), messages: [{ role: "user", content: "Hello" }], stream: true };
+  const key = s.cache.config?.auth_enabled ? "YOUR_GATEWAY_KEY" : "agent2api-local";
+  const header = protocol === "anthropic-messages" ? `x-api-key: ${key}` : `Authorization: Bearer ${key}`;
+  const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
+  return `curl ${quote(`${gatewayURL() || "http://127.0.0.1:8787"}/v1/${path}`)} \\\n  -H 'Content-Type: application/json' \\\n  -H ${quote(header)} \\\n${protocol === "anthropic-messages" ? "  -H 'anthropic-version: 2023-06-01' \\\n" : ""}  -d ${quote(JSON.stringify(payload, null, 2))}`;
 }
 function modelPage() {
   return `<div class="notice info">${icon("info")}<div><strong>${e(L("同名模型，明确选择来源", "Same model name, explicit source"))}</strong><p>${e(L("带前缀的 ID 固定平台；不带前缀的 ID 按平台顺序调度，可按配置回退到另一平台。", "A prefixed ID pins its platform. Bare IDs follow platform priority and configured fallback."))} <a href="#platforms">${e(L("查看路由规则", "View routing policy"))} →</a></p></div></div>
@@ -531,7 +606,7 @@ function modelPage() {
       ["supports_thinking", L("思考", "Reasoning")],
     ],
     s.models.capability,
-  )}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
+  )}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
   <section class="card" id="modelResults"></section>`;
 }
 function updateModelTable() {
@@ -544,6 +619,7 @@ function updateModelTable() {
       (s.models.capability === "all" || m[s.models.capability]) &&
       `${m.id} ${m.display_name} ${routeId(m)}`.toLowerCase().includes(q),
   );
+  filtered.sort((a, b) => (s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || routeId(a).localeCompare(routeId(b)));
   const { rows, footer } = paginate(filtered, "models", 20);
   const body = rows
     .map(
@@ -673,7 +749,7 @@ function accountPage() {
       ["disabled", L("已停用", "Disabled")],
     ],
     s.accounts.status,
-  )}</select></div><span class="result-count" id="accountCount"></span></div><div class="account-grid" id="accountCards"></div>`;
+  )}</select></div><div class="toolbar-group"><span class="result-count" id="accountCount"></span><div class="segmented">${[["table", L("表格", "Table")], ["cards", L("卡片", "Cards")]].map(([id, title]) => `<button data-action="account-view" data-value="${id}" class="${s.accounts.view === id ? "active" : ""}" aria-pressed="${s.accounts.view === id}">${e(title)}</button>`).join("")}</div></div></div><div class="${s.accounts.view === "table" ? "card" : "account-grid"}" id="accountCards"></div>`;
 }
 function updateAccountCards() {
   if (!$("accountCards")) return;
@@ -695,6 +771,16 @@ function updateAccountCards() {
     `${rows.length} 个账号`,
     `${rows.length} accounts`,
   );
+  if (s.accounts.view === "table") {
+    $("accountCards").innerHTML = rows.length ? `<div class="table-wrap"><table class="account-table"><thead><tr><th>${e(L("账号", "Account"))}</th><th>${e(L("平台", "Platform"))}</th><th>${e(L("调度状态", "Scheduling"))}</th><th>${e(L("登录状态", "Credentials"))}</th><th>${e(L("并发", "Concurrency"))}</th><th class="num">${e(L("累计调用", "Requests"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${rows.map((a) => {
+      const index = accounts().indexOf(a), name = a.identity?.nickname || a.label;
+      const ambiguous = accounts().filter((other) => other.label === a.label).length > 1;
+      const usage = s.cache.metrics?.by_account?.find((row) => row.key === a.label);
+      const max = a.max_concurrency || 0, current = a.in_flight || 0;
+      return `<tr><td><div class="account-table-name"><span class="account-avatar">${e(name.slice(0, 1))}</span><div><strong>${e(name)}</strong><div class="cell-sub mono">${e(a.label)}</div></div></div><div class="cell-sub">${e(a.identity?.source === "desktop" ? L("桌面应用", "Desktop app") : L("凭证文件", "Credential file"))}</div></td><td>${regionTag(a.platform)}</td><td>${tag(...accountStatus(a))}${Object.keys(a.model_cooldowns || {}).length ? `<div class="cell-sub">${Object.keys(a.model_cooldowns).length} ${e(L("个模型冷却", "models cooling"))}</div>` : ""}${a.cooldown_secs > 0 ? `<div class="cell-sub" data-until="${Date.now() + a.cooldown_secs * 1000}">${e(countdown(a.cooldown_secs))}</div>` : ""}</td><td><span class="${a.identity?.refresh_expired ? "negative" : ""}">${e(credentialStatus(a))}</span><div class="cell-sub">${a.identity?.expires_at ? e(timestamp(a.identity.expires_at, true)) : "—"}</div></td><td class="account-concurrency"><span class="numeric">${current} / ${max || "∞"}</span><div class="load-track"><span style="width:${max ? Math.min(100, current / max * 100) : 0}%"></span></div></td><td class="num numeric">${ambiguous ? `<span class="muted" title="${e(L("同标识跨平台聚合，无法单独归属", "This label is aggregated across platforms"))}">—</span>` : n(usage?.total)}${!ambiguous && usage?.failed ? `<div class="cell-sub negative">${n(usage.failed)} ${e(L("失败", "failed"))}</div>` : ""}</td><td><div class="row-actions"><button class="button small" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${e(L("记录", "Logs"))}</button>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div></td></tr>`;
+    }).join("")}</tbody></table></div>` : empty(L("没有匹配的账号", "No matching accounts"), L("更换筛选条件，或添加一个账号。", "Change filters or add an account."), "accounts");
+    return;
+  }
   $("accountCards").innerHTML =
     rows
       .map((a) => {
@@ -730,7 +816,7 @@ function platformPage() {
         ready = pool.filter((a) => a.healthy).length,
         count =
           models().filter((m) => m.platform === p.id).length || p.models || 0;
-      return `<article class="card platform-card"><div class="platform-card-top"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${p.id === "workbuddy-global" ? "GL" : "CN"}</div><div><h2>${e(platformName(p.id))}</h2><p class="mono">${e(p.id)}</p></div>${tag(p.status === "active" ? L("已连接", "Connected") : L("需关注", "Attention"), p.status === "active" ? "green" : "amber", true)}</div><div class="platform-card-stats"><div><strong>${count}</strong><small>${e(L("模型条目", "Model entries"))}</small></div><div><strong>${pool.length}</strong><small>${e(L("账号总数", "Accounts"))}</small></div><div><strong>${ready}</strong><small>${e(L("账号就绪", "Ready accounts"))}</small></div></div><div class="platform-url mono">${e(p.base_url || "—")}</div><div class="platform-card-footer"><span>${e(L("模型前缀", "Model prefix"))} <code>${e(p.id)}/</code></span><button class="button small" data-action="platform-models" data-value="${e(p.id)}">${e(L("查看模型", "View models"))}${icon("arrow")}</button></div></article>`;
+      return `<article class="card platform-card"><div class="platform-card-top"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${e(platformMark(p.id))}</div><div><h2>${e(platformName(p.id))}</h2><p class="mono">${e(p.id)}</p></div>${tag(p.status === "active" ? L("已连接", "Connected") : L("需关注", "Attention"), p.status === "active" ? "green" : "amber", true)}</div><div class="platform-card-stats"><div><strong>${count}</strong><small>${e(L("模型条目", "Model entries"))}</small></div><div><strong>${pool.length}</strong><small>${e(L("账号总数", "Accounts"))}</small></div><div><strong>${ready}</strong><small>${e(L("账号就绪", "Ready accounts"))}</small></div></div><div class="platform-url mono">${e(p.base_url || "—")}</div><div class="platform-card-footer"><span>${e(L("模型前缀", "Model prefix"))} <code>${e(p.id)}/</code></span><button class="button small" data-action="platform-models" data-value="${e(p.id)}">${e(L("查看模型", "View models"))}${icon("arrow")}</button></div></article>`;
     })
     .join(
       "",
@@ -754,7 +840,16 @@ function recentRequests() {
   );
 }
 function requestPage() {
-  return `<div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号或错误…", "Search model, account or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
+  const sample = recentRequests();
+  const accountOptions = [...new Map(sample.map((row) => [accountKey(row), `${regionName(row.platform)} / ${row.account || L("未记录账号", "Unrecorded")}`])).entries()];
+  if (s.requests.account.startsWith("label:")) accountOptions.unshift([s.requests.account, `${L("标识", "Label")}: ${s.requests.account.slice(6)}`]);
+  else if (s.requests.account !== "all" && !accountOptions.some(([key]) => key === s.requests.account)) {
+    const [platform, label] = JSON.parse(s.requests.account);
+    accountOptions.unshift([s.requests.account, `${regionName(platform)} / ${label || L("未记录账号", "Unrecorded")}`]);
+  }
+  const modelOptions = [...new Set(sample.map((row) => row.model))];
+  if (s.requests.model !== "all" && !modelOptions.includes(s.requests.model)) modelOptions.push(s.requests.model);
+  return `<div class="card request-filters"><div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号、状态码或错误…", "Search model, account, status or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
     [
       ["all", L("全部状态", "All states")],
       ["ok", L("成功", "Success")],
@@ -769,20 +864,10 @@ function requestPage() {
       ["anthropic-messages", "Anthropic"],
     ],
     s.requests.protocol,
-  )}</select></div>${button(L("导出记录", "Export CSV"), "export-requests", "", "requests")}</div><section class="card" id="requestResults"></section>`;
+  )}</select></div></div><div class="toolbar filter-secondary"><div class="toolbar-group"><select id="requestModelFilter" class="select" aria-label="${e(L("模型筛选", "Model filter"))}">${options([["all", L("全部模型", "All models")], ...modelOptions.sort().map((id) => [id, id])], s.requests.model)}</select><select id="requestAccountFilter" class="select" aria-label="${e(L("账号筛选", "Account filter"))}">${options([["all", L("全部账号", "All accounts")], ...accountOptions], s.requests.account)}</select><select id="requestRangeFilter" class="select" aria-label="${e(L("记录时间范围", "Request time range"))}">${options([["all", L("全部缓存记录", "All buffered records")], ["15", L("最近 15 分钟", "Last 15 minutes")], ["30", L("最近 30 分钟", "Last 30 minutes")], ["60", L("最近 1 小时", "Last hour")]], s.requests.range)}</select></div>${button(L("清空筛选", "Reset filters"), "reset-request-filters", "ghost", "close")}</div></div><div class="sample-summary" id="requestSampleStats"></div><section class="card"><div class="card-head request-table-head"><div><h2>${e(L("调用记录", "Request records"))}</h2><p>${e(L("网关仅保留最近 200 条；筛选与导出作用于这些记录", "The gateway retains the latest 200 records; filters and exports apply to this sample"))}</p></div><div class="toolbar-group"><select id="requestSort" class="select" aria-label="${e(L("记录排序", "Request sort"))}">${options([["time", L("最新优先", "Newest first")], ["latency", L("耗时优先", "Longest duration")], ["tokens", L("Token 优先", "Most tokens")]], s.requests.sort)}</select><select id="requestPageSize" class="select" aria-label="${e(L("每页记录数", "Records per page"))}">${options([["20", "20 / " + L("页", "page")], ["50", "50 / " + L("页", "page")], ["100", "100 / " + L("页", "page")]], String(s.requests.size))}</select>${button(L("导出", "Export"), "export-requests", "small", "requests")}</div></div><div id="requestResults"></div></section>`;
 }
 function filteredRequests() {
-  const q = s.requests.query.trim().toLowerCase();
-  return recentRequests().filter(
-    (row) =>
-      (s.requests.platform === "all" || row.platform === s.requests.platform) &&
-      (s.requests.status === "all" ||
-        (s.requests.status === "ok" ? row.ok : !row.ok)) &&
-      (s.requests.protocol === "all" || row.protocol === s.requests.protocol) &&
-      `${row.model} ${row.model_requested || ""} ${row.account || ""} ${row.error || ""}`
-        .toLowerCase()
-        .includes(q),
-  );
+  return filterRequests(recentRequests(), s.requests);
 }
 function requestTable(rows, details = true) {
   if (!rows.length)
@@ -797,16 +882,18 @@ function requestTable(rows, details = true) {
   return `<div class="table-wrap"><table><thead><tr><th>${e(L("时间", "Time"))}</th><th>${e(L("模型与平台", "Model & platform"))}</th><th>${e(L("协议", "Protocol"))}</th><th>${e(L("状态", "Status"))}</th><th class="num">${e(L("耗时", "Duration"))}</th><th class="num">${e(L("输入 / 输出", "Input / output"))}</th><th></th></tr></thead><tbody>${rows
     .map((row) => {
       // Use a stable key instead of object identity: overview and logs have separate array copies.
-      const key = `${row.time}|${row.model}|${row.account || ""}|${row.duration_ms}`;
-      return `<tr class="request-click"><td class="mono">${e(timestamp(row.time))}<div class="cell-sub">${e(new Date(row.time).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" }))}</div></td><td class="cell-model"><div class="cell-main mono" title="${e(row.model)}">${e(row.model)}</div><div class="cell-sub">${row.platform ? regionTag(row.platform) : e(L("来源未记录", "Source unrecorded"))} ${e(row.account || "")}</div></td><td><span style="font-size:11px">${e(protocolName(row.protocol))}</span><div class="cell-sub">${e(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div></td><td>${tag(`${row.status} · ${row.ok ? L("成功", "OK") : L("失败", "Failed")}`, row.ok ? "green" : "red")} ${!row.ok && row.error ? `<span class="table-short-error" title="${e(row.error)}">${e(row.error.slice(0, 120))}</span>` : ""}</td><td class="num mono">${e(duration(row.duration_ms))}</td><td class="num mono">${n(row.input_tokens)} <span class="muted">/</span> ${n(row.output_tokens)}</td><td>${iconButton("chevron", L("调用详情", "Request details"), "request-detail", `data-key="${e(key)}"`)}</td></tr>`;
+      const key = requestKey(row);
+      return `<tr class="request-click" data-action="request-detail" data-key="${e(key)}" tabindex="0" aria-label="${e(`${row.model} · ${timestamp(row.time)} · ${L("调用详情", "Request details")}`)}"><td class="mono">${e(timestamp(row.time))}<div class="cell-sub">${e(new Date(row.time).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" }))}</div></td><td class="cell-model"><div class="cell-main mono" title="${e(row.model)}">${e(row.model)}</div><div class="cell-sub">${row.platform ? regionTag(row.platform) : e(L("来源未记录", "Source unrecorded"))} ${e(row.account || "")}</div>${row.model_requested ? `<div class="cell-sub requested-model" title="${e(row.model_requested)}">${e(L("请求", "Requested"))}: ${e(row.model_requested)}</div>` : ""}</td><td><span style="font-size:11px">${e(protocolName(row.protocol))}</span><div class="cell-sub">${e(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div></td><td>${tag(`${row.status} · ${row.ok ? L("成功", "OK") : L("失败", "Failed")}`, row.ok ? "green" : "red")} ${!row.ok && row.error ? `<span class="table-short-error" title="${e(row.error)}">${e(row.error.slice(0, 120))}</span>` : ""}</td><td class="num mono">${e(duration(row.duration_ms))}${row.gen_ms > 0 && row.output_tokens > 0 ? `<div class="cell-sub">${(row.output_tokens / (row.gen_ms / 1000)).toFixed(1)} tok/s</div>` : ""}</td><td class="num mono">${n(row.input_tokens)} <span class="muted">/</span> ${n(row.output_tokens)}</td><td>${iconButton("chevron", L("调用详情", "Request details"), "request-detail", `data-key="${e(key)}"`)}</td></tr>`;
     })
     .join("")}</tbody></table></div>`;
 }
 function updateRequestTable() {
   if (!$("requestResults")) return;
   const filtered = filteredRequests(),
-    { rows, footer } = paginate(filtered, "requests", 20);
+    { rows, footer } = paginate(filtered, "requests", s.requests.size);
   $("requestResults").innerHTML = requestTable(rows) + footer;
+  const stats = summarizeRequests(filtered);
+  $("requestSampleStats").innerHTML = `<span>${e(L("匹配记录", "Matched"))}<strong>${n(stats.total)}</strong><small>/ ${recentRequests().length}</small></span><span>${e(L("成功率", "Success rate"))}<strong>${stats.total ? (stats.success_rate * 100).toFixed(1) + "%" : "—"}</strong></span><span>${e(L("失败", "Failed"))}<strong class="${stats.failed ? "negative" : ""}">${n(stats.failed)}</strong></span><span>P95<strong>${e(duration(stats.p95))}</strong></span><span>${e(L("输出 Token", "Output tokens"))}<strong>${compact(stats.output_tokens)}</strong></span>`;
 }
 
 function settingsPage() {
@@ -874,7 +961,7 @@ function accountUsageDetails(account) {
 }
 function showRequestDetail(key) {
   const row = recentRequests().find(
-    (r) => `${r.time}|${r.model}|${r.account || ""}|${r.duration_ms}` === key,
+    (r) => requestKey(r) === key,
   );
   if (!row) return;
   showDrawer(
@@ -888,6 +975,57 @@ function modal(title, content) {
     `<div class="dialog-header"><h2>${e(title)}</h2>${iconButton("close", L("关闭", "Close"), "close-modal")}</div>${content}`;
   if (!$("modal").open) $("modal").showModal();
 }
+function openRequestFilters(filters) {
+  s.requests = { ...s.requests, query: "", platform: "all", status: "all", protocol: "all", account: "all", model: "all", range: "all", sort: "time", page: 1, ...filters };
+  if (s.page === "requests") draw();
+  else location.hash = "requests";
+}
+function commandSearch() {
+  if ($("modal").open) return;
+  modal(L("搜索与快捷跳转", "Search and navigation"), `<div class="command-search-field">${search("commandSearch", "", L("搜索页面、模型或账号…", "Search pages, models or accounts…"))}<kbd>Esc</kbd></div><div id="commandResults" class="command-results"></div><p class="scope-note">${e(L("Enter 打开第一项 · Esc 关闭", "Enter opens the first result · Esc closes"))}</p>`);
+  updateCommandResults("");
+  $("commandSearch").focus();
+}
+function updateCommandResults(query) {
+  const q = query.trim().toLowerCase();
+  const pages = Object.keys(names).filter((page) => `${page} ${names[page]()}`.toLowerCase().includes(q));
+  const foundModels = q ? models().filter((m) => `${routeId(m)} ${m.display_name}`.toLowerCase().includes(q)).slice(0, 6) : [];
+  const foundAccounts = q ? accounts().filter((a) => `${a.label} ${a.identity?.nickname || ""} ${a.platform}`.toLowerCase().includes(q)).slice(0, 4) : [];
+  $("commandResults").innerHTML = `${pages.length ? `<div class="command-section-label">${e(L("页面", "Pages"))}</div>${pages.map((page) => `<button data-action="jump-page" data-value="${page}">${icon(page === "analytics" ? "activity" : page === "connection" ? "external" : page)}<span>${e(names[page]())}</span>${icon("arrow")}</button>`).join("")}` : ""}${foundModels.length ? `<div class="command-section-label">${e(L("测试模型", "Try a model"))}</div>${foundModels.map((m) => `<button data-action="try-model" data-model="${e(routeId(m))}">${icon("models")}<span class="mono truncate">${e(routeId(m))}</span>${icon("arrow")}</button>`).join("")}` : ""}${foundAccounts.length ? `<div class="command-section-label">${e(L("账号", "Accounts"))}</div>${foundAccounts.map((a) => `<button data-action="account-detail" data-index="${accounts().indexOf(a)}">${icon("accounts")}<span>${e(a.identity?.nickname || a.label)}</span>${regionTag(a.platform)}</button>`).join("")}` : ""}` || empty(L("没有匹配结果", "No matches"), L("尝试模型名、平台或页面名称。", "Try a model, platform or page name."));
+}
+function chartReadout(target) {
+  const shell = target.closest(".chart-shell"), tooltip = shell?.querySelector(".chart-tooltip");
+  if (!tooltip) return;
+  const { time, a, b, kind, x } = target.dataset;
+  tooltip.hidden = false;
+  tooltip.innerHTML = `<strong>${e(time)}</strong><div><i class="legend-dot"></i>${e(kind === "requests" ? L("成功", "Success") : L("输入 Token", "Input tokens"))}<b>${n(a)}</b></div><div><i class="legend-dot red"></i>${e(kind === "requests" ? L("失败", "Failed") : L("输出 Token", "Output tokens"))}<b>${n(b)}</b></div>`;
+  tooltip.style.left = `${Math.min(Math.max(10, Number(x) / 610 * shell.clientWidth - 80), Math.max(10, shell.clientWidth - 175))}px`;
+  const crosshair = shell.querySelector(".chart-crosshair");
+  crosshair.removeAttribute("hidden");
+  crosshair.setAttribute("x1", x);
+  crosshair.setAttribute("x2", x);
+}
+document.addEventListener("pointerover", (event) => {
+  const point = event.target.closest?.("[data-chart-point]");
+  if (point) chartReadout(point);
+});
+document.addEventListener("focusin", (event) => {
+  if (event.target.matches("[data-chart-point]")) chartReadout(event.target);
+});
+document.addEventListener("pointerout", (event) => {
+  const shell = event.target.closest?.(".chart-shell");
+  if (shell && !shell.contains(event.relatedTarget) && !shell.contains(document.activeElement)) {
+    shell.querySelector(".chart-tooltip").hidden = true;
+    shell.querySelector(".chart-crosshair").setAttribute("hidden", "");
+  }
+});
+document.addEventListener("focusout", (event) => {
+  const shell = event.target.closest?.(".chart-shell");
+  if (shell && !shell.contains(event.relatedTarget)) {
+    shell.querySelector(".chart-tooltip").hidden = true;
+    shell.querySelector(".chart-crosshair").setAttribute("hidden", "");
+  }
+});
 function authDialog() {
   modal(
     L("配置控制台连接", "Console connection"),
@@ -1220,8 +1358,7 @@ function chatSettings() {
   );
 }
 function exportRequests() {
-  const rows = filteredRequests(),
-    columns = [
+  exportCSV(filteredRequests(), [
       "time",
       "platform",
       "model_requested",
@@ -1233,7 +1370,9 @@ function exportRequests() {
       "input_tokens",
       "output_tokens",
       "error",
-    ];
+    ], "requests");
+}
+function exportCSV(rows, columns, name) {
   // Protect spreadsheet consumers from formula execution in upstream text.
   const csvCell = (value) => {
     let text = String(value ?? "");
@@ -1251,13 +1390,15 @@ function exportRequests() {
   );
   const link = document.createElement("a");
   link.href = url;
-  link.download = `agent2api-requests-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `agent2api-${name}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 const views = {
   overview,
+  analytics: analyticsPage,
+  connection: connectionPage,
   models: modelPage,
   accounts: accountPage,
   platforms: platformPage,
@@ -1274,6 +1415,42 @@ document.addEventListener("click", async (event) => {
     switch (action) {
       case "retry":
         return refresh(pageKeys[s.page], true);
+      case "command-search":
+        return commandSearch();
+      case "jump-page":
+        $("modal").close();
+        location.hash = value;
+        return;
+      case "trend-range":
+        s.trendMinutes = Number(value);
+        return draw();
+      case "analytics-dimension":
+        s.analytics.dimension = value;
+        return draw();
+      case "export-usage":
+        return exportCSV(usageRows(), ["key", "total", "ok", "failed", "input_tokens", "output_tokens", "avg_latency_ms", "success_rate"], s.analytics.dimension);
+      case "usage-requests":
+        return openRequestFilters({ ...(kind === "by_model" ? { model: value } : kind === "by_protocol" ? { protocol: value } : { account: "label:" + value }) });
+      case "account-requests":
+        return openRequestFilters({ platform, account: accountKey({ platform, account: label }) });
+      case "inspect-failures":
+        return openRequestFilters({ status: "failed" });
+      case "reset-request-filters":
+        return openRequestFilters({});
+      case "account-view":
+        s.accounts.view = value;
+        save("agent2api_account_view", value);
+        return draw();
+      case "connection-protocol":
+        s.connectionProtocol = value;
+        return draw();
+      case "copy-connection-url":
+        return copy(s.connectionProtocol === "anthropic-messages" ? gatewayURL() : `${gatewayURL()}/v1`);
+      case "copy-connection-example":
+        return copy(connectionExample());
+      case "open-platforms":
+        location.hash = "platforms";
+        return;
       case "auth":
         return authDialog();
       case "close-detail":
@@ -1298,6 +1475,7 @@ document.addEventListener("click", async (event) => {
             true,
           );
         s.chat.model = model;
+        $("modal").close();
         save("agent2api_chat_model", model);
         $("detailDialog").close();
         location.hash = "chat";
@@ -1332,6 +1510,7 @@ document.addEventListener("click", async (event) => {
         toast(L("模型目录已更新", "Model catalog updated"));
         return;
       case "account-detail":
+        $("modal").close();
         return showAccountDetail(Number(index));
       case "request-detail":
         return showRequestDetail(key);
@@ -1391,6 +1570,11 @@ document.addEventListener("click", async (event) => {
 });
 document.addEventListener("input", (event) => {
   const { id, value } = event.target;
+  if (id === "commandSearch") updateCommandResults(value);
+  if (id === "analyticsSearch") {
+    s.analytics.query = value;
+    updateAnalyticsTable();
+  }
   if (id === "modelSearch") {
     s.models.query = value;
     s.models.page = 1;
@@ -1413,6 +1597,21 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", async (event) => {
   const target = event.target,
     { id, value } = target;
+  if (id === "autoRefresh") {
+    s.refreshEvery = Number(value);
+    save("agent2api_refresh", value);
+    s.lastPoll = Date.now();
+    return;
+  }
+  if (id === "analyticsSort") { s.analytics.sort = value; updateAnalyticsTable(); }
+  if (id === "modelSort") { s.models.sort = value; s.models.page = 1; updateModelTable(); }
+  if (id === "connectionModel") { s.connectionModel = value; draw(); }
+  const requestFilters = { requestModelFilter: "model", requestAccountFilter: "account", requestRangeFilter: "range", requestSort: "sort", requestPageSize: "size" };
+  if (requestFilters[id]) {
+    s.requests[requestFilters[id]] = id === "requestPageSize" ? Number(value) : value;
+    s.requests.page = 1;
+    updateRequestTable();
+  }
   if (id === "langSel") {
     s.lang = value;
     save("agent2api_lang", value);
@@ -1498,6 +1697,25 @@ document.addEventListener("submit", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
+  if (event.target.matches("[data-chart-point]") && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+    event.preventDefault();
+    const hits = [...event.target.closest("svg").querySelectorAll("[data-chart-point]")];
+    const index = hits.indexOf(event.target) + (event.key === "ArrowRight" ? 1 : -1);
+    hits[Math.max(0, Math.min(hits.length - 1, index))].focus();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    return commandSearch();
+  }
+  if (event.target.id === "commandSearch" && event.key === "Enter") {
+    event.preventDefault();
+    $("commandResults")?.querySelector("button")?.click();
+  }
+  if (event.target.matches("tr.request-click") && ["Enter", " "].includes(event.key)) {
+    event.preventDefault();
+    return showRequestDetail(event.target.dataset.key);
+  }
   if (
     event.target.id === "chatInput" &&
     event.key === "Enter" &&
@@ -1553,17 +1771,17 @@ document.addEventListener("visibilitychange", () => {
     refresh(s.page === "chat" ? ["status"] : pageKeys[s.page]);
 });
 setInterval(() => {
-  if (document.hidden || $("modal").open) return;
+  if (document.hidden || $("modal").open || !s.refreshEvery || Date.now() - s.lastPoll < s.refreshEvery * 1000) return;
   const keys =
     s.page === "overview"
-      ? ["metrics", "accounts"]
-      : s.page === "requests"
+      ? ["status", "metrics", "accounts"]
+      : ["requests", "analytics"].includes(s.page)
         ? ["metrics"]
         : s.page === "accounts"
           ? ["accounts", "metrics"]
           : ["status"];
   refresh(keys);
-}, 10000);
+}, 1000);
 setInterval(() => {
   document.querySelectorAll("[data-until]").forEach((element) => {
     const remaining = Math.max(
