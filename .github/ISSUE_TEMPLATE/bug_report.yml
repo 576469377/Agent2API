@@ -49,6 +49,25 @@ body:
       placeholder: '输出 `go version` 的结果'
 
   - type: dropdown
+    id: platform
+    attributes:
+      label: 涉及的平台区域
+      options:
+        - WorkBuddy 国内版 (workbuddy)
+        - WorkBuddy 国际版 (workbuddy-global)
+        - 两个平台 / 自动路由
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: routing-model
+    attributes:
+      label: 请求模型 ID
+      description: 可填写平台前缀或别名；不要填写账号标识或凭证
+      placeholder: 'workbuddy-global/模型名'
+
+  - type: dropdown
     id: protocol
     attributes:
       label: 涉及的协议
@@ -68,6 +87,7 @@ body:
       options:
         - Claude Code
         - Codex CLI
+        - ZCode
         - curl / 直接 HTTP
         - 网页控制台
         - 其他 SDK
