@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/576469377/Agent2API/internal/llm"
 )
@@ -93,6 +94,9 @@ func WriteError(w http.ResponseWriter, f *llm.Failure) {
 		body = []byte(`{"error":{"message":"internal server error","type":"server_error"}}`)
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if f != nil && f.RetryAfterSeconds > 0 && (status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable) {
+		w.Header().Set("Retry-After", strconv.Itoa(f.RetryAfterSeconds))
+	}
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

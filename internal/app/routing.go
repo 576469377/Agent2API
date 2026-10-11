@@ -45,6 +45,9 @@ func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hin
 		if nextErr == nil {
 			return next, rt, nil
 		}
+		// The final error and metrics must describe the last actual attempt,
+		// rather than hiding it behind the primary platform's earlier failure.
+		stream, primary, err = next, rt, nextErr
 		if !eligible(llm.Wrap(nextErr)) {
 			break
 		}

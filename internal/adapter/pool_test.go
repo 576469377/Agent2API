@@ -95,17 +95,20 @@ func TestPoolRotatesAcrossHealthyAccounts(t *testing.T) {
 	p.Add("a", &fakeAd{name: "test", onStream: func() { hits[0]++ }})
 	p.Add("b", &fakeAd{name: "test", onStream: func() { hits[1]++ }})
 
-	// 样本取 60：6 次的伯努利抽样有 ~20% 概率出现 [1 5]/[0 6] 型倾斜（实测偶发），
-	// 60 次下 P(份额 < 0.2) 约 1e-6，测试才稳定。
-	for i := 0; i < 60; i++ {
-		if _, err := p.Stream(context.Background(), llm.RequestMessages{}); err != nil {
+	// 冷启动健康分随样本变化，不是固定 p=0.5 的独立伯努利抽样。
+	// 保持份额下限断言，用较大样本避免初期加权偏差导致偶发 CI 失败。
+	const requests = 1000
+	for i := 0; i < requests; i++ {
+		s, err := p.Stream(context.Background(), llm.RequestMessages{})
+		if err != nil {
 			t.Fatalf("第 %d 次请求不应失败: %v", i, err)
 		}
+		_ = closeStream(s)
 	}
 	// 健康度加权随机：全健康时两账号同分，应接近均分（不是精确 50/50）。
 	total := hits[0] + hits[1]
-	if total != 60 {
-		t.Fatalf("60 次请求应全部成功, hits=%v", hits)
+	if total != requests {
+		t.Fatalf("%d 次请求应全部成功, hits=%v", requests, hits)
 	}
 	for _, h := range hits {
 		if float64(h)/float64(total) < 0.2 {

@@ -46,12 +46,11 @@ func sessionKeyOf(body []byte, h http.Header) string {
 		Metadata struct {
 			UserID string `json:"user_id"`
 		} `json:"metadata"`
-		User     string          `json:"user"`
-		System   json.RawMessage `json:"system"`
-		Messages []struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
+		User         string            `json:"user"`
+		System       json.RawMessage   `json:"system"`
+		Instructions json.RawMessage   `json:"instructions"`
+		Input        json.RawMessage   `json:"input"`
+		Messages     []affinityMessage `json:"messages"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
 		return ""
@@ -62,20 +61,58 @@ func sessionKeyOf(body []byte, h http.Header) string {
 	if probe.User != "" {
 		return "u:" + probe.User
 	}
-	// 兜底：系统提示 + 首条 user 消息。
-	sum := sha256.New()
-	if len(probe.System) > 0 {
-		sum.Write(probe.System)
+	// Fallback covers Messages, Chat Completions and Responses. Hash framed
+	// values rather than a growing transcript; no conversation means no binding.
+	parts := []json.RawMessage{}
+	for _, system := range []json.RawMessage{probe.System, probe.Instructions} {
+		if meaningfulAffinityContent(system) {
+			parts = append(parts, system)
+		}
 	}
-	for _, m := range probe.Messages {
+	messages := probe.Messages
+	var input string
+	var firstUser json.RawMessage
+	if len(messages) == 0 && len(probe.Input) > 0 {
+		if json.Unmarshal(probe.Input, &input) == nil && input != "" {
+			firstUser = probe.Input
+		} else {
+			_ = json.Unmarshal(probe.Input, &messages)
+		}
+	}
+	for _, m := range messages {
+		if !meaningfulAffinityContent(m.Content) {
+			continue
+		}
+		if m.Role == "system" || m.Role == "developer" {
+			parts = append(parts, m.Content)
+		}
 		if m.Role == "user" {
-			sum.Write(m.Content)
+			firstUser = m.Content
 			break
 		}
 	}
-	digest := sum.Sum(nil)
-	if len(digest) == 0 {
+	if !meaningfulAffinityContent(firstUser) {
 		return ""
 	}
-	return "h:" + hex.EncodeToString(digest[:8])
+	parts = append(parts, firstUser)
+	seed, err := json.Marshal(parts)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(seed)
+	return "h:" + hex.EncodeToString(digest[:16])
+}
+
+type affinityMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+func meaningfulAffinityContent(raw json.RawMessage) bool {
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", `""`, "[]":
+		return false
+	default:
+		return true
+	}
 }

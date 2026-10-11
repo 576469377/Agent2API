@@ -32,8 +32,9 @@ type Failure struct {
 	Timeout       bool
 	Canceled      bool
 	// QuotaExhausted 表示账号额度耗尽（如需购买加量包），不会自动重置。
-	// 与 RateLimited（到点重置、可精确冷却）语义不同：它应当触发
-	// **账号级**的长冷却，而不是按模型分别试错。
+	// 与 RateLimited（到点重置、可精确冷却）语义不同。
+	// 当前 WorkBuddy 按模型处理且仅信任上游重置时刻；其他平台的额度
+	// 作用域需要由其适配器声明，不能从这个字段推断应整号冻结。
 	QuotaExhausted bool
 	// Unauthorized 表示凭据缺失或错误。必须独立于 ClientFixable：
 	// HTTP 层要求这类失败返回 401（客户端 SDK 靠 401 触发重新配置凭据），
@@ -164,6 +165,8 @@ func (f *Failure) HTTPStatus() int {
 		return 413
 	case f.RateLimited:
 		return 429
+	case f.Code == "no_account" || f.Code == "no_available_accounts":
+		return 503
 	case f.ClientFixable:
 		return 400
 	case f.UpstreamFault:

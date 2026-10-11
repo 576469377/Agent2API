@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -406,18 +405,6 @@ func mapStopReason(reason string) llm.StopReason {
 	default:
 		return llm.StopReasonStop
 	}
-}
-
-// parseRetryAfter 解析 Retry-After 头（秒）。
-func parseRetryAfter(v string) int {
-	if v == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil {
-		return 0
-	}
-	return n
 }
 
 // idleReadCloser 在超过指定时间没有数据到达时主动断开上游连接。

@@ -26,9 +26,6 @@ const (
 	// 0.3 意味着「最近约 3 次」主导判断——既能快速反映劣化，
 	// 又不会因单次抖动就把账号判死。
 	ewmaAlpha = 0.3
-	// healthWarmup 是冷启动样本数：样本不足时不参与排序比较，
-	// 避免「只跑过一次就定终身」。
-	healthWarmup = 3
 	// latencyCeilingMs 是延迟评分的饱和值：超过它一律视为最慢。
 	latencyCeilingMs = 60_000.0
 	// consecFailPenalty 是每次连续失败扣的分（相对 0..1 的成功率分）。
@@ -167,7 +164,8 @@ type AccountStatus struct {
 	// 控制台据此显示「2/4」这类负载，用于判断该不该加号或调上限。
 	InFlight       int `json:"in_flight"`
 	MaxConcurrency int `json:"max_concurrency,omitempty"`
-	// IsNext 表示严格轮询下「下一个请求将使用该账号」。
+	// IsNext 是兼容字段，表示当前推荐账号；实际请求按健康度加权随机
+	// 并考虑会话与并发，不能将此字段解释为下一次请求的确定预测。
 	IsNext  bool    `json:"is_next"`
 	Adapter Adapter `json:"-"`
 }
@@ -243,10 +241,8 @@ func (p *Pool) logfNow(format string, args ...any) {
 //   - 延迟 EWMA（越快分越高，占 0.4）
 //   - 连续失败惩罚（每次 -0.15）
 //
-// 冷启动（样本不足 healthWarmup）返回中性分 0.5。注意这个中性分与
-// 「全成功」的分数（1.0）有明显的距离，所以冷启动期不会偏向谁；
-// 但样本刚满 warmup 时分数会立刻跳到真实水平——为避免因此独占流量，
-// pickByHealthLocked 用**加权随机**而非取最大值。
+// 冷启动向中性分 0.5 连续收缩，样本越多越接近实测健康度。
+// Stream 使用加权随机，避免分数略高的账号独占流量。
 //
 // 调用方必须持有 p.mu。
 func (a *poolAccount) healthScore() float64 {
@@ -340,35 +336,36 @@ func (p *Pool) pickLocked(now time.Time, model string) *poolAccount {
 // 换号只在「请求尚未产出任何内容」的 dial 阶段安全——这与单个适配器内部
 // 重试的边界一致；流一旦建立、内容一旦下发，错误就走流内通道，绝不重发。
 func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.ResponseStream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	n := len(p.accounts)
 	if n == 0 {
 		p.mu.Unlock()
-		return nil, &llm.Failure{Code: "no_account", Message: "号池为空：未配置任何可用账号", ClientFixable: true}
+		return nil, &llm.Failure{Code: "no_account", Message: "号池为空：未配置任何可用账号", UpstreamFault: true}
 	}
 	p.mu.Unlock()
 
 	// 会话亲和：同一会话优先粘住上次的账号（长上下文在账号间漂移会让
 	// 上游重复处理全部输入）。
 	//
-	// 亲和失败（账号没了/首帧报错）时解绑并落入下方的正常换号循环，
-	// 错误作为 lastErr 起点参与后续分类。
-	var sk string
+	// 亲和只影响首选账号，建流、健康度与失败分类共用同一条路径。
+	// HTTP 流是可迁移的软亲和：绑定账号满载时优先使用池内空闲容量。
+	sk := req.SessionKey
+	boundIdx := -1
 	var lastErr error
 	tried := map[int]bool{}
-	if req.SessionKey != "" {
-		sk = req.SessionKey
+	if sk != "" {
 		// 亲和查找必须在 p.mu 内完成：accounts 切片会被 poolwatch 的 Add
 		// 并发 append（扩容重分配期间锁外读可撕裂），modelCooldown 会被
 		// 限流路径并发写（map 并发读写是不可恢复的 fatal panic）。
 		p.mu.Lock()
 		bound, has := p.affinity.get(sk)
-		var boundIdx = -1
-		var boundAcc *poolAccount
 		if has {
 			for idx, acc := range p.accounts {
 				if acc.label == bound && acc.available(time.Now(), req.Model) {
-					boundIdx, boundAcc = idx, acc
+					boundIdx = idx
 					break
 				}
 			}
@@ -378,38 +375,23 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 			}
 		}
 		p.mu.Unlock()
-
-		if boundAcc != nil {
-			tried[boundIdx] = true
-			// 并发槽位：亲和请求同样要排队（否则绑定会把某个账号打爆）。
-			if err := boundAcc.acquireSlot(ctx); err != nil {
-				return nil, err
-			}
-			s, err := boundAcc.adp.Stream(ctx, req)
-			if err == nil {
-				bs, probeErr := probeFirstEvent(ctx, s)
-				if probeErr == nil {
-					return &labeledStream{ResponseStream: boundAcc.withSlot(bs), label: boundAcc.label}, nil
-				}
-				_ = closeStream(s)
-				err = probeErr
-			}
-			boundAcc.releaseSlot()
-			// 亲和账号失败：解绑（持锁——affinity 表是裸 map），错误带入
-			// 正常换号循环。
-			lastErr = err
-			p.mu.Lock()
-			p.affinity.delete(sk)
-			p.mu.Unlock()
-		}
 	}
 
-	// 正常换号循环（亲和失败或无绑定时进入）。tried 已含亲和尝试过的账号。
+	// 每个账号至多尝试一次，亲和尝试也计入同一预算。
 	for len(tried) < n {
-
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		now := time.Now()
 		p.mu.Lock()
-		idx, acc := p.pickByHealthLocked(now, req.Model, tried)
+		idx := boundIdx
+		var acc *poolAccount
+		if idx >= 0 && p.accounts[idx].available(now, req.Model) && p.accounts[idx].hasCapacity() {
+			acc = p.accounts[idx]
+		} else {
+			idx, acc = p.pickByHealthLocked(now, req.Model, tried)
+		}
+		boundIdx = -1
 		p.mu.Unlock()
 		if acc == nil {
 			break // 没有未试过且可用的账号了
@@ -419,6 +401,10 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		// 并发槽位：账号在途请求达到上限时在这里排队（受 ctx 约束）。
 		// 选号阶段已优先挑「有余量」的账号，所以只有全部账号都满员时才会真正等待。
 		if err := acc.acquireSlot(ctx); err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			acc.releaseSlot()
 			return nil, err
 		}
 		s, err := acc.adp.Stream(ctx, req)
@@ -525,62 +511,56 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		}
 	}
 
-	// 换号循环结束。两件事要区分：
-	//   · 有账号真正尝试过但都失败（lastErr ≠ nil）→ 上游确实拒绝了；
-	//   · 没有账号能服务此模型（lastErr == nil，因为可用账号都被 available() 过滤掉，
-	//     压根没进入尝试）→ 这是「全池冷却」语义，应返回 429 退避而非把某次尝试的
-	//     原始错误甩给客户端（那样会泄露难看的 {"error":{"data":{"code":14018...}}}）。
-	//
-	// 关键修正：即使 lastErr ≠ nil（亲和绑定的账号被真正试过并返回 14018），只要**请求
-	// 的模型在所有账号上都无法服务**，也应归一成 all_accounts_cooling——否则用户会看到
-	// 裸上游 JSON 而不是「该模型在所有账号上都被限流」的清晰提示。
-	allBlockedOrCooling := true
-	for _, acc := range p.accounts {
-		if acc.available(time.Now(), req.Model) {
-			allBlockedOrCooling = false
-			break
-		}
-	}
-	if allBlockedOrCooling {
-		p.mu.Lock()
-		now := time.Now()
-		blocked := 0
-		earliest := time.Time{}
-		for _, acc := range p.accounts {
-			if acc.state == stateBlocked {
-				blocked++
-			}
-			// 该模型在此账号上最早何时解冻（账号级 + 模型级取较早者）。
-			if t := acc.earliestModelThaw(now); !t.IsZero() {
-				if earliest.IsZero() || t.Before(earliest) {
-					earliest = t
-				}
-			}
-		}
-		p.mu.Unlock()
+	return nil, p.exhaustedFailure(req.Model, lastErr)
+}
 
-		if blocked == len(p.accounts) {
-			return nil, &llm.Failure{
-				Code:         "all_accounts_blocked",
-				Message:      "所有账号鉴权失效，请重新登录后再试",
-				Unauthorized: true,
-			}
+// exhaustedFailure snapshots scheduling state under the same lock as writers.
+// An account can serve the requested model only after BOTH cooldowns expire.
+func (p *Pool) exhaustedFailure(model string, lastErr error) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	enabled, blocked := 0, 0
+	var earliest time.Time
+	for _, acc := range p.accounts {
+		if acc.state == stateDisabled {
+			continue
 		}
-		remaining := 0
-		if !earliest.IsZero() {
-			if s := int(earliest.Sub(now).Seconds()); s > 0 {
-				remaining = s
+		enabled++
+		if acc.available(now, model) {
+			if lastErr != nil {
+				return lastErr
 			}
+			return &llm.Failure{Code: "no_available_accounts", Message: "账号状态在调度期间发生变化，请重试", UpstreamFault: true}
 		}
-		return nil, &llm.Failure{
-			Code:              "all_accounts_cooling",
-			Message:           fmt.Sprintf("模型 %s 在所有账号上都被限流，请稍后重试（或改用其他模型）", req.Model),
-			RateLimited:       true,
-			RetryAfterSeconds: remaining,
-			UpstreamFault:     true,
+		if acc.state == stateBlocked {
+			blocked++
+			continue
+		}
+		until := acc.cooldownUntil
+		if modelUntil := acc.modelCooldown[modelKey(model)]; modelUntil.After(until) {
+			until = modelUntil
+		}
+		if until.After(now) && (earliest.IsZero() || until.Before(earliest)) {
+			earliest = until
 		}
 	}
-	return nil, lastErr
+	if enabled == 0 {
+		return &llm.Failure{Code: "no_available_accounts", Message: "没有已启用的账号，请检查账号配置", UpstreamFault: true}
+	}
+	if blocked == enabled {
+		return &llm.Failure{Code: "all_accounts_blocked", Message: "所有启用账号鉴权失效，请重新登录后再试", Unauthorized: true}
+	}
+	remaining := 0
+	if !earliest.IsZero() {
+		// Round up: a positive sub-second cooldown must not become Retry-After: 0.
+		remaining = int((earliest.Sub(now) + time.Second - 1) / time.Second)
+	}
+	return &llm.Failure{
+		Code:        "all_accounts_cooling",
+		Message:     fmt.Sprintf("模型 %s 在所有可用账号上都被限流，请稍后重试（或改用其他模型）", model),
+		RateLimited: true, RetryAfterSeconds: remaining, UpstreamFault: true,
+	}
 }
 
 // accountUsable 判断账号**本身**是否可用（与具体模型无关）。
@@ -617,23 +597,6 @@ func (a *poolAccount) available(now time.Time, model string) bool {
 func (a *poolAccount) modelCooling(now time.Time, model string) bool {
 	until, ok := a.modelCooldown[modelKey(model)]
 	return ok && until.After(now)
-}
-
-// earliestModelThaw 返回该账号上最早解冻的模型时刻（供全池冷却时估算等待）。
-func (a *poolAccount) earliestModelThaw(now time.Time) time.Time {
-	earliest := a.cooldownUntil
-	for _, until := range a.modelCooldown {
-		if !until.After(now) {
-			continue
-		}
-		if earliest.IsZero() || until.Before(earliest) {
-			earliest = until
-		}
-	}
-	if !earliest.After(now) {
-		return time.Time{}
-	}
-	return earliest
 }
 
 // —— 账号并发（背压）——
@@ -769,9 +732,9 @@ func (a *poolAccount) markFailure() {
 // 永远拿不到新样本，健康度无从更新，也无法分摊限流风险。
 //
 // 加权随机既利用了健康差异（分高者更容易被选中），又保证每个账号都有
-// 机会被验证与分摊。冷启动时大家同分，退化为均匀轮询——正是期望行为。
+// 机会被验证与分摊。冷启动时大家同分，退化为等权随机。
 //
-// 随机源用当前纳秒，避免引入 rand 全局锁；选号本就不要求密码学强度。
+// 随机源使用 math/rand/v2；选号不要求密码学强度。
 // 调用方必须持有 p.mu。
 func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]bool) (int, *poolAccount) {
 	n := len(p.accounts)
@@ -841,11 +804,10 @@ func upstreamCooldown(f *llm.Failure) time.Duration {
 	if f.RetryAfterSeconds <= 0 {
 		return 0
 	}
-	d := time.Duration(f.RetryAfterSeconds) * time.Second
-	if d > maxCooldown {
-		d = maxCooldown
+	if f.RetryAfterSeconds >= int(maxCooldown/time.Second) {
+		return maxCooldown
 	}
-	return d
+	return time.Duration(f.RetryAfterSeconds) * time.Second
 }
 
 // ditherBackoff 给换号之间的等待加抖动，避免多个并发请求同步重试。

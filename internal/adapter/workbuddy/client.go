@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -197,6 +198,31 @@ func (c *httpClient) doJSON(ctx context.Context, method, path string, body any, 
 	return nil
 }
 
+// Retry-After permits either nonnegative delta-seconds or an HTTP date.
+// Invalid headers carry no scheduling advice; legitimate deadlines are bounded
+// by the same 24-hour safety ceiling used by the account pool.
+func parseRetryAfter(value string, now time.Time) int {
+	value = strings.TrimSpace(value)
+	const ceiling = 24 * 60 * 60
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		if seconds > ceiling {
+			return ceiling
+		}
+		return int(seconds)
+	}
+	if deadline, err := http.ParseTime(value); err == nil && deadline.After(now) {
+		delta := deadline.Sub(now)
+		if delta >= 24*time.Hour {
+			return ceiling
+		}
+		return int((delta + time.Second - 1) / time.Second)
+	}
+	return 0
+}
+
 // httpError 把上游 HTTP 错误映射为 Failure。
 func httpError(status int, raw []byte, retryAfter string) error {
 	msg := strings.TrimSpace(string(raw))
@@ -241,12 +267,7 @@ func httpError(status int, raw []byte, retryAfter string) error {
 		// 与错误码 rate_limited 自相矛盾，重试层也会把它当成不可重试。
 		f.RateLimited = true
 	}
-	if retryAfter != "" {
-		var secs int
-		if _, err := fmt.Sscanf(retryAfter, "%d", &secs); err == nil {
-			f.RetryAfterSeconds = secs
-		}
-	}
+	f.RetryAfterSeconds = parseRetryAfter(retryAfter, time.Now())
 	// 「额度已用尽」类业务码（嵌套在 error.data.code，如 14018）：上游只说
 	// 「购买加量包」，没有可解析的重置时刻。识别它并打上 QuotaExhausted 标记，
 	// 号池据此走「拿不到重置时刻就不加锁、直接换号」的路径

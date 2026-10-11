@@ -151,3 +151,22 @@ func TestSameModelFallbackDoesNotOverridePinnedRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestFallbackReturnsLastAttemptErrorAndPlatform(t *testing.T) {
+	firstFailure := &llm.Failure{Code: "rate_limited", RateLimited: true}
+	lastFailure := &llm.Failure{Code: "invalid_request", Message: "unsupported parameter", ClientFixable: true}
+	cn := &catalogAdapter{models: []adapter.ModelInfo{{ID: "shared"}}, err: firstFailure}
+	global := &catalogAdapter{models: []adapter.ModelInfo{{ID: "shared"}}, err: lastFailure}
+	h, err := NewHub([]*PlatformRuntime{{ID: "workbuddy", Adapter: cn}, {ID: "workbuddy-global", Adapter: global}}, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.MetricsFile = ""
+	cfg.Models.FallbackOnUnavailable = true
+	a := New(cfg, h, log.New(io.Discard, "", 0))
+	_, rt, err := a.openRoutedStream(context.Background(), llm.RequestMessages{Model: "shared"}, "")
+	if err != lastFailure || rt.ID != "workbuddy-global" || global.gotModel != "shared" {
+		t.Fatalf("wrong final attribution: platform=%s err=%v", rt.ID, err)
+	}
+}
