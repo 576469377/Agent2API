@@ -8,17 +8,31 @@
 # config.json 里可能有 api_key，凭证文件里是账号的 access/refresh token。
 # 泄露凭证 = 泄露账号。详见 README「安全须知」。
 config.json
+config.*.json
+!config.example.json
 *.session.json
 auths/
 *.info
 .env
-*.env.local
+.env.*
+!.env.example
+!.env.sample
+*.env
+*.env.*
 # 常见凭证文件名兜底（如 login -out 的自选路径、手工导出的凭据）
 cred*.json
 *credential*.json
 *credentials*.json
 *.pem
 *.key
+# Client configs, encrypted credentials, candidates and backups remain local too.
+provider_config.json*
+*.candidate
+*.bak
+*.bak-*
+*.backup
+*.info.*
+*.session.json.*
 
 # ── 指标落盘（运行期自动生成，含真实调用统计）────────────────
 metrics.json

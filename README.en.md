@@ -1,26 +1,27 @@
 # Agent2API
 
-**One local gateway for WorkBuddy China and International, with standard LLM APIs.**
+**An extensible local gateway that translates AI agent platforms' private protocols into standard LLM APIs.**
 
-Reuse your own authorized desktop login with Chat Completions, Responses and Anthropic Messages clients. Both regions share a console while keeping credentials and account pools separate. Platform-qualified model IDs make overlapping names explicit.
+Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, account scheduling, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China and WorkBuddy International.** Future adapters can reuse these common layers.
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
 [简体中文](README.md) · **English** · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/576469377/Agent2API/issues)
 
-![Two regions, one local gateway, three API protocols](docs/assets/gateway.svg)
+![Extensible platform adapters, one gateway and standard API protocols](docs/assets/gateway.svg)
 
 > [!IMPORTANT]
 > A personal learning and research project, for your own authorized accounts on your machine or a controlled private environment. Private upstream protocols may change, and this usage may conflict with upstream terms. Read the [disclaimer](DISCLAIMER.md); do not offer a public service or publish credentials. No license has been selected.
 
 ## What it does
 
-Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local endpoint. The gateway translates protocols and manages both WorkBuddy regions in one process.
+Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local endpoint. Each adapter handles its upstream protocol while clients keep using standard APIs. New platforms reuse the existing protocol layers, routing and console.
 
 | Capability | Available today |
 |---|---|
-| Platforms | WorkBuddy / CodeBuddy China and WorkBuddy International |
+| Implemented platforms | WorkBuddy / CodeBuddy China and WorkBuddy International |
+| Extension | Implement a platform adapter and register it with the Hub; other platforms are not implemented yet |
 | APIs | Chat Completions, Responses, Anthropic Messages; streaming and non-streaming |
 | Routing | Platform prefixes, aliases, optional same-name fallback before stream acceptance |
 | Accounts | Region isolation, credential discovery and refresh, pools, affinity, concurrency limits |
@@ -29,7 +30,7 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 
 ## Quick start
 
-Install **Go 1.23+** and log in to the appropriate WorkBuddy desktop client. These commands build the current default branch.
+Install **Go 1.23+**. The examples use WorkBuddy, the currently supported integration, and require an authorized desktop login. These commands build the current default branch.
 
 ```powershell
 # Windows PowerShell

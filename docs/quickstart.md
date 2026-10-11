@@ -2,6 +2,8 @@
 
 [文档导航](README.md) · [客户端接入](clients.md) · [故障排查](troubleshooting.md)
 
+以下以当前已实现的 WorkBuddy 适配器为例。Agent2API 的路由、标准协议与控制台面向多平台扩展；其他上游平台尚未实现。
+
 ## 1. 准备环境
 
 - Git 与 Go 1.23+。

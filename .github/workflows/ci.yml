@@ -10,6 +10,18 @@ permissions:
   contents: read
 
 jobs:
+  secret-check:
+    name: credential guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 扫描全部可达历史（不输出密钥值）
+        run: python3 scripts/check-secrets.py --history
+      - name: 提交保护回归测试
+        run: python3 -m unittest discover -s scripts -p test_check_secrets.py
+
   build-test:
     name: build / vet / test (Go ${{ matrix.go }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}

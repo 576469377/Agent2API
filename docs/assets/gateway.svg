@@ -1,28 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="320" viewBox="0 0 1040 320" role="img" aria-labelledby="title desc">
   <title id="title">Agent2API gateway architecture</title>
-  <desc id="desc">Standard clients connect through one local Agent2API gateway to separate WorkBuddy China and International account pools.</desc>
+  <desc id="desc">Standard clients connect through shared routing and protocol conversion to extensible platform adapters. WorkBuddy China and International are implemented; additional adapters are planned.</desc>
   <defs>
     <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0d192b"/><stop offset="1" stop-color="#152f39"/></linearGradient>
     <linearGradient id="accent"><stop stop-color="#7ce6c3"/><stop offset="1" stop-color="#79c3ff"/></linearGradient>
   </defs>
   <rect width="1040" height="320" rx="20" fill="url(#bg)"/>
   <g font-family="Segoe UI,Arial,sans-serif">
-    <text x="40" y="48" fill="#82d9c2" font-size="12" letter-spacing="3">LOCAL · MULTI-REGION · STANDARD APIs</text>
-    <text x="40" y="88" fill="#f1f6fb" font-size="28" font-weight="700">Two regions. One gateway.</text>
-    <text x="40" y="116" fill="#a9bfce" font-size="14">Explicit model routing · Independent credentials · A shared console</text>
-    <path d="M302 220 H365 M675 220 H731 M731 182 V258 M731 182 H766 M731 258 H766" fill="none" stroke="#52959b" stroke-width="2"/>
+    <text x="40" y="48" fill="#82d9c2" font-size="12" letter-spacing="3">EXTENSIBLE · LOCAL · STANDARD APIs</text>
+    <text x="40" y="88" fill="#f1f6fb" font-size="28" font-weight="700">Many platforms. One API gateway.</text>
+    <text x="40" y="116" fill="#a9bfce" font-size="14">Platform adapters · Shared protocol layers · Unified routing and management</text>
+    <path d="M302 220 H365 M675 220 H731 M731 177 V265 M731 177 H766 M731 221 H766 M731 265 H766" fill="none" stroke="#52959b" stroke-width="2"/>
     <g fill="#172d3e" stroke="#355064">
       <rect x="40" y="156" width="262" height="128" rx="12"/>
       <rect x="366" y="156" width="308" height="128" rx="12" stroke="#72d8c3"/>
-      <rect x="766" y="152" width="234" height="60" rx="10"/>
-      <rect x="766" y="228" width="234" height="60" rx="10"/>
+      <rect x="766" y="156" width="234" height="40" rx="8"/>
+      <rect x="766" y="200" width="234" height="40" rx="8"/>
+      <rect x="766" y="244" width="234" height="40" rx="8" stroke-dasharray="4 4"/>
     </g>
     <rect x="366" y="156" width="5" height="128" rx="2" fill="url(#accent)"/>
     <g fill="#f1f6fb" font-size="17" font-weight="600">
       <text x="60" y="184">Standard clients</text>
       <text x="390" y="186">Agent2API</text>
-      <text x="783" y="177" font-size="14">WorkBuddy China</text>
-      <text x="783" y="253" font-size="14">WorkBuddy International</text>
+      <text x="783" y="182" font-size="13">WorkBuddy China</text>
+      <text x="783" y="226" font-size="13">WorkBuddy International</text>
+      <text x="783" y="270" font-size="13" fill="#a9bfce">Future platform adapters</text>
     </g>
     <g fill="#afc5d5" font-size="13">
       <text x="60" y="210">Chat Completions</text>
@@ -31,8 +33,9 @@
       <text x="390" y="215">Model routing + protocol translation</text>
       <text x="390" y="242">Accounts · SSE · Usage · Tools</text>
       <text x="390" y="265" fill="#7ce6c3">127.0.0.1:8787</text>
-      <text x="783" y="197">workbuddy/model</text>
-      <text x="783" y="273">workbuddy-global/model</text>
+      <text x="940" y="182" font-size="10" fill="#7ce6c3">READY</text>
+      <text x="940" y="226" font-size="10" fill="#7ce6c3">READY</text>
+      <text x="940" y="270" font-size="10">PLANNED</text>
     </g>
   </g>
 </svg>

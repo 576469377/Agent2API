@@ -1,26 +1,27 @@
 # Agent2API
 
-**一个本地网关，把 WorkBuddy 国内版与国际版接入标准 LLM 客户端。**
+**把 AI Agent 平台的私有协议，统一转换为标准 LLM API 的多平台本地网关。**
 
-复用本人已登录的桌面账号，对外提供 Chat Completions、Responses 和 Anthropic Messages。国内版与国际版共享控制台，凭证与账号池独立管理，重名模型可通过平台前缀明确路由。
+通过平台适配器接入不同上游，对外提供 Chat Completions、Responses 和 Anthropic Messages，共用模型路由、账号调度、流式转换与管理控制台。**目前已接入 WorkBuddy / CodeBuddy 国内版与 WorkBuddy 国际版**，后续平台可沿用同一套协议与管理能力。
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
 **简体中文** · [English](README.en.md) · [文档导航](docs/README.md) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/576469377/Agent2API/issues)
 
-![Agent2API：两个区域、一个网关、三种协议](docs/assets/gateway.svg)
+![Agent2API：可扩展的平台适配器、统一网关与标准 API](docs/assets/gateway.svg)
 
 > [!IMPORTANT]
 > 个人学习与研究项目，仅限本人已授权账号在本机或受控私有环境使用。上游是私有协议，可能随时变化；使用方式可能与上游条款冲突。请阅读[免责声明](DISCLAIMER.md)，勿公开提供服务或提交凭证。仓库尚未选定许可证。
 
 ## 它解决什么问题
 
-让 Claude Code、ZCode、Codex CLI 及其他兼容标准 API 的客户端连接同一个本地入口。无需为每个客户端重复实现上游协议，也无需为国内版、国际版分别运行网关。
+让 Claude Code、ZCode、Codex CLI 及其他兼容标准 API 的客户端连接同一个本地入口。上游接入由适配器完成，客户端继续使用标准协议；新增平台时复用现有协议层、路由和控制台。
 
 | 能力 | 当前实现 |
 |---|---|
-| 平台 | WorkBuddy / CodeBuddy 国内版、WorkBuddy 国际版 |
+| 已接入平台 | WorkBuddy / CodeBuddy 国内版、WorkBuddy 国际版 |
+| 扩展方式 | 实现平台适配器并注册到 Hub；其他平台尚未实现 |
 | 协议 | Chat Completions、Responses、Anthropic Messages；流式与非流式 |
 | 路由 | 平台前缀、模型别名、可选的建流前同名回退 |
 | 账号 | 区域隔离、凭证自动发现与刷新、多账号调度、会话亲和、并发上限 |
@@ -29,7 +30,7 @@
 
 ## 快速开始
 
-需要 **Go 1.23+**，并已在相应 WorkBuddy 桌面客户端登录。以下从默认分支构建当前代码；完整安装、设备登录与验证步骤见[快速开始](docs/quickstart.md)。
+需要 **Go 1.23+**。以下以目前支持的 WorkBuddy 为例，需要先在相应桌面客户端登录。从默认分支构建当前代码；完整安装、设备登录与验证步骤见[快速开始](docs/quickstart.md)。
 
 ```powershell
 # Windows PowerShell
