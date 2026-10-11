@@ -13,7 +13,7 @@
 | `-host` | `AGENT2API_HOST` | 监听地址，默认 127.0.0.1 |
 | `-api-key` | `AGENT2API_API_KEY` | 网关访问密钥，为空则不鉴权 |
 | `-credential` | `AGENT2API_CREDENTIAL_PATH` | 凭证文件路径，为空时自动探测 |
-| `-accounts-dir` | — | 号池目录，目录下每个 `*.json` 视为一个账号 |
+| `-accounts-dir` | — | 号池目录，扫描其中具有有效凭证结构的 `*.json`，其他 JSON 跳过 |
 | `-base-url` | `AGENT2API_BASE_URL` | 上游地址 |
 | `-metrics-file` | — | 指标落盘路径；缺省写配置文件同目录的 `metrics.json`，无配置文件时写工作目录的 `agent2api-metrics.json` |
 | `-no-persist` | — | 关闭指标落盘 |
@@ -88,7 +88,7 @@
 - 默认 **4**；设 `0` 关闭（不限并发）
 - 这是**背压**不是失败：排队期间客户端连接保持，不会被换号或标记冷却
 - 排队只发生在所有账号都满员时——只要有账号空闲，请求立刻走它
-- 平台级可用 `upstream.platforms[].max_concurrency_per_account` 单独覆盖
+- 平台级可用 `upstream.platforms[].max_concurrency_per_account` 的正数单独覆盖；平台级 `0` 表示继承顶层值。要关闭并发限制，将顶层设为 `0`，对应平台不填写正数覆盖值。
 
 ### Prometheus 指标（/metrics）
 

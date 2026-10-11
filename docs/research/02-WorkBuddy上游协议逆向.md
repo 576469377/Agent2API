@@ -39,9 +39,9 @@ Base URL：[copilot.tencent.com](https://copilot.tencent.com)
 ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info
 ```
 
-JSON 结构（实测字段名）：
+结构示意（实测字段名；包含类型占位符，不能直接作为 JSON 凭证使用）：
 
-```json
+```text
 {
   "auth": {
     "accessToken":   "<JWT, 1527 字符>",
@@ -218,15 +218,17 @@ cannot unmarshal object into Go struct field Request.tool_choice of type string
 
 ### 4.4 工具调用（🟢 实测原文）
 
-首片带 `id` + `name`，后续片 `name` 为空、只带 `arguments` 分片：
+首片带 `id` + `name`，后续片 `name` 为空、只带 `arguments` 分片。以下按顺序摘出三个分片，以数组展示，实际逐帧发送：
 
 ```json
+[
 {"delta":{"tool_calls":[{"id":"call_0000000000000000000005","type":"function",
-  "function":{"name":"get_weather","arguments":""},"index":0}]}, "finish_reason":""}
+  "function":{"name":"get_weather","arguments":""},"index":0}]}, "finish_reason":""},
 {"delta":{"tool_calls":[{"type":"function",
-  "function":{"name":"","arguments":"{\"city\": \"北京\""},"index":0}]}, "finish_reason":""}
+  "function":{"name":"","arguments":"{\"city\": \"北京\""},"index":0}]}, "finish_reason":""},
 {"delta":{"tool_calls":[{"type":"function",
   "function":{"name":"","arguments":"}"},"index":0}]}, "finish_reason":"tool_calls"}
+]
 ```
 
 → **必须按 `index` 缓存 `function.name`，给后续空 name 的分片回填。**
@@ -243,6 +245,7 @@ cannot unmarshal object into Go struct field Request.tool_choice of type string
 只在**最后一个 chunk**（含 finish_reason 的那帧）出现：
 
 ```json
+{
 "usage": {
   "prompt_tokens": 157,
   "completion_tokens": 55,
@@ -254,6 +257,7 @@ cannot unmarshal object into Go struct field Request.tool_choice of type string
     "rejected_prediction_tokens": 0,
     "cached_tokens": 0
   }
+}
 }
 ```
 

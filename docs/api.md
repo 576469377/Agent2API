@@ -8,7 +8,7 @@
 | `POST /v1/responses` | OpenAI Responses | ✅ | ✅ |
 | `POST /v1/messages` | Anthropic Messages | ✅ | ✅ |
 | `GET /v1/models` | 模型列表（含 `models.aliases` 声明的别名） | — | ✅ |
-| `GET /metrics` | Prometheus 文本格式指标（与控制台指标同源，需 API Key） | — | ✅ |
+| `GET /metrics` | Prometheus 文本格式指标（与控制台指标同源；启用鉴权时需 API Key） | — | ✅ |
 | `GET /health` | 健康检查（只报状态与平台 ID，不探测上游） | — | ✅ |
 
 支持文本、思考过程、工具调用、多轮对话、系统提示词、采样参数、图片输入。

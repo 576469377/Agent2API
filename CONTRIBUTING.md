@@ -68,11 +68,12 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 
 `internal/app`、`internal/api/openai/chat`、`internal/config` 此前长期无测试，**现已补齐**（`app_test.go` / `matrix_test.go`、`chat_test.go`、`config_test.go`）。
 
-当前真正偏低、欢迎优先补的（数字来自 `make cover`，会随代码漂移，动手前请以本地实测为准）：
+可优先补充以下覆盖；覆盖率会随代码变化，请先运行 `make cover` 获取当前结果：
 
-- [`internal/web`](internal/web/) —— 控制台（**目前唯一完全无测试的包，0.0%**）
-- [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate` 路径），约 38%
-- [`cmd/agent2api`](cmd/agent2api/) —— 启动装配、子命令、号池监视与保活，约 7%
+- [`internal/web`](internal/web/) —— 静态入口；前端逻辑另有 `scripts/test-console-core.mjs` 离线测试，页面交互仍需浏览器验证
+- [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate` 路径）
+- [`cmd/agent2api`](cmd/agent2api/) —— 启动装配、子命令、号池监视与保活
+- [`cmd/console`](cmd/console/) —— 独立控制台的代理、路径与 SSE；已有离线测试，可补充异常网络场景
 
 ## 新增上游平台
 
@@ -80,12 +81,13 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 
 1. 在 `internal/adapter/<平台名>/` 下新建包，实现 `adapter.Adapter` 接口（3 个方法：`Stream` / `ListModels` / `Name`）
 2. 可选：实现 `adapter.Describer` / `adapter.Configurable`（用于控制台展示与热更新，不实现也能跑）
-3. 注册 5 个点（平台差异全部收口在这些位置，其余代码零改动）：
+3. 注册以下装配点：
    - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `newPlatformAdapter` 工厂（按平台构造适配器的分支）
    - [`cmd/agent2api/main.go`](cmd/agent2api/main.go) 的 `supportedPlatforms` 集合（启动校验）
    - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `platformDefaultPaths`（该平台的默认凭证位置，自动探测用）
    - [`internal/config/config.go`](internal/config/config.go) 的 `autoPlatforms` 列表（零配置自动集成；列表顺序即默认平台优先级）
    - [`internal/app/hub.go`](internal/app/hub.go) 的 `platformDefaultBaseURLs`（该平台默认上游地址）
+4. 根据平台实现认证、刷新及账号描述；当前 CLI 与控制台设备登录、账号凭证识别和重新登录针对 WorkBuddy，其他认证方式需要同步扩展相关装配与管理流程。控制台可复用通用列表与模型目录，但平台名称和特有操作也要补齐。
 
 模型路由、`/v1/models` 合并、控制台多平台展示都由 Hub 通用处理，**三个下游协议编码器一行都不用改** —— 这是 IR 分层设计的核心收益。
 
@@ -110,7 +112,8 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 | 路径 | 原因 |
 |---|---|
 | `config.json` | 可能含 `api_key` |
-| `*.session.json`、`auths/`、`*.info` | **认证凭证 —— 泄露即账号泄露** |
+| `*.session.json`、`auths/`、`*.info` 及其临时文件 / 备份 | **认证凭证 —— 泄露即账号泄露** |
+| `provider_config.json*`、`.zcode/` | 客户端密钥、配置与备份 |
 | `agent2api-metrics.json`、`metrics.json` | 含真实调用统计（模型名、时间、token 数） |
 | `.workbuddy/` | 内部开发记录 |
 | `bin/` | 编译产物（11MB+，且含绝对路径） |

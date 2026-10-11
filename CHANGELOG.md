@@ -7,6 +7,8 @@
 
 ### 修复
 
+- **文档与凭证保护复查**：修正账号退出与并发继承说明，补全平台扩展的认证边界；提交扫描覆盖敏感路径重命名、历史同内容文件、UTF-16 导出、未加引号的环境变量与加密凭证，忽略运行时临时文件。
+
 - **上游渠道指纹识别拒绝 ZCode 类客户端（2026-10-02 实机故障）**：上游按「其他编码代理产品」的固定句式识别调用方并整单拒绝（`Illegal API invocation from an unapproved channel`）。本次触发句是 Claude Code gitStatus 模板的 `Main branch (you will usually use this for PRs)`（ZCode 原样沿用，不在脱敏词表里）；实测该句**单独出现即触发**、子串单独出现不触发、纯长度填充（10100 字符）不触发——是完整指纹匹配，不是长度限制也不是普通关键词审核。已将该短语加入 `sensitiveTerms`，零宽空格破坏精确匹配（`internal/adapter/workbuddy/sanitize.go`），回归测试 `TestSanitizeBreaksChannelFingerprint` 锁定。
 
 ### 新增

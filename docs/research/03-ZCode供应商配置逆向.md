@@ -32,9 +32,9 @@
 ~/.zcode/v2/logs/<日期>.log               客户端主进程日志（排错关键，见 §5）
 ```
 
-文件顶层结构（🟢 实测；`modelConfigRules` 与 `providerConfigRules` 是**平级**的，见 §4 坑三）：
+文件顶层结构（🟢 实测；`modelConfigRules` 与 `providerConfigRules` 是**平级**的，见 §4 坑三）。下方 JSONC 注释仅作说明，实际配置须使用不含注释的 JSON：
 
-```json
+```jsonc
 {
   "schemaVersion": 1,
   "config": {
