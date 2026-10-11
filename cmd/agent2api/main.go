@@ -87,9 +87,9 @@ func addServerFlags(fs *flag.FlagSet) *serverFlags {
 	fs.StringVar(&sf.apiKey, "api-key", "", "网关访问密钥；为空则不鉴权")
 	fs.StringVar(&sf.credentialPath, "credential", "", "上游凭证文件路径；为空时自动探测本机已登录凭证")
 	fs.StringVar(&sf.accountsDir, "accounts-dir", "", "多账号号池目录；目录下每个 *.json 视为一个账号（agent2api login -out 攒凭证）")
-	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认 https://copilot.tencent.com")
+	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认按平台选择")
 	fs.BoolVar(&sf.noSanitize, "no-sanitize", false, "关闭内容脱敏（接入 Claude Code/Codex 时不建议关闭）")
-	fs.StringVar(&sf.platform, "platform", "", "上游平台（当前仅支持 workbuddy；缺省自动探测）")
+	fs.StringVar(&sf.platform, "platform", "", "上游平台（workbuddy / workbuddy-global；缺省自动探测）")
 	fs.StringVar(&sf.metricsFile, "metrics-file", "", "指标落盘路径；默认写到配置文件同目录的 metrics.json")
 	fs.BoolVar(&sf.noPersist, "no-persist", false, "关闭指标落盘（重启后统计清零）")
 	return sf
@@ -172,8 +172,8 @@ func runServer(args []string) {
 
 	// 平台合法性在 buildHub 里逐个校验（自动集成模式下 Platform 为空是正常的）。
 	// 这里只拦「显式写了不支持平台」的低级错误，快速失败。
-	if cfg.Upstream.Platform != "" && cfg.Upstream.Platform != "workbuddy" {
-		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy）", cfg.Upstream.Platform)
+	if cfg.Upstream.Platform != "" && !supportedPlatforms[cfg.Upstream.Platform] {
+		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / workbuddy-global）", cfg.Upstream.Platform)
 	}
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
@@ -381,7 +381,7 @@ func printBanner(cfg config.Config, hub *app.Hub) {
 
 // supportedPlatforms 是 buildHub 能装配的平台集合（与 newPlatformAdapter 工厂一致）。
 // 新增平台适配器后在此追加。
-var supportedPlatforms = map[string]bool{"workbuddy": true}
+var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlatform: true}
 
 // buildHub 按配置装配多平台枢纽。
 //
@@ -396,7 +396,7 @@ func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
 	for _, pc := range pcs {
 		if !supportedPlatforms[pc.ID] {
 			failures = append(failures, pc.ID+": 不支持的平台")
-			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy）", pc.ID)
+			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy / workbuddy-global）", pc.ID)
 			continue
 		}
 		clone := cfg.CloneForPlatform(pc)
@@ -434,15 +434,23 @@ func truncate(s string, n int) string {
 
 func runLogin(args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
-	out := fs.String("out", "", "凭证输出路径，默认 ~/.workbuddy/session.json")
-	base := fs.String("base-url", workbuddy.DefaultBaseURL, "上游地址")
-	platform := fs.String("platform", "VSCode", "上报给上游的客户端标识")
+	out := fs.String("out", "", "凭证输出路径，默认按区域选择")
+	base := fs.String("base-url", "", "上游地址，默认按区域选择")
+	region := fs.String("region", "cn", "账号区域: cn / global")
+	platform := fs.String("platform", "", "上报给上游的客户端标识，默认按区域选择")
 	_ = fs.Parse(args)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
+	pid := "workbuddy"
+	if *region == "global" {
+		pid = workbuddy.GlobalPlatform
+	} else if *region != "cn" {
+		log.Fatalf("未知区域: %s（应为 cn / global）", *region)
+	}
 	cred, err := workbuddy.Login(ctx, *base, workbuddy.LoginOptions{
+		Region:     pid,
 		BaseURL:    *base,
 		Platform:   *platform,
 		OutputPath: *out,

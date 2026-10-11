@@ -72,6 +72,10 @@ func (h *Hub) ResolveAlias(model string) (string, string) {
 	t, ok := h.aliases[model]
 	h.mu.RUnlock()
 	if !ok {
+		// A qualified model selects its region without requiring a configured alias.
+		if i := strings.Index(model, "/"); i > 0 && i < len(model)-1 && h.Platform(model[:i]) != nil {
+			return model[i+1:], model[:i]
+		}
 		return model, ""
 	}
 	return t.Model, t.Platform

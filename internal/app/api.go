@@ -33,6 +33,7 @@ var builtinPlatforms = []struct {
 	Implemented bool
 }{
 	{ID: "workbuddy", Name: "WorkBuddy / CodeBuddy", Note: "腾讯 CodeBuddy 桌面端登录态复用", Implemented: true},
+	{ID: "workbuddy-global", Name: "WorkBuddy International", Note: "WorkBuddy 国际版桌面端登录态复用", Implemented: true},
 	{ID: "devin", Name: "Devin", Note: "上游为私有 protobuf over Connect，需独立适配器", Implemented: false},
 	{ID: "cursor", Name: "Cursor", Note: "待调研上游协议", Implemented: false},
 }
@@ -387,7 +388,7 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		// 未显式配置号池目录时，兜底到 ~/.workbuddy/（登录凭证的默认位置）。
 		// 号池监视器每 10 秒扫描该目录，新凭证无需重启即可加入轮询。
-		dir = DefaultAccountsDir()
+		dir = workbuddy.AccountsDirForPlatform(rt.ID)
 		_ = os.MkdirAll(dir, 0o700)
 	}
 	// 新凭证文件名由前端给（默认 account-N）；只接受纯文件名，防目录穿越。
@@ -401,7 +402,7 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	sess, err := a.logins.Start(rt.ID, filepath.Join(dir, name))
+	sess, err := a.logins.Start(rt.ID, filepath.Join(dir, name), rt.baseURL())
 	if err != nil {
 		f := llm.Wrap(err)
 		writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
@@ -742,6 +743,7 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 		"platform":  defID,
 		"platforms": platforms,
 		"models":    all,
+		"routing":   map[string]any{"priority": "platform_configuration_order", "fallback_on_unavailable": a.cfg.Models.FallbackOnUnavailable, "qualified_ids_pin_platform": true},
 	})
 }
 

@@ -25,6 +25,8 @@ type loginState struct {
 
 // LoginOptions 是登录参数。
 type LoginOptions struct {
+	// Region is the gateway platform ID (workbuddy / workbuddy-global).
+	Region string
 	// BaseURL 为上游地址，为空时用 DefaultBaseURL。
 	BaseURL string
 
@@ -43,11 +45,17 @@ type LoginOptions struct {
 // baseURL 为空时使用 DefaultBaseURL。
 func Login(ctx context.Context, baseURL string, opts LoginOptions) (*Credential, error) {
 	if baseURL == "" {
-		baseURL = DefaultBaseURL
+		baseURL = BaseURLForPlatform(opts.Region)
+	}
+	if opts.OutputPath == "" {
+		opts.OutputPath = filepath.Join(AccountsDirForPlatform(opts.Region), "session.json")
 	}
 	cli := newHTTPClient(baseURL, 0)
 	if opts.Platform == "" {
 		opts.Platform = "VSCode"
+		if opts.Region == GlobalPlatform {
+			opts.Platform = "workbuddy-ai"
+		}
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 5 * time.Minute
@@ -84,6 +92,13 @@ func Login(ctx context.Context, baseURL string, opts LoginOptions) (*Credential,
 		ExpiresAt:    tok.ExpiresAt,
 		Domain:       tok.Domain,
 		MachineID:    stableMachineID(),
+	}
+	if cred.Domain == "" {
+		if opts.Region == GlobalPlatform {
+			cred.Domain = "www.workbuddy.ai"
+		} else {
+			cred.Domain = "www.workbuddy.cn"
+		}
 	}
 	if cred.TokenType == "" {
 		cred.TokenType = "Bearer"

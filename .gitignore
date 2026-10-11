@@ -34,6 +34,10 @@ agent2api-metrics.json
 coverage.txt
 coverage.out
 
+# Python tooling
+__pycache__/
+*.pyc
+
 # ── 编辑器 / IDE ───────────────────────────────────────────
 .idea/
 .vscode/

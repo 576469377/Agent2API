@@ -17,19 +17,20 @@ const defaultModel = "auto"
 
 // configModel 是 /v3/config 返回的模型条目。
 type configModel struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	DescriptionZh     string `json:"descriptionZh"`
-	DescriptionEn     string `json:"descriptionEn"`
-	MaxInputTokens    int    `json:"maxInputTokens"`
-	MaxOutputTokens   int    `json:"maxOutputTokens"`
-	MaxAllowedSize    int    `json:"maxAllowedSize"`
-	SupportsImages    bool   `json:"supportsImages"`
-	SupportsToolCall  bool   `json:"supportsToolCall"`
-	SupportsReasoning bool   `json:"supportsReasoning"`
-	OnlyReasoning     bool   `json:"onlyReasoning"`
-	IsDefault         bool   `json:"isDefault"`
-	Vendor            string `json:"vendor"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	DescriptionZh     string   `json:"descriptionZh"`
+	DescriptionEn     string   `json:"descriptionEn"`
+	MaxInputTokens    int      `json:"maxInputTokens"`
+	MaxOutputTokens   int      `json:"maxOutputTokens"`
+	MaxAllowedSize    int      `json:"maxAllowedSize"`
+	SupportsImages    bool     `json:"supportsImages"`
+	SupportsToolCall  bool     `json:"supportsToolCall"`
+	SupportsReasoning bool     `json:"supportsReasoning"`
+	OnlyReasoning     bool     `json:"onlyReasoning"`
+	IsDefault         bool     `json:"isDefault"`
+	Vendor            string   `json:"vendor"`
+	Tags              []string `json:"tags"`
 }
 
 type configResponse struct {
@@ -74,10 +75,23 @@ func (c *modelCache) set(models []adapter.ModelInfo) {
 
 // fetchModels 从 /v3/config 拉取模型清单。
 func (a *Adapter) fetchModels(ctx context.Context) ([]adapter.ModelInfo, error) {
+	if err := a.auth.EnsureValid(); err != nil {
+		return nil, err
+	}
 	var resp configResponse
 	headers := a.auth.BuildHeaders(headerModeConfig)
-	if err := a.cli.doJSON(ctx, http.MethodGet, configPath+"?repos=", nil, headers, &resp); err != nil {
+	err := a.cli.doJSON(ctx, http.MethodGet, configPath+"?repos=", nil, headers, &resp)
+	if isUnauthorized(err) {
+		if refreshErr := a.auth.Refresh(); refreshErr != nil {
+			return nil, refreshErr
+		}
+		err = a.cli.doJSON(ctx, http.MethodGet, configPath+"?repos=", nil, a.auth.BuildHeaders(headerModeConfig), &resp)
+	}
+	if err != nil {
 		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, &llm.Failure{Code: "model_config_failed", Message: resp.Msg, UpstreamFault: true}
 	}
 	if len(resp.Data.Models) == 0 {
 		return nil, &llm.Failure{Code: "empty_model_list", Message: "上游返回的模型清单为空", UpstreamFault: true}
@@ -112,6 +126,12 @@ func (a *Adapter) fetchModels(ctx context.Context) ([]adapter.ModelInfo, error) 
 // 判据：补全类模型的 maxOutputTokens 极小（≤256）且不支持工具调用；
 // 另有若干显式前缀（codewise- / nes- / hunyuan-image）。
 func isNonChatModel(m configModel) bool {
+	for _, tag := range m.Tags {
+		switch tag {
+		case "text-to-image", "image-to-image", "text-to-video", "image-to-video":
+			return true
+		}
+	}
 	switch {
 	case strings.HasPrefix(m.ID, "codewise-"),
 		strings.HasPrefix(m.ID, "nes-"),
@@ -153,7 +173,7 @@ func (a *Adapter) ListModels(ctx context.Context) ([]adapter.ModelInfo, error) {
 	}
 	models, err := a.fetchModels(ctx)
 	if err != nil {
-		if fb := fallbackModels(); len(fb) > 0 {
+		if fb := fallbackModels(); a.cfg.Platform != GlobalPlatform && len(fb) > 0 {
 			a.logf("warn: 拉取模型清单失败，使用内置兜底清单: %v", err)
 			return fb, nil
 		}

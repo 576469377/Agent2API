@@ -34,8 +34,15 @@ func DefaultCredentialPaths() []string {
 		}
 	case "windows":
 		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			local = filepath.Join(home, "AppData/Local")
+		}
+		roaming := os.Getenv("APPDATA")
+		if roaming == "" {
+			roaming = filepath.Join(home, "AppData/Roaming")
+		}
 		return []string{
-			filepath.Join(home, "AppData/Roaming/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info"),
+			filepath.Join(roaming, "CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info"),
 			filepath.Join(local, "CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info"),
 			filepath.Join(home, ".workbuddy/session.json"),
 		}
@@ -100,22 +107,34 @@ func loadCredentialFile(path string) (*Credential, error) {
 	if err != nil {
 		return nil, &llm.Failure{Code: "credential_read_failed", Message: "读取凭证文件失败: " + err.Error(), Cause: err}
 	}
+	decoded, err := decodeCredentialDocument(raw)
+	if err != nil {
+		return nil, &llm.Failure{Code: "credential_parse_failed", Message: "解析凭证失败: " + err.Error(), Cause: err}
+	}
+	defer clear(decoded)
+	raw = decoded
 	var cf credentialFile
-	if err := json.Unmarshal(raw, &cf); err != nil {
+	if err := json.Unmarshal(raw, &cf); err != nil || cf.Auth.AccessToken == "" {
 		// 兼容扁平格式（部分版本直接把 token 放在顶层）
 		var flat struct {
 			AccessToken  string `json:"accessToken"`
 			RefreshToken string `json:"refreshToken"`
 			Domain       string `json:"domain"`
 			UID          string `json:"uid"`
+			TokenType    string `json:"tokenType"`
+			ExpiresAt    int64  `json:"expiresAt"`
+			RefreshExpAt int64  `json:"refreshExpiresAt"`
 		}
 		if err2 := json.Unmarshal(raw, &flat); err2 == nil && flat.AccessToken != "" {
 			cf.Auth.AccessToken = flat.AccessToken
 			cf.Auth.RefreshToken = flat.RefreshToken
 			cf.Auth.Domain = flat.Domain
 			cf.Account.UID = flat.UID
+			cf.Auth.TokenType = flat.TokenType
+			cf.Auth.ExpiresAt = flat.ExpiresAt
+			cf.Auth.RefreshExpAt = flat.RefreshExpAt
 		} else {
-			return nil, &llm.Failure{Code: "credential_parse_failed", Message: "解析凭证文件失败: " + err.Error(), Cause: err}
+			return nil, &llm.Failure{Code: "credential_parse_failed", Message: "解析凭证文件失败", Cause: err}
 		}
 	}
 	if cf.Auth.AccessToken == "" {
@@ -292,18 +311,30 @@ func (a *Auth) refreshLocked() error {
 	if tok.Domain != "" {
 		a.cred.Domain = tok.Domain
 	}
-	_ = a.persistLocked()
+	if tok.TokenType != "" {
+		a.cred.TokenType = tok.TokenType
+	}
+	if tok.RefreshExpiresAt > 0 {
+		a.cred.RefreshExpAt = tok.RefreshExpiresAt
+	} else if tok.RefreshExpiresIn > 0 {
+		a.cred.RefreshExpAt = time.Now().UnixMilli() + tok.RefreshExpiresIn*1000
+	}
+	if err := a.persistLocked(); err != nil {
+		return &llm.Failure{Code: "credential_write_failed", Message: "刷新成功但凭证保存失败: " + err.Error(), Cause: err}
+	}
 	return nil
 }
 
 // tokenPayload 是刷新/登录返回的 token 结构。
 type tokenPayload struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-	TokenType    string `json:"tokenType"`
-	ExpiresIn    int64  `json:"expiresIn"`
-	ExpiresAt    int64  `json:"expiresAt"`
-	Domain       string `json:"domain"`
+	AccessToken      string `json:"accessToken"`
+	RefreshToken     string `json:"refreshToken"`
+	TokenType        string `json:"tokenType"`
+	ExpiresIn        int64  `json:"expiresIn"`
+	ExpiresAt        int64  `json:"expiresAt"`
+	Domain           string `json:"domain"`
+	RefreshExpiresAt int64  `json:"refreshExpiresAt"`
+	RefreshExpiresIn int64  `json:"refreshExpiresIn"`
 }
 
 func unwrapToken(raw json.RawMessage) (tokenPayload, error) {
@@ -347,14 +378,43 @@ func (a *Auth) persistLocked() error {
 		return err
 	}
 	authObj, _ := doc["auth"].(map[string]any)
+	flat := authObj == nil && doc["accessToken"] != nil
+	if flat {
+		authObj = doc
+	}
 	if authObj == nil {
 		authObj = map[string]any{}
 	}
-	authObj["accessToken"] = a.cred.AccessToken
-	authObj["refreshToken"] = a.cred.RefreshToken
+	var key []byte
+	defer func() { clear(key) }()
+	for field, value := range map[string]string{"accessToken": a.cred.AccessToken, "refreshToken": a.cred.RefreshToken} {
+		if wrapper, ok := authObj[field].(map[string]any); ok && wrapper["$wbEncrypted"] != nil {
+			if wrapper["scheme"] != nil {
+				return fmt.Errorf("不支持的凭证加密格式")
+			}
+			if key == nil {
+				key, err = localCredentialKey(globalDomain(a.cred.Domain))
+				if err != nil {
+					return err
+				}
+			}
+			sealed, err := sealCredentialField(value, key)
+			if err != nil {
+				return err
+			}
+			authObj[field] = sealed
+		} else {
+			authObj[field] = value
+		}
+	}
 	authObj["expiresAt"] = a.cred.ExpiresAt
+	authObj["domain"] = a.cred.Domain
+	authObj["tokenType"] = a.cred.TokenType
+	authObj["refreshExpiresAt"] = a.cred.RefreshExpAt
 	authObj["lastRefreshTime"] = time.Now().UnixMilli()
-	doc["auth"] = authObj
+	if !flat {
+		doc["auth"] = authObj
+	}
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err

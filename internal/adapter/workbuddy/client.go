@@ -80,6 +80,10 @@ func (c *httpClient) authHeaders(cred *Credential, mode headerMode) http.Header 
 		// 上游配置服务校验 UA，generic UA 会被拒（code 12403 "check ua"）。
 		// 注意此处 X-IDE-Type/Name 用大写的 VSCode，与聊天请求不同。
 		h.Set("User-Agent", configUserAgent)
+		if cred != nil && globalDomain(cred.Domain) {
+			// Config is selected by product UA; CodeBuddyIDE returns an unrelated catalogue.
+			h.Set("User-Agent", "WorkBuddy/5.7.6")
+		}
 		h.Set("X-IDE-Type", "VSCode")
 		h.Set("X-IDE-Name", "VSCode")
 		h.Set("X-IDE-Version", ideVersion)
@@ -93,6 +97,11 @@ func (c *httpClient) authHeaders(cred *Credential, mode headerMode) http.Header 
 	}
 
 	if cred == nil {
+		if mode == headerModeNoAuth {
+			for _, field := range []string{"Authorization", "User-Id", "Enterprise-Id", "Department-Info"} {
+				h.Set("X-No-"+field, "true")
+			}
+		}
 		return h
 	}
 

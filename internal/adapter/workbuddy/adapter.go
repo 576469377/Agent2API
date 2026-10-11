@@ -24,7 +24,8 @@ import (
 
 // Config 是 WorkBuddy 适配器配置。
 type Config struct {
-	BaseURL string
+	Platform string
+	BaseURL  string
 
 	// CredentialPath 指定凭证文件；为空则按平台默认路径依次探测。
 	CredentialPath string
@@ -67,7 +68,7 @@ type Adapter struct {
 // New 构造适配器。credentialPath 为空时自动探测本机已登录凭证。
 func New(cfg Config) (*Adapter, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
+		cfg.BaseURL = BaseURLForPlatform(cfg.Platform)
 	}
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = 60 * time.Second
@@ -82,19 +83,28 @@ func New(cfg Config) (*Adapter, error) {
 		cfg.ModelCacheTTL = 30 * time.Minute
 	}
 
+	if cfg.Platform == "" {
+		cfg.Platform = "workbuddy"
+	}
+	if cfg.CredentialPath == "" {
+		for _, p := range DefaultCredentialPathsForPlatform(cfg.Platform) {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				cfg.CredentialPath = p
+				break
+			}
+		}
+		if cfg.CredentialPath == "" {
+			return nil, &llm.Failure{Code: "no_credential", Message: "未找到 " + cfg.Platform + " 凭证，请先登录对应版本客户端", ClientFixable: true}
+		}
+	}
 	cred, err := loadCredentialFile(cfg.CredentialPath)
 	if err != nil {
 		return nil, err
 	}
-	credPath := cfg.CredentialPath
-	if credPath == "" {
-		for _, p := range DefaultCredentialPaths() {
-			if _, statErr := os.Stat(p); statErr == nil {
-				credPath = p
-				break
-			}
-		}
+	if globalDomain(cred.Domain) != (cfg.Platform == GlobalPlatform) {
+		return nil, &llm.Failure{Code: "credential_region_mismatch", Message: "凭证区域与平台不匹配: " + cfg.Platform, ClientFixable: true}
 	}
+	credPath := cfg.CredentialPath
 
 	cli := newHTTPClient(cfg.BaseURL, 0)
 	auth := newAuth(cli, cred, credPath)
@@ -109,7 +119,7 @@ func New(cfg Config) (*Adapter, error) {
 }
 
 // Name 实现 adapter.Adapter。
-func (a *Adapter) Name() string { return "workbuddy" }
+func (a *Adapter) Name() string { return a.cfg.Platform }
 
 // CredentialInfo 返回当前账号摘要，用于 /health 与日志。
 func (a *Adapter) CredentialInfo() string {
@@ -192,6 +202,16 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 	}
 
 	body := buildUpstreamRequest(req, a.sanitize.Load())
+	if a.cfg.Platform == GlobalPlatform {
+		if req.Model == "" {
+			body.Model = "default-model"
+		}
+		// The international service requires the first message to be a system
+		// prompt, including for standard API requests that omit one.
+		if len(body.Messages) == 0 || body.Messages[0].Role != "system" {
+			body.Messages = append([]upstreamMessage{{Role: "system", Content: "You are a helpful assistant."}}, body.Messages...)
+		}
+	}
 
 	backoff := 500 * time.Millisecond
 	var lastErr error
@@ -297,6 +317,14 @@ func (a *Adapter) dial(ctx context.Context, body upstreamRequest) (llm.ResponseS
 	headers := a.auth.BuildHeaders(headerModeFull)
 
 	resp, err := a.cli.openStream(streamCtx, chatCompletionsPath, body, headers)
+	// Older international deployments expose the same protocol under /console.
+	// Only route absence permits fallback; semantic failures must not be replayed.
+	if a.cfg.Platform == GlobalPlatform && err != nil {
+		var f *llm.Failure
+		if errors.As(err, &f) && (f.Code == "http_404" || f.Code == "http_405") {
+			resp, err = a.cli.openStream(streamCtx, "/console/chat/completions", body, headers)
+		}
+	}
 	if err != nil {
 		cancel()
 		return nil, err
@@ -343,7 +371,7 @@ func (a *Adapter) logf(format string, args ...any) {
 
 // String 便于调试。
 func (a *Adapter) String() string {
-	return fmt.Sprintf("workbuddy[base=%s account=%s]", a.cfg.BaseURL, a.CredentialInfo())
+	return fmt.Sprintf("%s[base=%s account=%s]", a.Name(), a.cfg.BaseURL, a.CredentialInfo())
 }
 
 // 编译期断言。
@@ -352,8 +380,8 @@ var _ adapter.Adapter = (*Adapter)(nil)
 // Describe 实现 adapter.Describer，向控制台暴露运行时信息。
 func (a *Adapter) Describe() adapter.Description {
 	desc := adapter.Description{
-		ID:      "workbuddy",
-		Name:    "WorkBuddy / CodeBuddy",
+		ID:      a.Name(),
+		Name:    a.Name(),
 		BaseURL: a.cfg.BaseURL,
 		Account: a.CredentialInfo(),
 	}

@@ -69,7 +69,11 @@ func newLoginManager(logf func(string, ...any)) *loginManager {
 
 // Start 发起一次登录，立刻返回会话（含授权 URL）。
 // platform 决定登录方式；当前仅实现 workbuddy 的设备码授权。
-func (m *loginManager) Start(platform, outPath string) (*loginSnapshot, error) {
+func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*loginSnapshot, error) {
+	baseURL := workbuddy.BaseURLForPlatform(platform)
+	if len(baseURLs) > 0 && baseURLs[0] != "" {
+		baseURL = baseURLs[0]
+	}
 	s := &loginSession{
 		ID:        newSessionID(),
 		Status:    loginPending,
@@ -87,8 +91,9 @@ func (m *loginManager) Start(platform, outPath string) (*loginSnapshot, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 		defer cancel()
 
-		cred, err := workbuddy.Login(ctx, workbuddy.DefaultBaseURL, workbuddy.LoginOptions{
-			BaseURL:    workbuddy.DefaultBaseURL,
+		cred, err := workbuddy.Login(ctx, baseURL, workbuddy.LoginOptions{
+			Region:     platform,
+			BaseURL:    baseURL,
 			OutputPath: outPath,
 			OnAuthURL: func(u string) {
 				select {

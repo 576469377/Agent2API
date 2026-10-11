@@ -228,13 +228,24 @@ func (a *App) models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := make([]map[string]any, 0, len(models))
+	seen := map[string]bool{}
 	for _, m := range models {
-		data = append(data, map[string]any{
-			"id":       m.ID,
-			"object":   "model",
-			"created":  a.createdAt,
-			"owned_by": m.Platform,
-		})
+		ids := []string{m.RoutingID}
+		if m.DefaultRoute || m.RoutingID == "" {
+			ids = append(ids, m.ID)
+		}
+		for _, id := range ids {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			data = append(data, map[string]any{
+				"id":       id,
+				"object":   "model",
+				"created":  a.createdAt,
+				"owned_by": m.Platform,
+			})
+		}
 	}
 	sort.Slice(data, func(i, j int) bool {
 		return data[i]["id"].(string) < data[j]["id"].(string)
@@ -326,9 +337,8 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.RequestTimeout())
 	defer cancel()
 
-	rt := a.hub.RouteWithHint(req.Model, platformHint)
+	stream, rt, err := a.openRoutedStream(ctx, req, platformHint)
 	rec.Platform = rt.ID
-	stream, err := rt.Adapter.Stream(ctx, req)
 	if err != nil {
 		a.fail(rec, err)
 		common.WriteError(w, llm.Wrap(err))
@@ -383,9 +393,8 @@ func (a *App) fail(rec *obs.Record, err error) {
 // 此后的错误只能降级为流内错误事件。
 // platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
 func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
-	rt := a.hub.RouteWithHint(req.Model, platformHint)
+	stream, rt, err := a.openRoutedStream(r.Context(), req, platformHint)
 	rec.Platform = rt.ID
-	stream, err := rt.Adapter.Stream(r.Context(), req)
 	if err != nil {
 		a.fail(rec, err)
 		common.WriteError(w, llm.Wrap(err))

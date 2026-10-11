@@ -11,6 +11,10 @@
 
 ### 新增
 
+- **控制台重构**：统一导航、概览与调用趋势；模型按平台/能力筛选并展示完整路由 ID；账号、模型和调用详情采用侧栏；保留多账号管理、可用性矩阵、流式测试、双语与深浅主题。新增独立控制台入口 `cmd/console`，从磁盘读取前端并透传 API/SSE，无需停止正在使用的反代。
+
+- **双平台模型路由**：国内版/国际版共用控制台；平台限定名避免重名冲突，可配置裸名同名回退（仅建流前的额度/限流/HTTP 5xx）。修正国际模型配置的产品 UA，过滤媒体模型；ZCode 同步改为保留原有模型与设置的增量合并。
+- **WorkBuddy 国际版**：独立平台 `workbuddy-global`，区域隔离的凭证探测/号池/登录/刷新，兼容新版 sym-v1 加密桌面凭证并保留加密回写；国际请求补齐必需的首条 system，复用三种标准协议与工具调用。新增国际版实测报告和 `scripts/sync-zcode.py` 模型元数据同步工具。
 - **ZCode 供应商配置逆向报告**（`docs/research/03-ZCode供应商配置逆向.md`）：`provider_config.json` 完整结构与两处 strict schema 的必填清单、60s 轮询热加载、静默降级的表现与真正的报错日志位置（`~/.zcode/v2/logs/`）、三连坑实录（缺必填字段 / `maxOutputTokens` 多余键 / `modelConfigRules` 嵌套层级）、模型清单与上下文元数据的同步流程；README 中英版 ZCode 小节同步链接
 - **ZCode 接入指南**（README/README.en「接入客户端」）：自定义供应商的协议/Base URL/密钥填值、模型清单来源、手动编辑 `provider_config.json` 的路径与严格 schema 警示，以及「网关需 2026-10-02 之后构建否则被渠道指纹拒绝」的版本要求；脱敏 TIP 同步覆盖 ZCode
 - **每账号并发上限与在途可视化**（`max_concurrency_per_account`，默认 4，0 = 不限）：

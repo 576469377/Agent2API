@@ -22,6 +22,9 @@ type Config struct {
 
 // ModelsConfig 是模型层的配置（别名与路由）。
 type ModelsConfig struct {
+	// Bare IDs may try the same model in other platforms after a quota or HTTP 5xx refusal.
+	// Explicit platform/model IDs and aliases pinned to a platform never cross regions.
+	FallbackOnUnavailable bool `json:"fallback_on_unavailable,omitempty"`
 	// Aliases 是模型别名表：客户端请求的模型名 → 实际路由目标。
 	//
 	// 两种写法：
@@ -48,10 +51,10 @@ type ServerConfig struct {
 
 // UpstreamConfig 是上游配置。
 type UpstreamConfig struct {
-	// Platform 是单平台模式的上游平台（当前仅支持 workbuddy）。
+	// Platform 是单平台模式的上游平台（支持 workbuddy / workbuddy-global）。
 	//
 	// 空字符串（默认）表示「自动集成」：ResolvePlatforms 返回 autoPlatforms
-	// （当前即 workbuddy），网关自动探测本机登录态。显式填写（配置文件或
+	// （国内版与国际版），网关自动探测本机登录态。显式填写（配置文件或
 	// -platform）则固定使用该平台。
 	Platform string `json:"platform"`
 
@@ -119,10 +122,11 @@ type PlatformConfig struct {
 }
 
 // autoPlatforms 是「自动集成」的候选清单（零配置时的默认行为）。
-// 当前仅 workbuddy；新增平台适配器后在此追加即可。
+// 国内版与国际版；新增平台适配器后在此追加即可。
 // 顺序即默认平台优先级：列表第一个是默认平台，未知模型名透传给它。
 var autoPlatforms = []PlatformConfig{
 	{ID: "workbuddy"},
+	{ID: "workbuddy-global"},
 }
 
 // ResolvePlatforms 把配置归一化为「实际要启动的平台列表」。

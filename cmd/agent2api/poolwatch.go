@@ -32,7 +32,7 @@ func startPoolWatchers(hub *app.Hub, cfg config.Config, logger *log.Logger) {
 	for _, rt := range hub.Platforms() {
 		dir := rt.AccountsDir()
 		if dir == "" {
-			dir = app.DefaultAccountsDir()
+			dir = workbuddy.AccountsDirForPlatform(rt.ID)
 		}
 		go watchAccountDir(rt, dir, cfg, logger)
 	}
@@ -75,32 +75,25 @@ func watchAccountDir(rt *app.PlatformRuntime, dir string, cfg config.Config, log
 				continue
 			}
 			path := filepath.Join(dir, name)
+			if !looksLikeCredential(path) {
+				continue
+			}
 
-			adp, err := workbuddy.New(workbuddy.Config{
-				CredentialPath:     path,
-				Sanitize:           cfg.Upstream.Sanitize,
-				RequestTimeout:     cfg.RequestTimeout(),
-				StreamIdleTimeout:  cfg.StreamIdleTimeout(),
-				StreamTotalTimeout: cfg.StreamTotalTimeout(),
-				ModelCacheTTL:      cfg.ModelCacheTTL(),
-				Logger:             logf,
-			})
+			adp, err := newPlatformAdapter(cfg.CloneForPlatform(rt.Cfg), path, logf)
 			if err != nil {
 				// 凭证无效（损坏/缺字段/或与现有账号同一 UID）——静默重试，
 				// 同一错误只记一次日志，避免每 10 秒刷屏。
 				if lastErr[name] != err.Error() {
 					lastErr[name] = err.Error()
-					// 同一文件同一错误只记一次：默认目录里躺着几十个
-					// 非凭证文件，每 10s 刷一遍是日志灾难。
-					if lastErr[name] != err.Error() {
-						lastErr[name] = err.Error()
-						logf("号池目录候选 %s 暂不可入池: %v", name, err)
-					}
+					logf("号池目录候选 %s 暂不可入池: %v", name, err)
 				}
 				continue
 			}
-			// workbuddy.New 返回具体类型，AccountUID 是它的方法，直接调用。
-			uid := adp.AccountUID()
+			// Factories return the shared adapter interface.
+			uid := ""
+			if u, ok := adp.(interface{ AccountUID() string }); ok {
+				uid = u.AccountUID()
+			}
 			if uid != "" && existingUID[uid] {
 				// 与已有账号同一身份（如桌面凭证的导出副本）——不入池不报错。
 				lastErr[name] = "duplicate"

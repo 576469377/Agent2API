@@ -20,7 +20,7 @@ func TestDefaultValues(t *testing.T) {
 		t.Fatalf("默认 platform 应为空（自动集成）, got %q", cfg.Upstream.Platform)
 	}
 	pls := cfg.ResolvePlatforms()
-	if len(pls) != 1 || pls[0].ID != "workbuddy" {
+	if len(pls) != 2 || pls[0].ID != "workbuddy" || pls[1].ID != "workbuddy-global" {
 		t.Fatalf("自动集成应返回 workbuddy, got %+v", pls)
 	}
 	if !pls[0].Sanitize {

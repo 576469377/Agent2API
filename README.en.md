@@ -2,7 +2,7 @@
 
 A local reverse-proxy gateway that translates AI agent platforms' private protocols into standard LLM APIs.
 
-Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**: it exposes Chat Completions, Responses, and Anthropic Messages, with a built-in multi-platform Hub that routes each request by model name — the bundled platform today is **WorkBuddy / CodeBuddy**.
+Claude Code, Codex CLI, and any OpenAI / Anthropic client work **without modification**: it exposes Chat Completions, Responses, and Anthropic Messages, with a built-in multi-platform Hub that routes each request by model name — bundled platforms include **WorkBuddy / CodeBuddy China and WorkBuddy International**.
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.md) · [Disclaimer](DISCLAIMER.md)
 
@@ -82,6 +82,20 @@ curl -s http://127.0.0.1:8787/health
 > [!WARNING]
 > **Listening on `0.0.0.0` without `-api-key` means anyone on your network can spend your quota.**
 
+### WorkBuddy International
+
+Zero-config startup discovers China and international desktop credentials separately. Use `agent2api -platform workbuddy-global` to select international only, or `agent2api login -region global` for device login. International accounts use `~/.workbuddy-ai`.
+
+New desktop sym-v1 encrypted credentials are read through the installed client's local storage API and retain their encrypted format when refreshed. For custom installations, set `AGENT2API_WORKBUDDY_EXECUTABLE`. Windows is verified end to end; see the [international integration report](docs/research/04-WorkBuddy国际版接入.md) for other systems and current model availability.
+
+Sync verified models and their context limits to ZCode, preserving other providers and backing up its configuration:
+
+```bash
+python scripts/sync-zcode.py --config config.json
+```
+
+Bare model IDs use platform declaration order. Qualify IDs as `workbuddy/model` or `workbuddy-global/model` to select a region. Optional `models.fallback_on_unavailable: true` allows bare IDs to try the same model in other platforms on quota/rate-limit or HTTP 5xx refusals before a stream is accepted. Pinned routes never fall back. ZCode sync uses `platform/model` IDs for every platform, migrates legacy model references, merges entries and preserves existing models, preferences, ordering and other providers; it does not change the default unless `--default-model` is supplied.
+
 ### Connecting clients
 
 **Claude Code**
@@ -142,16 +156,18 @@ curl http://127.0.0.1:8787/v1/responses \
 
 ## Web Console
 
+The redesigned console combines regional platforms with source/capability filters, routing explanations, account health, request details and a streaming playground. A standalone console can load new UI assets **without restarting the gateway or changing ZCode's endpoint**; see the [console guide](docs/console.md).
+
 The console is compiled in with `go:embed`: no frontend build, no CDN dependencies (charts are native SVG). Visit `http://127.0.0.1:8787` after starting.
 
 | Page | What it shows |
 |---|---|
-| **Overview** | Status wall, request trend, token usage, per-protocol/model/account rankings; auto-refresh with countdown |
-| **Accounts** | Pool management: scheduling and login state, credential expiry, per-account usage; enable/disable, reset cooldown, re-login, add account |
+| **Overview** | Status summary, request/token trends, usage and model/protocol/account breakdown; refreshes every 10 seconds while visible |
+| **Accounts** | Platform filtering, separate scheduling and credential status; details include expiry, recorded usage and management actions |
 | **Chat** | Talk to the gateway directly to verify protocols and models |
 | **Platforms** | Upstream URL, account count, model count, health |
 | **Models** | Model list with capability tags; switchable account × model matrix |
-| **Request Log** | Last 200 requests (annotated with the account actually used), failed rows highlighted |
+| **Request Log** | Last 200 requests, platform/protocol/status/search filters, pagination, error details and CSV export |
 | **Settings** | Sanitization toggle (hot reload), model refetch, access key, effective config |
 
 > Only the Chat page's **math rendering** lazily loads KaTeX from a CDN on first use; offline it falls back to plain monospace text. Everything else has zero external dependencies.
@@ -230,7 +246,7 @@ Precedence: CLI flags > environment variables > config file > built-in defaults.
 | `-metrics-file` | — | Metrics persistence path; defaults to `metrics.json` next to the config file, or `agent2api-metrics.json` in the working directory without one |
 | `-no-persist` | — | Disable metrics persistence |
 | `-no-sanitize` | — | Disable content sanitization |
-| `-platform` | — | Pin a single platform (only `workbuddy` today); by default all built-in platforms are auto-integrated |
+| `-platform` | — | Pin a single platform (`workbuddy` for China / `workbuddy-global` for international); by default all built-in platforms are auto-integrated |
 
 ### Multi-platform config (upstream.platforms)
 
@@ -249,7 +265,7 @@ To aggregate several upstream platforms in one gateway, declare them under `upst
 - **Routing**: `/v1/models` merges every platform's catalog (each entry carries its `platform`); a request's `model` goes to the platform whose catalog contains it, and **unknown model names pass through to the default platform** (the first in the list) — preserving the single-platform "let upstream decide" semantics
 - **Field fallback**: a platform's `credential_path` / `accounts_dir` / `base_url` / timeout entries fall back to the top-level fields when omitted; platforms are fully isolated (separate pools, cooldowns, login sessions)
 - **⚠️ The `sanitize` exception**: a boolean can't distinguish "omitted" from "false" — when platforms are declared explicitly, **each one must state `"sanitize": true`** (required for Claude Code / Codex); omitting it turns sanitization off for that platform
-- **Zero config (default)**: all built-in platforms are auto-integrated (just workbuddy today); platforms that can't log in are skipped with a warning
+- **Zero config (default)**: both China and international platforms are auto-integrated; platforms that can't log in are skipped with a warning
 
 Subcommands:
 

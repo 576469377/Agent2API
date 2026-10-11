@@ -16,6 +16,8 @@ func sandboxHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // Windows：os.UserHomeDir 读的是它
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	return home
 }
 
@@ -132,12 +134,13 @@ func TestLooksLikeCredentialFiltersClientData(t *testing.T) {
 		body []byte
 		want bool
 	}{
-		"nested.json":  {[]byte(`{"auth":{"accessToken":"tok"}}`), true},
-		"flat.json":    {[]byte(`{"accessToken":"tok"}`), true},
-		"client.json":  {[]byte(`{"mcpServers":{},"enabled":true}`), false},
-		"empty.json":   {[]byte(`{}`), false},
-		"array.json":   {[]byte(`[1,2,3]`), false},
-		"nulltok.json": {[]byte(`{"auth":{"accessToken":""}}`), false},
+		"nested.json":    {[]byte(`{"auth":{"accessToken":"tok"}}`), true},
+		"encrypted.json": {[]byte(`{"auth":{"accessToken":{"$wbEncrypted":1,"envelope":"test"}}}`), true},
+		"flat.json":      {[]byte(`{"accessToken":"tok"}`), true},
+		"client.json":    {[]byte(`{"mcpServers":{},"enabled":true}`), false},
+		"empty.json":     {[]byte(`{}`), false},
+		"array.json":     {[]byte(`[1,2,3]`), false},
+		"nulltok.json":   {[]byte(`{"auth":{"accessToken":""}}`), false},
 	}
 	for name, c := range cases {
 		p := filepath.Join(dir, name)

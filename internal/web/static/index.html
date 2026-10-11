@@ -1,300 +1,105 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- color-scheme 跟随系统：让原生控件（select/input/滚动条）与暗色模式一起切换 -->
-<meta name="color-scheme" content="light dark">
-<title>Agent2API 控制台</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>">
-</head>
-<body>
-<!-- 图标 sprite：内联零请求、零 CDN，符号由 .ic 引用 -->
-<svg style="display:none" aria-hidden="true">
-  <symbol id="i-overview" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm10 8h8V11h-8v10zM3 21h8v-6H3v6zm10-12h8V3h-8v6z"/></symbol>
-  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM7 9h10v2H7V9zm6 5H7v-2h6v2zm4-6H7V6h10v2z"/></symbol>
-  <symbol id="i-platform" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 7.4L4.6 6 12 2.6 19.4 6 12 9.4zM2 17l10 5 10-5-2.2-1.1L12 19.6 4.2 15.9 2 17zm0-5 10 5 10-5-2.2-1.1L12 14.6 4.2 10.9 2 12z"/></symbol>
-  <symbol id="i-model" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zm-9 5.6-6-3.4V9.4l6 3.4v8.8z"/></symbol>
-  <symbol id="i-log" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></symbol>
-  <symbol id="i-account" viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></symbol>
-  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3H9l-.3 2.5c-.6.3-1.2.6-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1L9 21h6l.3-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></symbol>
-</svg>
-<div class="shell">
-
-  <!-- ───────── 侧边栏 ───────── -->
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="brand-mark">⚡</span>
-      <div class="brand-text">
-        <strong>Agent2API</strong>
-        <small id="brandSub">控制台</small>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Agent2API · 控制台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%232562eb'/%3E%3Cpath d='M23 8 12 23h8l-3 9 12-16h-8z' fill='white'/%3E%3C/svg%3E"
+    />
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("agent2api_theme") || "auto";
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="主导航">
+        <a class="brand" href="#overview"
+          ><span class="brand-icon">A<span>2</span></span
+          ><span
+            ><strong>Agent2API</strong
+            ><small id="brandSubtitle">统一模型网关</small></span
+          ></a
+        >
+        <div class="nav-caption" id="navCaption">工作空间</div>
+        <nav id="nav"></nav>
+        <div class="sidebar-bottom">
+          <a class="sidebar-shortcut" href="#chat" id="sidebarShortcut"></a>
+          <div class="sidebar-status">
+            <span class="status-dot" id="healthDot"></span
+            ><span id="healthText">连接中</span
+            ><span class="version" id="version"></span>
+          </div>
+          <div class="preferences">
+            <select id="langSel" aria-label="语言 / Language">
+              <option value="zh">中文</option>
+              <option value="en">English</option></select
+            ><select id="themeSel" aria-label="主题 / Theme">
+              <option value="auto">跟随系统</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+          </div>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <button
+            class="icon-button mobile-menu"
+            id="menuButton"
+            aria-label="展开导航"
+          ></button>
+          <div class="breadcrumbs">
+            <span>Agent2API</span><span class="breadcrumb-divider">/</span
+            ><strong id="breadcrumb">概览</strong>
+          </div>
+          <div class="topbar-actions">
+            <span class="connection-badge" id="connectionBadge"
+              >正在连接网关</span
+            ><button class="button small" id="copyEndpoint"></button>
+          </div>
+        </header>
+        <main id="main" tabindex="-1">
+          <header class="page-header">
+            <div>
+              <div class="eyebrow" id="pageEyebrow">WORKSPACE OVERVIEW</div>
+              <h1 id="pageTitle">网关概览</h1>
+              <p id="pageDescription"></p>
+            </div>
+            <div class="page-actions">
+              <span class="updated-at" id="updatedAt"></span
+              ><button class="button" id="refreshButton"></button>
+            </div>
+          </header>
+          <div
+            class="notice error-notice"
+            id="errorBanner"
+            role="alert"
+            hidden
+          ></div>
+          <div id="pageContent">
+            <div class="loading-state">
+              <span class="spinner"></span>正在连接网关…
+            </div>
+          </div>
+        </main>
+        <footer class="workspace-footer">
+          <span id="footerText">一个入口，连接全部平台。</span
+          ><span id="footerEndpoint"></span>
+        </footer>
       </div>
     </div>
-
-    <nav class="nav" id="nav">
-      <div class="nav-group">运营</div>
-      <button class="nav-item active" data-page="overview"><svg class="ic"><use href="#i-overview"/></svg><span data-i18n="nav.overview">概览</span></button>
-      <button class="nav-item" data-page="requests"><svg class="ic"><use href="#i-log"/></svg><span data-i18n="nav.requests">调用日志</span></button>
-      <div class="nav-group">上游</div>
-      <button class="nav-item" data-page="accounts"><svg class="ic"><use href="#i-account"/></svg><span data-i18n="nav.accounts">账号</span></button>
-      <button class="nav-item" data-page="platforms"><svg class="ic"><use href="#i-platform"/></svg><span data-i18n="nav.platforms">平台</span></button>
-      <button class="nav-item" data-page="models"><svg class="ic"><use href="#i-model"/></svg><span data-i18n="nav.models">模型</span></button>
-      <div class="nav-group">工具</div>
-      <button class="nav-item" data-page="chat"><svg class="ic"><use href="#i-chat"/></svg><span data-i18n="nav.chat">对话</span></button>
-      <button class="nav-item" data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span data-i18n="nav.settings">设置</span></button>
-    </nav>
-
-    <div class="pref-row">
-      <select id="langSel" class="pref-sel" title="Language / 语言">
-        <option value="zh">中文</option>
-        <option value="en">English</option>
-      </select>
-      <select id="themeSel" class="pref-sel" title="主题 / Theme">
-        <option value="auto" data-i18n="theme.auto">跟随系统</option>
-        <option value="light" data-i18n="theme.light">浅色</option>
-        <option value="dark" data-i18n="theme.dark">深色</option>
-      </select>
-    </div>
-
-    <div class="side-foot">
-      <div class="health" id="health">
-        <span class="dot" id="dot"></span><span id="healthText">连接中…</span>
-      </div>
-      <div class="side-meta" id="sideMeta"></div>
-    </div>
-  </aside>
-
-  <!-- ───────── 主区 ───────── -->
-  <main class="main" id="main">
-
-    <!-- 概览 -->
-    <section class="page active" id="page-overview">
-      <header class="page-head">
-        <div>
-          <div class="crumb" data-crumb></div>
-          <h1 data-i18n="page.overview">概览</h1>
-          <p class="sub" id="ovSub" data-i18n="sub.overview">网关运行状况与用量统计</p>
-        </div>
-        <div class="page-actions">
-          <span class="live" id="ovLive"></span>
-          <button class="btn" id="btnRefresh" data-i18n="btn.refresh">刷新</button>
-        </div>
-      </header>
-
-      <div class="stat-grid" id="statGrid"></div>
-
-      <div class="panel-row">
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="chart.req">请求趋势</h2><span class="panel-note" data-i18n="chart.win">最近 30 分钟</span></div>
-          <div class="chart" id="chartReq"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="chart.tok">Token 消耗</h2><span class="panel-note" data-i18n="chart.win">最近 30 分钟</span></div>
-          <div class="chart" id="chartTok"></div>
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="chart.proto">协议分布</h2></div>
-          <div class="rank" id="rankProto"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="chart.model">模型调用排行</h2></div>
-          <div class="rank" id="rankModel"></div>
-        </div>
-      </div>
-
-      <div class="panel-row" id="panelAcctRank" style="display:none">
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="chart.acct">账号用量排行</h2><span class="panel-note" data-i18n="chart.byreq">按请求数</span></div>
-          <div class="rank" id="rankAccount"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head"><h2 data-i18n="chart.recent">最近请求</h2><button class="link" data-goto="requests" data-i18n="chart.viewall">查看全部</button></div>
-        <div id="recentShort"></div>
-      </div>
-    </section>
-
-    <!-- 对话 -->
-    <section class="page" id="page-chat">
-      <header class="page-head">
-        <div class="crumb" data-crumb></div>
-        <div><h1 data-i18n="page.chat">对话</h1><p class="sub" data-i18n="sub.chat">直接与网关对话，验证协议与模型表现</p></div>
-        <div class="page-actions">
-          <select id="model" title="模型"></select>
-          <button class="btn" id="btnChatSettings">参数</button>
-          <button class="btn" id="btnClear">清空</button>
-        </div>
-      </header>
-
-      <div class="chat-params" id="chatParams">
-        <label>温度 <input type="number" id="temperature" step="0.1" min="0" max="2" placeholder="默认"></label>
-        <label>最大输出 <input type="number" id="maxTokens" step="256" min="1" placeholder="默认"></label>
-        <label>思考强度
-          <select id="effort"><option value="">默认</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select>
-        </label>
-        <label>系统提示 <input type="text" id="system" placeholder="可选"></label>
-      </div>
-
-      <div class="banner" id="banner"></div>
-
-      <div class="messages" id="messages">
-        <div class="empty" id="empty">
-          <h2>想聊点什么？</h2>
-          <p>这里直接连到本机运行的 Agent2API 网关，走标准 OpenAI 接口。</p>
-          <div class="suggestions">
-            <button data-prompt="用三句话解释什么是反向代理">解释反向代理</button>
-            <button data-prompt="帮我写一个 Go 函数，判断字符串是否是回文">写个 Go 函数</button>
-            <button data-prompt="给我三个提高代码可读性的建议">代码可读性建议</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="composer">
-        <div class="composer-box">
-          <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-          <div class="composer-bar">
-            <span class="hint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
-            <div class="spacer"></div>
-            <span class="status" id="status"></span>
-            <button class="btn primary" id="btnSend">发送</button>
-            <button class="btn" id="btnStop" style="display:none">停止</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 账号 -->
-    <section class="page" id="page-accounts">
-      <header class="page-head">
-        <div>
-          <div class="crumb" data-crumb></div>
-          <h1 data-i18n="page.accounts">账号</h1>
-          <p class="sub" id="acctSub" data-i18n="sub.accounts">号池中的上游账号与登录状态</p>
-        </div>
-        <div class="page-actions">
-          <button class="btn" id="btnAddAccount" data-i18n="btn.add">添加账号</button>
-          <button class="btn" id="btnReloadAccounts" data-i18n="btn.reload">刷新</button>
-        </div>
-      </header>
-      <div id="accountList"></div>
-    </section>
-
-    <!-- 平台 -->
-    <section class="page" id="page-platforms">
-      <header class="page-head">
-        <div class="crumb" data-crumb></div>
-        <div><h1 data-i18n="page.platforms">平台</h1><p class="sub" data-i18n="sub.platforms">已接入的上游平台，以及后续规划</p></div>
-        <div class="page-actions"><button class="btn" id="btnReloadPlatforms" data-i18n="btn.reload">刷新</button></div>
-      </header>
-      <div id="accountPool"></div>
-      <div id="platformList"></div>
-      <h3 class="sec-title">规划中</h3>
-      <div id="plannedList"></div>
-    </section>
-
-    <!-- 模型 -->
-    <section class="page" id="page-models">
-      <header class="page-head">
-        <div class="crumb" data-crumb></div>
-        <div><h1 data-i18n="page.models">模型</h1><p class="sub" id="modelsSub" data-i18n="sub.models">所有平台可用模型</p></div>
-        <div class="page-actions">
-          <input type="text" id="modelFilter" class="filter" placeholder="筛选模型…">
-          <select id="modelView" title="视图">
-            <option value="list">列表</option>
-            <option value="matrix">账号矩阵</option>
-          </select>
-          <button class="btn" id="btnReloadModels" data-i18n="btn.reload">刷新</button>
-        </div>
-      </header>
-      <div class="table-wrap"><div class="table-scroll"><table class="table" id="modelTable"></table></div></div>
-    </section>
-
-    <!-- 日志 -->
-    <section class="page" id="page-requests">
-      <header class="page-head">
-        <div class="crumb" data-crumb></div>
-        <div><h1 data-i18n="page.requests">调用日志</h1><p class="sub" data-i18n="sub.requests">最近 200 条请求</p></div>
-        <div class="page-actions">
-          <select id="reqFilter">
-            <option value="">全部</option>
-            <option value="fail">仅失败</option>
-            <option value="ok">仅成功</option>
-          </select>
-          <button class="btn" id="btnReloadReq" data-i18n="btn.reload">刷新</button>
-        </div>
-      </header>
-      <div class="table-wrap"><div class="table-scroll"><table class="table" id="reqTable"></table></div></div>
-    </section>
-
-    <!-- 设置 -->
-    <section class="page" id="page-settings">
-      <header class="page-head">
-        <div class="crumb" data-crumb></div>
-        <div><h1 data-i18n="page.settings">设置</h1><p class="sub" data-i18n="sub.settings">运行期可调项与当前生效配置</p></div>
-      </header>
-
-      <div class="panel">
-        <div class="panel-head"><h2 data-i18n="set.runtime">运行期开关</h2></div>
-        <div class="setting">
-          <div class="setting-info">
-            <strong>内容脱敏</strong>
-            <small>在敏感词中插入零宽空格，规避上游关键词审核误伤。接入 Claude Code / Codex 时强烈建议开启。</small>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="swSanitize">
-            <span></span>
-          </label>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <strong>重新拉取模型清单</strong>
-            <small>立即失效并重建模型缓存，用于上游模型更新后同步。</small>
-          </div>
-          <button class="btn" id="btnRefreshModels" data-i18n="btn.pull">拉取</button>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <strong>网关访问密钥</strong>
-            <small>网关以 -api-key 启动时，控制台会自动携带这里保存的密钥调用 /api/*。仅保存在本浏览器，不会发送给任何第三方。</small>
-          </div>
-          <div style="display:flex;gap:6px">
-            <input type="password" id="apiKeyInput" placeholder="未设置" style="width:180px" autocomplete="off">
-            <button class="btn" id="btnSaveKey" data-i18n="btn.save">保存</button>
-            <button class="btn" id="btnClearKey" data-i18n="btn.clearkey">清除</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head"><h2 data-i18n="set.effective">当前生效配置</h2></div>
-        <div class="kv" id="configView"></div>
-        <p class="note">监听地址、上游地址、超时等需要重启生效，请用配置文件或启动参数修改，控制台不做假动作。</p>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head"><h2 data-i18n="set.access">接入方式</h2></div>
-        <div class="kv" id="usageView"></div>
-      </div>
-    </section>
-
-  </main>
-</div>
-<dialog id="loginDialog" class="dlg">
-  <h3>添加账号 / 重新登录</h3>
-  <p class="dlg-hint" id="loginHint"></p>
-  <input type="text" id="loginUrl" class="filter" style="width:100%">
-  <div class="dlg-actions">
-    <span id="loginState" class="dlg-state"></span>
-    <div class="spacer"></div>
-    <button class="btn" id="loginOpen">在浏览器打开</button>
-    <button class="btn" onclick="document.getElementById('loginDialog').close()">关闭</button>
-  </div>
-</dialog>
-<script src="/static/app.js"></script>
-</body>
+    <dialog id="detailDialog" class="drawer">
+      <div id="detailContent"></div>
+    </dialog>
+    <dialog id="modal" class="modal"><div id="modalContent"></div></dialog>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
 </html>

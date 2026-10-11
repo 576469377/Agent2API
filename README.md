@@ -2,7 +2,7 @@
 
 把 AI Agent 平台的私有协议翻译成标准 LLM API 的本地反向代理网关。
 
-Claude Code、Codex CLI 及任意 OpenAI / Anthropic 客户端**零改造**接入：对外提供 Chat Completions、Responses、Anthropic Messages 三种协议，内置多平台枢纽（Hub）按模型名把请求路由到对应上游 —— 当前内置平台为 **WorkBuddy / CodeBuddy**。
+Claude Code、Codex CLI 及任意 OpenAI / Anthropic 客户端**零改造**接入：对外提供 Chat Completions、Responses、Anthropic Messages 三种协议，内置多平台枢纽（Hub）按模型名把请求路由到对应上游 —— 当前内置平台为 **WorkBuddy / CodeBuddy 国内版与 WorkBuddy 国际版**。
 
 [简体中文](README.md) · [English](README.en.md) · [更新日志](CHANGELOG.md) · [免责声明](DISCLAIMER.md)
 
@@ -82,6 +82,12 @@ curl -s http://127.0.0.1:8787/health
 > [!WARNING]
 > **监听 `0.0.0.0` 且未设 `-api-key`，同网段任何人都能用你的账号额度。**
 
+### WorkBuddy 国际版
+
+零配置启动会分别探测国内版和国际版的登录态。只使用国际版时运行 `agent2api -platform workbuddy-global`；没有桌面登录态时使用 `agent2api login -region global`。国际版账号目录为 `~/.workbuddy-ai`，与国内版隔离。
+
+支持新版国际桌面客户端的加密凭证读取与加密回写。自定义安装位置可设置 `AGENT2API_WORKBUDDY_EXECUTABLE`。Windows 已端到端验证，其他系统的加密凭证支持详见 [国际版接入与实测报告](docs/research/04-WorkBuddy国际版接入.md)。模型目录按账号动态获取；目录里出现的旧模型不一定仍有服务，接入客户端前应实际验证。
+
 ### 接入客户端
 
 **Claude Code**
@@ -105,6 +111,12 @@ export ANTHROPIC_API_KEY=任意值     # 未配置网关密钥时不会校验
 | Base URL | `http://127.0.0.1:8787/v1` |
 | API Key | 随意填（网关未配置密钥时不校验） |
 | 模型 | 逐个添加，清单以 `agent2api models` 或控制台「模型」页为准 |
+
+将国内版与国际版模型合并到同一个 ZCode 供应商，模型 ID 统一使用 `平台/模型` 前缀（先启动网关；自动备份，保留已有模型、排序、能力设置及其他供应商）：
+
+```bash
+python scripts/sync-zcode.py --config config.json
+```
 
 不走 UI 也可以直接编辑 `~/.zcode/v2/provider_config.json`：在 `providerRules` 追加一条规则（`api.type: "anthropic-messages"`、`api.baseUrl`、`personalModelIds` 填模型清单），并把它加进 `providerOrder`——客户端每 60s 热加载，无需重启。改前备份该文件：schema 是严格校验的，字段缺失/多余/嵌套错位都会**整份配置被拒**（UI 里所有个人供应商消失），排错与完整字段清单见 [`docs/research/03-ZCode供应商配置逆向.md`](docs/research/03-ZCode供应商配置逆向.md)；模型元数据（真实上下文窗口等）的同步方法同见该文。
 
@@ -142,16 +154,18 @@ curl http://127.0.0.1:8787/v1/responses \
 
 ## 网页控制台
 
+新版统一管理国内版与国际版，支持平台和能力筛选、路由规则、账号状态、调用详情、流式模型测试与中英文/深浅主题。正在使用反代时，可以启动独立控制台加载新界面，**无需重启原网关或修改 ZCode 地址**，详见[控制台使用说明](docs/console.md)。
+
 控制台用 `go:embed` 编进二进制：无前端构建、无 CDN 依赖（原生 SVG 图表）。启动后访问 `http://127.0.0.1:8787`。
 
 | 页面 | 内容 |
 |---|---|
-| **概览** | 状态墙、请求趋势、Token 消耗、协议/模型/账号排行；带倒计时的自动刷新 |
-| **账号** | 号池管理：调度与登录状态、凭证有效期、每账号用量；启停、清冷却、重新登录、添加账号 |
+| **概览** | 状态摘要、调用 / Token 趋势、用量、协议/模型/账号统计；每 10 秒刷新，隐藏页面时暂停 |
+| **账号** | 按平台筛选账号，区分调度与登录状态；详情内查看凭证、用量并启停、重置冷却与重新登录 |
 | **对话** | 直接与网关对话，验证协议与模型表现 |
 | **平台** | 上游地址、账号数、模型数、健康状态 |
 | **模型** | 模型清单与能力标签，可切换账号 × 模型矩阵（列头显示每账号**在途/并发上限**与整号冷却倒计时） |
-| **调用日志** | 最近 200 条请求（标注实际使用的账号），失败行高亮 |
+| **调用日志** | 最近 200 条请求，按平台/协议/状态/关键词筛选、分页、错误详情和 CSV 导出 |
 | **设置** | 脱敏开关（热更新）、重新拉取模型清单、访问密钥、当前生效配置 |
 
 > 仅对话页的**公式渲染**会在首次遇到数学公式时从 CDN 加载 KaTeX，离线时回退为等宽原文，不影响其他功能。
@@ -230,7 +244,7 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 | `-metrics-file` | — | 指标落盘路径；缺省写配置文件同目录的 `metrics.json`，无配置文件时写工作目录的 `agent2api-metrics.json` |
 | `-no-persist` | — | 关闭指标落盘 |
 | `-no-sanitize` | — | 关闭内容脱敏 |
-| `-platform` | — | 固定单平台（当前仅 `workbuddy`）；缺省自动集成全部内置平台 |
+| `-platform` | — | 固定单平台（`workbuddy` 国内版 / `workbuddy-global` 国际版）；缺省自动集成全部内置平台 |
 
 ### 多平台配置（upstream.platforms）
 
@@ -246,10 +260,11 @@ agent2api -accounts-dir auths                 # 启动（工作目录有 auths/ 
 }
 ```
 
-- **路由语义**：`/v1/models` 合并所有平台的模型清单（每项带 `platform` 归属）；请求的 `model` 精确命中哪个平台的目录就路由到哪个平台，**未命中则透传给默认平台**（配置列表的第一个）——保持单平台时代「未知模型名交给上游」的语义
+- **路由语义**：裸模型名按配置中的平台顺序选取，同名时优先第一个平台；`workbuddy/模型名` 与 `workbuddy-global/模型名` 固定区域。`/v1/models` 返回唯一的裸模型名和各平台限定名，`/api/models` 提供 `routing_id` 与 `default_route`。未知裸模型名透传默认平台。
+- **同名回退**：`models.fallback_on_unavailable: true` 时，裸名在建流前遇到额度不足、限流或 HTTP 5xx，可尝试其他平台目录中的同名模型。默认为关闭；显式平台限定名或指定平台的别名始终固定区域，响应开始后不回退。用 `models.aliases: {"glm-5.3":"workbuddy-global/glm-5.3"}` 可覆盖某个裸名的默认路由。
 - **字段回退**：平台内的 `credential_path` / `accounts_dir` / `base_url` / 各超时项缺省时回退到顶层同名配置；平台之间完全隔离（各自独立的号池、冷却与登录会话）
 - **⚠️ `sanitize` 例外**：布尔值无法区分「未填」与「false」，显式声明 platforms 时**每个平台都要显式写 `"sanitize": true`**（接 Claude Code / Codex 必需），漏写该平台会裸奔
-- **零配置（缺省）**：自动集成全部内置平台（当前即 workbuddy），能登录哪个就用哪个；探测不到的平台跳过并告警
+- **零配置（缺省）**：自动集成国内版与国际版，能登录哪个就用哪个；探测不到的平台跳过并告警
 
 子命令：
 

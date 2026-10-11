@@ -19,7 +19,9 @@ import (
 // Platform 字段是模型的来源平台 ID，控制台据此分类筛选，客户端据此理解归属。
 type ModelInfo struct {
 	adapter.ModelInfo
-	Platform string `json:"platform"`
+	Platform     string `json:"platform"`
+	RoutingID    string `json:"routing_id"`
+	DefaultRoute bool   `json:"default_route"`
 }
 
 // PlatformRuntime 是一个上游平台在进程内的运行期实例。
@@ -40,7 +42,8 @@ type PlatformRuntime struct {
 // platformDefaultBaseURLs 是各平台的默认上游地址，
 // 平台配置未显式给 base_url 时兜底（与各适配器内置默认一致）。
 var platformDefaultBaseURLs = map[string]string{
-	"workbuddy": "https://copilot.tencent.com",
+	"workbuddy":        "https://copilot.tencent.com",
+	"workbuddy-global": "https://www.workbuddy.ai",
 }
 
 // Hub 是多平台集成的核心：一个进程里管着所有上游平台，
@@ -59,8 +62,9 @@ type Hub struct {
 	platforms map[string]*PlatformRuntime
 	order     []string
 	// index 模型 ID → 平台 ID。启动时从各平台 ListModels 构建；
-	// 模型 ID 冲突时首个平台胜出并告警——两平台同名模型必然有一个路由不到。
-	index map[string]string
+	// 模型 ID 冲突时首个平台处理裸模型名；平台/模型名始终可指定来源。
+	index   map[string]string
+	catalog map[string][]adapter.ModelInfo
 	// aliases 是模型别名表（见 aliases.go）：请求模型名 → 实际路由目标。
 	// 装配期由 SetAliases 装载，运行期只读。
 	aliases map[string]aliasTarget
@@ -80,6 +84,7 @@ func NewHub(runtimes []*PlatformRuntime, logger *log.Logger) (*Hub, error) {
 	h := &Hub{
 		platforms: map[string]*PlatformRuntime{},
 		index:     map[string]string{},
+		catalog:   map[string][]adapter.ModelInfo{},
 		logger:    logger,
 	}
 	for _, rt := range runtimes {
@@ -99,6 +104,7 @@ func NewHub(runtimes []*PlatformRuntime, logger *log.Logger) (*Hub, error) {
 			h.logger.Printf("平台 %s 模型枚举失败（不影响启动，稍后可刷新）: %v", rt.ID, err)
 			continue
 		}
+		h.catalog[rt.ID] = models
 		for _, m := range models {
 			if owner, exists := h.index[m.ID]; exists {
 				h.logger.Printf("模型 %s 同时存在于 %s 与 %s，路由到先配置的 %s", m.ID, owner, rt.ID, owner)
@@ -126,7 +132,7 @@ func (h *Hub) Route(model string) *PlatformRuntime {
 	if pid, ok := h.index[model]; ok {
 		return h.platforms[pid]
 	}
-	return h.DefaultPlatform()
+	return h.platforms[h.order[0]]
 }
 
 // Platforms 按配置声明顺序返回所有平台运行期实例。
@@ -162,6 +168,10 @@ func (h *Hub) DefaultPlatform() *PlatformRuntime {
 
 // OwnerOf 返回模型 ID 的所属平台 ID；未知返回空串。
 func (h *Hub) OwnerOf(model string) string {
+	model, hint := h.ResolveAlias(model)
+	if hint != "" {
+		return hint
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.index[model]
@@ -191,17 +201,29 @@ func (h *Hub) Describe() []adapter.Description {
 //
 // 某个平台枚举失败时跳过它（记日志），不让一个平台的上游抖动拖垮整个清单。
 func (h *Hub) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	var out []ModelInfo
 	for _, rt := range h.Platforms() {
 		ms, err := rt.Adapter.ListModels(ctx)
 		if err != nil {
 			h.logger.Printf("平台 %s 模型枚举失败: %v", rt.ID, err)
 			continue
 		}
-		for _, m := range ms {
-			out = append(out, ModelInfo{ModelInfo: m, Platform: rt.ID})
+		h.mu.Lock()
+		h.catalog[rt.ID] = ms
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
+	// Rebuild after refresh. Keep last good data for a temporarily unavailable platform.
+	h.index = map[string]string{}
+	var out []ModelInfo
+	for _, pid := range h.order {
+		for _, m := range h.catalog[pid] {
+			if _, exists := h.index[m.ID]; !exists {
+				h.index[m.ID] = pid
+			}
+			out = append(out, ModelInfo{ModelInfo: m, Platform: pid, RoutingID: pid + "/" + m.ID, DefaultRoute: h.index[m.ID] == pid})
 		}
 	}
+	h.mu.Unlock()
 	// 别名也进目录：客户端通常只认列表里出现过的模型名，
 	// 不列出来它们就不会去用（控制台同理，需要一个地方能查到别名）。
 	out = append(out, aliasModelInfos(h.Aliases())...)

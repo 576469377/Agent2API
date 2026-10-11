@@ -9,14 +9,13 @@ import (
 
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
-	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // platformDefaultPaths 返回平台各自的默认凭证位置。
 func platformDefaultPaths(platform string) []string {
-	return workbuddy.DefaultCredentialPaths()
+	return workbuddy.DefaultCredentialPathsForPlatform(platform)
 }
 
 // buildAdapter 按配置装配上游：**恒返回号池**（哪怕只有一个账号）。
@@ -80,7 +79,7 @@ func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) })
 // 优先用账号昵称，其次 UID，最后才退回文件名。
 // 号池目录里的凭证文件继续用文件名（与磁盘对应，便于管理）。
 func accountLabel(path string, adp adapter.Adapter) string {
-	for _, p := range platformDefaultPaths("") {
+	for _, p := range append(platformDefaultPaths("workbuddy"), platformDefaultPaths(workbuddy.GlobalPlatform)...) {
 		if p == path {
 			name := ""
 			if idp, ok := adp.(interface {
@@ -108,6 +107,7 @@ func accountLabel(path string, adp adapter.Adapter) string {
 // 新增平台时只需在这里加一个分支。
 func newPlatformAdapter(cfg config.Config, credPath string, logf func(string, ...any)) (adapter.Adapter, error) {
 	adp, err := workbuddy.New(workbuddy.Config{
+		Platform:           cfg.Upstream.Platform,
 		BaseURL:            cfg.Upstream.BaseURL,
 		CredentialPath:     credPath,
 		Sanitize:           cfg.Upstream.Sanitize,
@@ -164,8 +164,8 @@ func collectCredentialPaths(cfg config.Config) []string {
 	// 这不是可选的：控制台的「添加账号」固定写这个目录（见 app.DefaultAccountsDir），
 	// 而它不在 platformDefaultPaths 的候选里（那里只列了 session.json）。
 	// 不扫这里，用户添加的账号就会「写进去了但网关看不见」——实测踩到过。
-	if cfg.Upstream.AccountsDir == "" || cfg.Upstream.AccountsDir != app.DefaultAccountsDir() {
-		addCredentialDir(app.DefaultAccountsDir(), add)
+	if cfg.Upstream.AccountsDir == "" || cfg.Upstream.AccountsDir != workbuddy.AccountsDirForPlatform(cfg.Upstream.Platform) {
+		addCredentialDir(workbuddy.AccountsDirForPlatform(cfg.Upstream.Platform), add)
 	}
 	return out
 }
@@ -212,14 +212,25 @@ func looksLikeCredential(path string) bool {
 	}
 	var doc struct {
 		Auth struct {
-			AccessToken string `json:"accessToken"`
+			AccessToken json.RawMessage `json:"accessToken"`
 		} `json:"auth"`
-		AccessToken string `json:"accessToken"` // 兼容扁平格式
+		AccessToken json.RawMessage `json:"accessToken"` // 兼容扁平格式
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return false
 	}
-	return doc.Auth.AccessToken != "" || doc.AccessToken != ""
+	hasToken := func(raw json.RawMessage) bool {
+		var plain string
+		if json.Unmarshal(raw, &plain) == nil {
+			return plain != ""
+		}
+		var encrypted struct {
+			Marker   int    `json:"$wbEncrypted"`
+			Envelope string `json:"envelope"`
+		}
+		return json.Unmarshal(raw, &encrypted) == nil && encrypted.Marker == 1 && encrypted.Envelope != ""
+	}
+	return hasToken(doc.Auth.AccessToken) || hasToken(doc.AccessToken)
 }
 
 // dedupeCredentialDir 清理**我们自己的**冗余凭证文件。
