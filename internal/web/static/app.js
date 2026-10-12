@@ -13,6 +13,7 @@ import {
 import { renderMath } from "./math.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "./monitor.js";
 import { mergePricingSnapshot, modelPricing, compareModelRates } from "./pricing.js";
+import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -33,6 +34,7 @@ const s = {
   key: saved("agent2api_key"),
   page: "overview",
   cache: {},
+  receivedAt: {},
   errors: {},
   busy: new Set(),
   authRequired: false,
@@ -112,8 +114,8 @@ const descriptions = {
     ),
   models: () =>
     L(
-      "按来源与能力寻找模型，复制完整 ID 即可指定平台。",
-      "Find models by source and capability. Copy a full ID to pin its platform.",
+      "按平台、能力与费率寻找模型，查看目录支持与账号状态。",
+      "Find models by platform, capability and credit rate. Inspect catalogue support and account status.",
     ),
   chat: () =>
     L(
@@ -146,17 +148,8 @@ const endpoints = {
   config: "/api/config",
   matrix: "/api/accounts/models",
 };
-const pageKeys = {
-  overview: ["status", "metrics", "accounts", "models"],
-  requests: ["metrics"],
-  analytics: ["metrics"],
-  connection: ["config", "models"],
-  accounts: ["accounts", "metrics"],
-  platforms: ["platforms", "accounts", "models"],
-  models: ["models"],
-  chat: ["models"],
-  settings: ["config"],
-};
+const pageKeys = pageResources;
+const currentResources = (background = false) => refreshResources(s.page, s.models.view === "matrix", background);
 const platforms = () =>
   s.cache.status?.platforms ||
   s.cache.platforms?.active ||
@@ -268,7 +261,7 @@ async function api(path, body) {
   }
   return response.json();
 }
-async function refresh(keys = pageKeys[s.page], manual = false) {
+async function refresh(keys = currentResources(), manual = false) {
   const needed = [...new Set(["status", ...keys])].filter(
     (key) => !s.busy.has(key),
   );
@@ -291,13 +284,13 @@ async function refresh(keys = pageKeys[s.page], manual = false) {
           // A missing snapshot remains unknown; generation is never probed.
           try {
             const snapshot = await fetch("/static/_model-pricing.json", { cache: "no-store", signal: AbortSignal.timeout(3000) });
-            if (snapshot.ok) data.models = mergePricingSnapshot(data.models, await snapshot.json());
+            if (snapshot.ok) { data.models = mergePricingSnapshot(data.models, await snapshot.json()); data.pricing_snapshot = true; }
           } catch {}
         }
         s.cache[key] = data;
+        s.receivedAt[key] = Date.now();
         delete s.errors[key];
         if (key === "status") {
-          s.authRequired = false;
           s.updated = new Date();
         }
       } catch (error) {
@@ -307,7 +300,8 @@ async function refresh(keys = pageKeys[s.page], manual = false) {
       }
     }),
   );
-  $("refreshButton").classList.remove("refreshing");
+  s.authRequired = Object.values(s.errors).some((error) => error?.status === 401);
+  $("refreshButton").classList.toggle("refreshing", s.busy.size > 0);
   chrome();
   draw();
 }
@@ -369,14 +363,13 @@ function chrome() {
   $("connectionBadge").textContent = connected
     ? L("反代服务运行中", "Gateway online")
     : L("连接需要检查", "Connection needs attention");
-  $("updatedAt").textContent = s.updated
-    ? `${L("更新于", "Updated")} ${timestamp(s.updated)}`
-    : "";
+  const pageTime = pageSnapshotTime(s.page, s.receivedAt, s.models.view === "matrix");
+  $("updatedAt").textContent = pageTime ? `${L("数据更新", "Data updated")} ${timestamp(pageTime)}` : L("数据待加载", "Loading data");
+  $("updatedAt").title = pageTime ? timestamp(pageTime, true) : "";
   const pageError = [
     ...new Set([
       "status",
-      ...pageKeys[s.page],
-      ...(s.page === "models" && s.models.view === "matrix" ? ["matrix"] : []),
+      ...currentResources(),
     ]),
   ].find((key) => s.errors[key]);
   $("errorBanner").hidden = !pageError;
@@ -393,9 +386,7 @@ function navigate() {
   draw(true);
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
-  if (s.page === "models" && s.models.view === "matrix")
-    refresh([...pageKeys.models, "matrix"]);
-  else refresh(pageKeys[s.page]);
+  refresh(currentResources());
 }
 function draw(force = false) {
   if (s.page === "chat" && !force && $("chatMessages")) {
@@ -606,8 +597,8 @@ function connectionExample() {
   return `curl ${quote(`${gatewayURL() || "http://127.0.0.1:8787"}/v1/${path}`)} \\\n  -H 'Content-Type: application/json' \\\n  -H ${quote(header)} \\\n${protocol === "anthropic-messages" ? "  -H 'anthropic-version: 2023-06-01' \\\n" : ""}  -d ${quote(JSON.stringify(payload, null, 2))}`;
 }
 function modelPage() {
-  return `<div class="notice info">${icon("info")}<div><strong>${e(L("同名模型，明确选择来源", "Same model name, explicit source"))}</strong><p>${e(L("带前缀的 ID 固定平台；不带前缀的 ID 按平台顺序调度，可按配置回退到另一平台。", "A prefixed ID pins its platform. Bare IDs follow platform priority and configured fallback."))} <a href="#platforms">${e(L("查看路由规则", "View routing policy"))} →</a></p></div></div>
-  <div class="toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新目录", "Refresh catalog"), "reload-models", "", "refresh")}</div></div>
+  return `<div class="notice info catalog-route-note">${icon("info")}<div><strong>${e(L("同名模型，明确选择来源", "Same model name, explicit source"))}</strong><p>${e(L("带前缀的 ID 固定平台；不带前缀的 ID 按平台顺序调度，可按配置回退到另一平台。", "A prefixed ID pins its platform. Bare IDs follow platform priority and configured fallback."))} <a href="#platforms">${e(L("查看路由规则", "View routing policy"))} →</a></p></div></div>
+  <div class="toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型清单", "Refresh catalogue"), "reload-models", "", "refresh")}</div></div>
   <div class="toolbar"><div class="toolbar-group">${search("modelSearch", s.models.query, L("搜索模型名称或 ID…", "Search model name or ID…"))}<select id="capabilityFilter" class="select" aria-label="${e(L("能力筛选", "Capability filter"))}">${options(
     [
       ["all", L("全部能力", "All capabilities")],
@@ -617,28 +608,34 @@ function modelPage() {
     ],
     s.models.capability,
   )}</select><select id="pricingFilter" class="select" aria-label="${e(L("费率筛选", "Rate filter"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["all", L("全部费率", "All rates")], ["free", L("零积分", "Zero credits")], ["credits", L("积分计费", "Uses credits")], ["dynamic", L("浮动倍率", "Variable rate")], ["unknown", L("费率未知", "Unknown rate")]], s.models.pricing)}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["rate", L("积分倍率从低到高", "Lowest credit rate")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
-  <section class="card" id="modelResults"></section><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
+  <div id="modelInsights"></div><section class="card" id="modelResults"></section><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
 }
 function pricingName(status) {
   return ({ free: L("零积分", "Zero credits"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
 }
+function updateModelInsights() {
+  if (!$("modelInsights")) return;
+  const matching = filterModelCatalog(models(), s.models), matrix = s.models.view === "matrix";
+  const counts = { free: 0, credits: 0, dynamic: 0, unknown: 0 };
+  for (const model of matching) counts[modelPricing(model).status]++;
+  const times = matching.map((m) => Date.parse(modelPricing(m).observedAt || "")).filter(Number.isFinite);
+  const filters = [s.models.query.trim(), s.models.platform !== "all", s.models.capability !== "all", !matrix && s.models.pricing !== "all"].filter(Boolean).length;
+  $("modelInsights").innerHTML = `<div class="catalog-summary">${Object.entries(counts).map(([key,count]) => `<button class="card catalog-summary-item ${!matrix && s.models.pricing === key ? "selected" : ""}" data-action="model-summary-filter" data-value="${key}" aria-pressed="${!matrix && s.models.pricing === key}" ${matrix ? "disabled" : ""}><span>${e(pricingName(key))}</span><strong>${n(count)}</strong><small>${e(key === "free" ? L("倍率为零，仍有用量限制", "Zero rate, usage limits apply") : key === "credits" ? L("显示上游积分倍率", "Upstream credit multipliers") : key === "dynamic" ? L("随自动选择的模型变化", "Depends on automatic selection") : L("缺失或已过期的信息", "Missing or stale metadata"))}</small></button>`).join("")}</div>
+  <div class="catalog-context"><span>${e(L("平台、能力与搜索匹配", "Matches platform, capability and search"))} <strong>${n(matching.length)}</strong> / ${n(models().length)}${!matrix && s.models.pricing !== "all" ? ` · ${e(pricingName(s.models.pricing))} ${n(counts[s.models.pricing])}` : ""}</span>${filters ? `<button class="button ghost small" data-action="reset-model-filters">${icon("close")}${e(L("清除筛选", "Reset filters"))} (${filters})</button>` : ""}</div>
+  <div class="catalog-source">${icon("clock")}<span>${times.length ? e(L("最早费率记录：", "Oldest rate observation: ") + timestamp(Math.min(...times), true)) : e(L("没有可核实的费率记录", "No verified rate metadata"))}${s.cache.models?.pricing_snapshot ? ` · ${e(L("费率为读取快照，更新模型清单不会更新费率", "Rates use an observed snapshot; catalogue refresh does not refresh rates"))}` : ""}</span></div>`;
+}
 function pricingCell(m) {
   const p = modelPricing(m), rate = p.multiplier;
   const value = p.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : rate !== undefined ? `${p.stale ? L("上次 ", "Previously ") : ""}×${String(rate)}` : "—";
-  return `${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${p.observedAt ? e((p.stale ? L("待更新 · ", "Stale · ") : "") + timestamp(p.observedAt)) : e(L("上游未提供", "Not reported"))}</div>`;
+  return `<div title="${e(p.observedAt ? L("费率读取：", "Rate observed: ") + timestamp(p.observedAt, true) : L("无已核实费率", "No verified rate"))}">${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${p.stale ? e(L("需更新费率", "Rate needs refresh")) : p.status === "unknown" ? e(L("无固定倍率", "No fixed rate")) : ""}</div></div>`;
 }
 function updateModelTable() {
   if (!$("modelResults")) return;
+  updateModelInsights();
   if (s.models.view === "matrix") return renderMatrix();
-  const q = s.models.query.trim().toLowerCase();
-  const filtered = models().filter(
-    (m) =>
-      (s.models.platform === "all" || m.platform === s.models.platform) &&
-      (s.models.capability === "all" || m[s.models.capability]) &&
-      (s.models.pricing === "all" || modelPricing(m).status === s.models.pricing) &&
-      `${m.id} ${m.display_name} ${routeId(m)}`.toLowerCase().includes(q),
-  );
-  filtered.sort((a, b) => (s.models.sort === "rate" ? compareModelRates(a, b) : s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || routeId(a).localeCompare(routeId(b)));
+  const filtered = filterModelCatalog(models(), s.models).filter((m) => s.models.pricing === "all" || modelPricing(m).status === s.models.pricing);
+  const platformOrder = platforms().map((p) => p.id);
+  filtered.sort((a, b) => (s.models.sort === "rate" ? compareModelRates(a, b) : s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || compareModelIdentity(a, b, platformOrder));
   const { rows, footer } = paginate(filtered, "models", 20);
   const body = rows
     .map(
@@ -693,21 +690,11 @@ function renderMatrix() {
         s.models.platform === "all" ||
         owners.get(key)?.platform === s.models.platform,
     );
-  const allowed = new Set(
-    models()
-      .filter(
-        (model) =>
-          (s.models.platform === "all" ||
-            model.platform === s.models.platform) &&
-          (s.models.capability === "all" || model[s.models.capability]),
-      )
-      .map((model) => model.id),
-  );
-  const rows = (m.models || []).filter(
-    (id) =>
-      id.toLowerCase().includes(s.models.query.toLowerCase()) &&
-      allowed.has(id),
-  );
+  const order = platforms().map((p) => p.id);
+  columns.sort((a,b) => compareModelIdentity({id: "", platform: owners.get(a)?.platform}, {id: "", platform: owners.get(b)?.platform}, order) || a.localeCompare(b));
+  const matching = filterModelCatalog(models(), s.models);
+  const allowed = new Set(matching.map((model) => model.id));
+  const rows = (m.models || []).filter((id) => allowed.has(id)).sort((a,b) => a.localeCompare(b));
   if (!columns.length || !rows.length) {
     $("modelResults").innerHTML = empty(
       L("没有匹配的账号与模型", "No matching accounts and models"),
@@ -717,7 +704,9 @@ function renderMatrix() {
   const header = columns
     .map((key) => {
       const a = owners.get(key);
-      return `<th><span class="matrix-head-name">${e(a?.identity?.nickname || a?.label || key)}</span><span class="matrix-head-note">${e(a ? regionName(a.platform) : L("未记录来源", "Source unavailable"))} · ${n(m.in_flight?.[key])} / ${a?.max_concurrency || m.max_concurrency || "∞"}</span>${m.account_cooldowns?.[key] > 0 ? tag(countdown(m.account_cooldowns[key]), "amber") : a?.state === "disabled" ? tag(L("已停用", "Disabled")) : ""}</th>`;
+      const remaining = remainingCooldown(a?.cooldown_secs, s.receivedAt.accounts);
+      const cooling = a?.cooldown_secs > 0 && !["disabled", "blocked"].includes(a.state) ? `<span class="matrix-head-note" data-until="${s.receivedAt.accounts + a.cooldown_secs * 1000}">${e(remaining ? countdown(remaining) : L("等待状态更新", "Awaiting update"))}</span>` : "";
+      return `<th><span class="matrix-head-name">${e(a?.identity?.nickname || a?.label || key)}</span><span class="matrix-head-note">${e(a ? regionName(a.platform) : L("未记录来源", "Source unavailable"))} · ${n(a?.in_flight ?? m.in_flight?.[key])} / ${a ? (a.max_concurrency || "∞") : (m.max_concurrency || "∞")}</span>${a ? tag(...accountStatus(a)) : tag(L("状态未知", "Unknown state"))}${cooling}</th>`;
     })
     .join("");
   const body = rows
@@ -727,13 +716,18 @@ function renderMatrix() {
           .map((key) => {
             const cool = m.cooldowns?.[key]?.[id] || 0,
               supported = (m.matrix?.[key] || []).includes(id);
-            return `<td>${cool > 0 ? `<span class="cooldown" data-until="${Date.now() + cool * 1000}">${e(countdown(cool))}</span>` : supported ? `<span class="supported" aria-label="${e(L("支持", "Supported"))}">✓</span>` : `<span class="unsupported" aria-label="${e(L("未开放", "Unavailable"))}">—</span>`}</td>`;
+            if (owners.get(key) && !matching.some((model) => model.id === id && model.platform === owners.get(key).platform)) return `<td><span class="unsupported" title="${e(L("此平台不符合当前筛选", "This platform does not match the filters"))}">—</span></td>`;
+            const state = availabilityState(owners.get(key), supported, cool, s.receivedAt.matrix);
+            if (state.kind === "cooling") return `<td><span class="cooldown" data-until="${s.receivedAt.matrix + cool * 1000}">${e(countdown(state.remaining))}</span></td>`;
+            if (state.kind === "supported") return `<td><span class="supported" aria-label="${e(L("目录支持", "Catalog supported"))}">✓</span></td>`;
+            const text = ({ disabled: L("已停用", "Disabled"), blocked: L("需登录", "Sign in"), account_unavailable: L("账号不可用", "Account unavailable"), awaiting_update: L("等待更新", "Awaiting update"), unknown: L("状态未知", "Unknown state"), unsupported: "—" })[state.kind];
+            return `<td><span class="${["awaiting_update", "account_unavailable"].includes(state.kind) ? "cooldown" : "unsupported"}">${e(text)}</span></td>`;
           })
           .join("")}</tr>`,
     )
     .join("");
   $("modelResults").innerHTML =
-    `${cardHead(L("模型 × 账号", "Models × accounts"), L("✓ 表示目录支持；整号冷却显示在列头，单模型冷却显示在对应格。", "✓ means catalog support. Account cooldowns appear in headers; model cooldowns in cells."))}<div class="table-wrap"><table class="matrix"><thead><tr><th>${e(L("模型", "Model"))}</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="table-footer">${e(L("目录支持不代表剩余额度，实际调用结果以日志为准。", "Catalog support does not guarantee quota. Check request logs for actual results."))}</div>`;
+    `${cardHead(L("模型 × 账号", "Models × accounts"), L("✓ 表示当前账号目录支持；停用、需登录和冷却会单独标注。", "✓ means the account catalogue supports this model. Disabled, login-required and cooling states are shown separately."))}<div class="table-wrap"><table class="matrix"><thead><tr><th>${e(L("模型", "Model"))}</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="table-footer">${e(L("目录支持不代表剩余额度，实际调用结果以日志为准。", "Catalog support does not guarantee quota. Check request logs for actual results."))}</div>`;
 }
 
 function accountStatus(a) {
@@ -754,7 +748,7 @@ function credentialStatus(a) {
   return L("已登录", "Signed in");
 }
 function accountPage() {
-  const all = accounts(),
+  const all = accounts().filter((a) => s.accounts.platform === "all" || a.platform === s.accounts.platform),
     ready = all.filter((a) => a.healthy).length,
     cooling = all.filter((a) => !a.healthy && a.state !== "disabled").length,
     disabled = all.filter((a) => a.state === "disabled").length;
@@ -796,7 +790,7 @@ function updateAccountCards() {
       const ambiguous = accounts().filter((other) => other.label === a.label).length > 1;
       const usage = s.cache.metrics?.by_account?.find((row) => row.key === a.label);
       const max = a.max_concurrency || 0, current = a.in_flight || 0;
-      return `<tr><td><div class="account-table-name"><span class="account-avatar">${e(name.slice(0, 1))}</span><div><strong>${e(name)}</strong><div class="cell-sub mono">${e(a.label)}</div></div></div><div class="cell-sub">${e(a.identity?.source === "desktop" ? L("桌面应用", "Desktop app") : L("凭证文件", "Credential file"))}</div></td><td>${regionTag(a.platform)}</td><td>${tag(...accountStatus(a))}${Object.keys(a.model_cooldowns || {}).length ? `<div class="cell-sub">${Object.keys(a.model_cooldowns).length} ${e(L("个模型冷却", "models cooling"))}</div>` : ""}${a.cooldown_secs > 0 ? `<div class="cell-sub" data-until="${Date.now() + a.cooldown_secs * 1000}">${e(countdown(a.cooldown_secs))}</div>` : ""}</td><td><span class="${a.identity?.refresh_expired ? "negative" : ""}">${e(credentialStatus(a))}</span><div class="cell-sub">${a.identity?.expires_at ? e(timestamp(a.identity.expires_at, true)) : "—"}</div></td><td class="account-concurrency"><span class="numeric">${current} / ${max || "∞"}</span><div class="load-track"><span style="width:${max ? Math.min(100, current / max * 100) : 0}%"></span></div></td><td class="num numeric">${ambiguous ? `<span class="muted" title="${e(L("同标识跨平台聚合，无法单独归属", "This label is aggregated across platforms"))}">—</span>` : n(usage?.total)}${!ambiguous && usage?.failed ? `<div class="cell-sub negative">${n(usage.failed)} ${e(L("失败", "failed"))}</div>` : ""}</td><td><div class="row-actions"><button class="button small" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${e(L("记录", "Logs"))}</button>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div></td></tr>`;
+      return `<tr><td><div class="account-table-name"><span class="account-avatar">${e(name.slice(0, 1))}</span><div><strong>${e(name)}</strong><div class="cell-sub mono">${e(a.label)}</div></div></div><div class="cell-sub">${e(a.identity?.source === "desktop" ? L("桌面应用", "Desktop app") : L("凭证文件", "Credential file"))}</div></td><td>${regionTag(a.platform)}</td><td>${tag(...accountStatus(a))}${Object.keys(a.model_cooldowns || {}).length ? `<div class="cell-sub">${Object.keys(a.model_cooldowns).length} ${e(L("个模型冷却", "models cooling"))}</div>` : ""}${a.cooldown_secs > 0 ? `<div class="cell-sub" data-until="${(s.receivedAt.accounts || Date.now()) + a.cooldown_secs * 1000}">${e(countdown(remainingCooldown(a.cooldown_secs, s.receivedAt.accounts)))}</div>` : ""}</td><td><span class="${a.identity?.refresh_expired ? "negative" : ""}">${e(credentialStatus(a))}</span><div class="cell-sub">${a.identity?.expires_at ? e(timestamp(a.identity.expires_at, true)) : "—"}</div></td><td class="account-concurrency"><span class="numeric">${current} / ${max || "∞"}</span><div class="load-track"><span style="width:${max ? Math.min(100, current / max * 100) : 0}%"></span></div></td><td class="num numeric">${ambiguous ? `<span class="muted" title="${e(L("同标识跨平台聚合，无法单独归属", "This label is aggregated across platforms"))}">—</span>` : n(usage?.total)}${!ambiguous && usage?.failed ? `<div class="cell-sub negative">${n(usage.failed)} ${e(L("失败", "failed"))}</div>` : ""}</td><td><div class="row-actions"><button class="button small" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${e(L("记录", "Logs"))}</button>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div></td></tr>`;
     }).join("")}</tbody></table></div>` : empty(L("没有匹配的账号", "No matching accounts"), L("更换筛选条件，或添加一个账号。", "Change filters or add an account."), "accounts");
     return;
   }
@@ -810,7 +804,7 @@ function updateAccountCards() {
         const load = max
           ? `${a.in_flight || 0} / ${max}`
           : `${a.in_flight || 0}`;
-        return `<article class="card account-card"><div class="account-card-top"><div class="account-avatar">${e(name.slice(0, 1).toUpperCase())}</div><div class="account-name"><strong title="${e(name)}">${e(name)}</strong><small>${e(platformName(a.platform))}</small></div>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div><div class="account-state">${tag(state, color, true)}<div class="account-load">${e(L("并发", "Active"))} ${e(load)}<div class="load-track"><span style="width:${max ? Math.min(100, ((a.in_flight || 0) / max) * 100) : 0}%"></span></div></div></div>${a.cooldown_secs > 0 ? `<div class="account-note">${e(L("整号冷却剩余", "Account cooldown"))} <span data-until="${Date.now() + a.cooldown_secs * 1000}">${e(countdown(a.cooldown_secs))}</span></div>` : ""}<div class="account-kv"><span>${e(L("登录状态", "Credentials"))}</span><span>${e(credentialStatus(a))}</span></div><div class="account-kv"><span>${e(L("来源", "Source"))}</span><span>${e(a.identity?.source === "desktop" ? L("桌面应用", "Desktop app") : a.identity?.source === "file" ? L("凭证文件", "Credential file") : a.identity?.source || "—")}</span></div><div class="account-kv"><span>UID</span><span title="${e(a.identity?.uid || "")}">${e(a.identity?.uid || "—")}</span></div><button class="button small" data-action="account-detail" data-index="${index}">${e(L("查看详情与管理", "Details & management"))}${icon("arrow")}</button></article>`;
+        return `<article class="card account-card"><div class="account-card-top"><div class="account-avatar">${e(name.slice(0, 1).toUpperCase())}</div><div class="account-name"><strong title="${e(name)}">${e(name)}</strong><small>${e(platformName(a.platform))}</small></div>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div><div class="account-state">${tag(state, color, true)}<div class="account-load">${e(L("并发", "Active"))} ${e(load)}<div class="load-track"><span style="width:${max ? Math.min(100, ((a.in_flight || 0) / max) * 100) : 0}%"></span></div></div></div>${a.cooldown_secs > 0 ? `<div class="account-note">${e(L("整号冷却剩余", "Account cooldown"))} <span data-until="${(s.receivedAt.accounts || Date.now()) + a.cooldown_secs * 1000}">${e(countdown(remainingCooldown(a.cooldown_secs, s.receivedAt.accounts)))}</span></div>` : ""}<div class="account-kv"><span>${e(L("登录状态", "Credentials"))}</span><span>${e(credentialStatus(a))}</span></div><div class="account-kv"><span>${e(L("来源", "Source"))}</span><span>${e(a.identity?.source === "desktop" ? L("桌面应用", "Desktop app") : a.identity?.source === "file" ? L("凭证文件", "Credential file") : a.identity?.source || "—")}</span></div><div class="account-kv"><span>UID</span><span title="${e(a.identity?.uid || "")}">${e(a.identity?.uid || "—")}</span></div><button class="button small" data-action="account-detail" data-index="${index}">${e(L("查看详情与管理", "Details & management"))}${icon("arrow")}</button></article>`;
       })
       .join("") ||
     `<div class="card" style="grid-column:1/-1">${empty(L("没有匹配的账号", "No matching accounts"), L("更换筛选条件，或添加一个账号。", "Change filters or add an account."), "accounts")}</div>`;
@@ -941,7 +935,7 @@ function showAccountDetail(index) {
     identity = a.identity || {};
   showDrawer(
     L("账号详情", "Account details"),
-    `<div class="detail-hero"><div class="account-avatar">${e((identity.nickname || a.label).slice(0, 1))}</div><div><h2>${e(identity.nickname || a.label)}</h2><p>${e(platformName(a.platform))}</p></div></div><div class="tags" style="margin-top:17px">${tag(status, color, true)}${tag(credentialStatus(a), "outline")}</div><dl class="details-list">${detailItem(L("账号标识", "Account label"), a.label, "mono")}${detailItem("UID", identity.uid)}${accountUsageDetails(a)}${detailItem(L("当前并发", "Active requests"), `${a.in_flight || 0} / ${a.max_concurrency || L("不限", "Unlimited")}`)}${detailItem(L("状态原因", "State reason"), a.reason || "—")}${a.cooldown_secs ? detailItem(L("整号冷却", "Account cooldown"), countdown(a.cooldown_secs)) : ""}${detailItem(L("登录令牌到期", "Access token expiry"), identity.expires_at ? timestamp(identity.expires_at, true) : "—")}${detailItem(L("凭证位置", "Credential path"), identity.credential_path || "—", "mono")}${a.last_error ? detailItem(L("最近错误", "Last error"), a.last_error, "error-text") : ""}${
+    `<div class="detail-hero"><div class="account-avatar">${e((identity.nickname || a.label).slice(0, 1))}</div><div><h2>${e(identity.nickname || a.label)}</h2><p>${e(platformName(a.platform))}</p></div></div><div class="tags" style="margin-top:17px">${tag(status, color, true)}${tag(credentialStatus(a), "outline")}</div><dl class="details-list">${detailItem(L("账号标识", "Account label"), a.label, "mono")}${detailItem("UID", identity.uid)}${accountUsageDetails(a)}${detailItem(L("当前并发", "Active requests"), `${a.in_flight || 0} / ${a.max_concurrency || L("不限", "Unlimited")}`)}${detailItem(L("状态原因", "State reason"), a.reason || "—")}${a.cooldown_secs ? detailItem(L("整号冷却", "Account cooldown"), countdown(remainingCooldown(a.cooldown_secs, s.receivedAt.accounts))) : ""}${detailItem(L("登录令牌到期", "Access token expiry"), identity.expires_at ? timestamp(identity.expires_at, true) : "—")}${detailItem(L("凭证位置", "Credential path"), identity.credential_path || "—", "mono")}${a.last_error ? detailItem(L("最近错误", "Last error"), a.last_error, "error-text") : ""}${
       Object.keys(a.model_cooldowns || {}).length
         ? detailItem(
             L("模型冷却", "Model cooldowns"),
@@ -1433,7 +1427,7 @@ document.addEventListener("click", async (event) => {
   try {
     switch (action) {
       case "retry":
-        return refresh(pageKeys[s.page], true);
+        return refresh(currentResources(), true);
       case "command-search":
         return commandSearch();
       case "jump-page":
@@ -1500,6 +1494,15 @@ document.addEventListener("click", async (event) => {
         location.hash = "chat";
         if (s.page === "chat") draw(true);
         return;
+      case "model-summary-filter":
+        s.models.pricing = value;
+        s.models.page = 1;
+        draw();
+        return;
+      case "reset-model-filters":
+        Object.assign(s.models, { query: "", platform: "all", capability: "all", pricing: "all", page: 1 });
+        draw();
+        return;
       case "models-platform":
         s.models.platform = value;
         s.models.page = 1;
@@ -1515,7 +1518,7 @@ document.addEventListener("click", async (event) => {
       case "model-view":
         s.models.view = value;
         draw();
-        if (value === "matrix") return refresh(["matrix", "accounts"]);
+        if (value === "matrix") return refresh(currentResources());
         return;
       case "paginate":
         s[kind].page += Number(value);
@@ -1525,8 +1528,9 @@ document.addEventListener("click", async (event) => {
       case "reload-models":
         target.disabled = true;
         await api("/api/config", { refresh_models: true });
-        await refresh(["models"]);
-        toast(L("模型目录已更新", "Model catalog updated"));
+        await refresh(currentResources());
+        if (s.errors.models || s.errors.matrix) throw (s.errors.models || s.errors.matrix);
+        toast(s.cache.models?.pricing_snapshot ? L("模型清单已更新；费率保留原读取时间", "Catalogue updated; rate observation times unchanged") : L("模型目录已更新", "Model catalog updated"));
         return;
       case "account-detail":
         $("modal").close();
@@ -1776,30 +1780,16 @@ document.addEventListener("click", (event) => {
     $("menuButton").setAttribute("aria-expanded", "false");
   }
 });
-$("refreshButton").addEventListener("click", () =>
-  refresh(
-    s.page === "models" && s.models.view === "matrix"
-      ? ["models", "matrix", "accounts"]
-      : pageKeys[s.page],
-    true,
-  ),
-);
+$("refreshButton").addEventListener("click", () => refresh(currentResources(), true));
 $("copyEndpoint").addEventListener("click", () => copy(`${gatewayURL()}/v1`));
 window.addEventListener("hashchange", navigate);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden)
-    refresh(s.page === "chat" ? ["status"] : pageKeys[s.page]);
+    refresh(s.page === "chat" ? ["status"] : currentResources());
 });
 setInterval(() => {
-  if (document.hidden || $("modal").open || !s.refreshEvery || Date.now() - s.lastPoll < s.refreshEvery * 1000) return;
-  const keys =
-    s.page === "overview"
-      ? ["status", "metrics", "accounts"]
-      : ["requests", "analytics"].includes(s.page)
-        ? ["metrics"]
-        : s.page === "accounts"
-          ? ["accounts", "metrics"]
-          : ["status"];
+  if (document.hidden || $("modal").open || $("detailDialog").open || !s.refreshEvery || Date.now() - s.lastPoll < s.refreshEvery * 1000) return;
+  const keys = currentResources(true);
   refresh(keys);
 }, 1000);
 setInterval(() => {

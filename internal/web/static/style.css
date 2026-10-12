@@ -2246,6 +2246,28 @@ kbd { font: 10px Consolas, monospace; border: 1px solid var(--border); border-ra
 .diagnostic-items > button, .diagnostic-items > a { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--surface-alt); display: flex; align-items: center; gap: 8px; font-size: 11px; text-align: left; min-width: 0; }
 .diagnostic-items .icon:last-child { margin-left: auto; width: 13px; flex: none; }
 .scope-note { font-size: 11px; color: var(--muted); line-height: 1.8; margin-top: 14px; }
+.catalog-route-note { padding: 12px 15px; margin-bottom: 18px; }
+.page-actions { flex-wrap: wrap; justify-content: flex-end; }
+@media (min-width: 721px) {
+  .page-actions .updated-at { display: block; flex-basis: 100%; text-align: right; font-size: 10px; }
+}
+.catalog-route-note strong { font-size: 11px; }
+.catalog-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0 10px; }
+.catalog-summary-item { text-align: left; padding: 15px 17px; color: var(--text); cursor: pointer; font: inherit; }
+.catalog-summary-item > span { color: var(--muted); font-size: 11px; }
+.catalog-summary-item strong { display: block; font-size: 26px; line-height: 1.3; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.catalog-summary-item small { display: block; font-size: 10px; color: var(--muted); line-height: 1.6; }
+.catalog-summary-item:hover:not(:disabled), .catalog-summary-item.selected { border-color: var(--accent); background: var(--surface-alt); }
+.catalog-summary-item.selected > span { color: var(--accent); }
+.catalog-summary-item:disabled { cursor: default; opacity: .75; }
+.catalog-context { display: flex; align-items: center; justify-content: space-between; min-height: 33px; font-size: 11px; color: var(--muted); gap: 10px; }
+.catalog-context strong { color: var(--text); }
+.catalog-source { display: flex; gap: 6px; align-items: flex-start; margin: 3px 0 14px; font-size: 10px; line-height: 1.7; color: var(--muted); }
+.catalog-source svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+@media (max-width: 720px) {
+  .catalog-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .catalog-summary-item { padding: 12px; }
+}
 .model-catalog-table th { padding: 13px 12px; }
 .model-catalog-table td { padding: 15px 12px; }
 .model-catalog-table .cell-model .cell-main,

@@ -1,0 +1,44 @@
+// View semantics shared by the console. All deadlines are anchored to receipt
+// of a backend snapshot, never to a redraw of cached data.
+export const pageResources = {
+  overview: ["status", "metrics", "accounts", "models"], requests: ["metrics"],
+  analytics: ["metrics"], connection: ["config", "models"],
+  accounts: ["accounts", "metrics"], platforms: ["platforms", "accounts", "models"],
+  models: ["models"], chat: ["models"], settings: ["config"],
+};
+export function refreshResources(page, matrix = false, background = false) {
+  if (page === "models" && matrix) return background ? ["accounts", "matrix"] : ["models", "accounts", "matrix"];
+  if (!background) return pageResources[page] || ["status"];
+  return page === "overview" ? ["status", "metrics", "accounts"] : ["requests", "analytics"].includes(page) ? ["metrics"] : page === "accounts" ? ["accounts", "metrics"] : ["status"];
+}
+export function filterModelCatalog(models, filters = {}) {
+  const q = (filters.query || "").trim().toLowerCase();
+  return models.filter((m) => (!filters.platform || filters.platform === "all" || m.platform === filters.platform) &&
+    (!filters.capability || filters.capability === "all" || m[filters.capability]) &&
+    `${m.id} ${m.display_name || ""} ${m.routing_id || `${m.platform}/${m.id}`}`.toLowerCase().includes(q));
+}
+export function compareModelIdentity(a, b, platformOrder = []) {
+  const rank = (id) => { const index = platformOrder.indexOf(id); return index < 0 ? platformOrder.length : index; };
+  return String(a.id).localeCompare(String(b.id)) || rank(a.platform) - rank(b.platform) || String(a.platform).localeCompare(String(b.platform));
+}
+export function remainingCooldown(seconds, receivedAt, now = Date.now()) {
+  if (!(seconds > 0) || !Number.isFinite(receivedAt)) return 0;
+  return Math.max(0, Math.ceil(seconds - Math.max(0, now - receivedAt) / 1000));
+}
+export function availabilityState(account, supported, modelSeconds, modelReceivedAt, now = Date.now()) {
+  if (!account) return { kind: "unknown" };
+  if (account.state === "disabled") return { kind: "disabled" };
+  if (account.state === "blocked" || ["unauthorized", "auth"].includes(account.reason)) return { kind: "blocked" };
+  if (!account.healthy) return { kind: "account_unavailable" };
+  if (!supported) return { kind: "unsupported" };
+  if (modelSeconds > 0) {
+    const remaining = remainingCooldown(modelSeconds, modelReceivedAt, now);
+    return { kind: remaining ? "cooling" : "awaiting_update", remaining };
+  }
+  return { kind: "supported" };
+}
+export function pageSnapshotTime(page, receivedAt, matrix = false) {
+  const keys = page === "overview" ? ["metrics", "accounts"] : page === "models" && matrix ? ["accounts", "matrix"] : refreshResources(page, matrix).filter((key) => key !== "status");
+  const times = keys.map((key) => receivedAt[key]);
+  return times.length && times.every(Number.isFinite) ? Math.min(...times) : null;
+}
