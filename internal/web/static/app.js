@@ -14,6 +14,7 @@ import { renderMath } from "./math.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "./monitor.js";
 import { mergePricingSnapshot, modelPricing, compareModelRates } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
+import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -41,6 +42,7 @@ const s = {
   trend: "requests",
   usage: "by_model",
   trendMinutes: 30,
+  dashboardScope: "all",
   refreshEvery: [0, 10, 30, 60].includes(Number(saved("agent2api_refresh", "10"))) ? Number(saved("agent2api_refresh", "10")) : 10,
   lastPoll: Date.now(),
   analytics: { dimension: "by_model", sort: "total", query: "" },
@@ -92,8 +94,8 @@ const names = {
 const descriptions = {
   overview: () =>
     L(
-      "运行状态、调用趋势与平台可用性，一眼掌握。",
-      "Your gateway health, traffic and platform availability at a glance.",
+      "掌握调用规模、流量变化与账号调度状态。",
+      "Monitor request volume, traffic patterns and account readiness.",
     ),
   requests: () =>
     L(
@@ -463,7 +465,7 @@ function chart(series, kind = "requests") {
           `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`,
       )
       .join(" ");
-  const axis = [0, 0.5, 1]
+  const axis = (kind === "requests" ? scale === 1 ? [0, 1] : [0, Math.ceil(scale / 2) / scale, 1] : [0, 0.5, 1])
     .map(
       (ratio) =>
         `<line class="chart-grid" x1="36" x2="588" y1="${y(scale * ratio)}" y2="${y(scale * ratio)}"/><text x="27" y="${y(scale * ratio) + 3}" text-anchor="end">${e(compact(scale * ratio))}</text>`,
@@ -475,82 +477,81 @@ function chart(series, kind = "requests") {
         `<text x="${x(index)}" y="188" text-anchor="${index === 0 ? "start" : index === values.length - 1 ? "end" : "middle"}">${e(new Date(values[index].minute * 60000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }))}</text>`,
     )
     .join("");
-  const points = values
+  const points = a.some((value) => value > 0) ? values
     .map(
       (row, index) =>
         `<circle class="chart-point" cx="${x(index)}" cy="${y(a[index])}" r="2" fill="var(--accent)"><title>${e(timestamp(row.minute * 60000))} · ${e(kind === "requests" ? L("成功 / 失败", "Success / Failed") : L("输入 / 输出 Token", "Input / output tokens"))}: ${a[index]} / ${b[index]}</title></circle>`,
     )
-    .join("");
+    .join("") : "";
   const width = 552 / Math.max(1, values.length - 1);
   const hits = values.map((row, index) => `<rect class="chart-hit" tabindex="0" role="button" aria-label="${e(`${timestamp(row.minute * 60000)} · ${a[index]} / ${b[index]}`)}" data-chart-point="${index}" data-x="${x(index)}" data-time="${e(timestamp(row.minute * 60000))}" data-a="${a[index]}" data-b="${b[index]}" data-kind="${kind}" x="${Math.max(36, x(index) - width / 2)}" y="20" width="${Math.min(width, 588 - Math.max(36, x(index) - width / 2))}" height="148"/>`).join("");
-  return `<div class="chart-shell"><svg class="chart" viewBox="0 0 610 200" aria-label="${e(L(`最近 ${s.trendMinutes} 分钟趋势`, `Last ${s.trendMinutes} minutes`))}">${axis}<path class="chart-area" d="${line(a)} L588,161 L36,161 Z"/><path class="chart-line" d="${line(a)}"/><path class="chart-line red" d="${line(b)}"/>${points}${times}<line class="chart-crosshair" x1="36" x2="36" y1="20" y2="161" hidden/>${hits}</svg><div class="chart-tooltip" hidden role="status"></div></div>`;
+  return `<div class="chart-shell"><svg class="chart" viewBox="0 0 610 200" aria-label="${e(L(`最近 ${s.trendMinutes} 分钟趋势`, `Last ${s.trendMinutes} minutes`))}">${axis}<path class="chart-area" d="${line(a)} L588,161 L36,161 Z"/><path class="chart-line" d="${line(a)}"/>${b.some((value) => value > 0) ? `<path class="chart-line red" d="${line(b)}"/>` : ""}${points}${times}<line class="chart-crosshair" x1="36" x2="36" y1="20" y2="161" hidden/>${hits}</svg><div class="chart-tooltip" hidden role="status"></div></div>`;
 }
 function platformSummary() {
   return (
     platforms()
       .map((p) => {
         const pool = accounts().filter((a) => a.platform === p.id),
-          ready = pool.filter((a) => a.healthy).length;
-        return `<a class="platform-summary" href="#platforms"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${e(platformMark(p.id))}</div><div class="platform-label"><strong>${e(platformName(p.id))}</strong><small>${n(models().filter((m) => m.platform === p.id).length || p.models || 0)} ${e(L("个模型", "models"))} · ${ready}/${pool.length} ${e(L("账号就绪", "accounts ready"))}</small></div>${tag(pool.length ? (ready ? L("可调度", "Ready") : L("需关注", "Attention")) : L("待加载", "Loading"), ready ? "green" : "amber", true)}</a>`;
+          health = accountReadiness(pool);
+        const label = !s.cache.accounts ? L("待加载", "Loading") : !pool.length ? L("未配置", "No accounts") : !health.enabled ? L("未启用", "Inactive") : !health.ready ? L("需关注", "Attention") : health.attention ? L("部分可用", "Partial") : L("可调度", "Ready");
+        return `<a class="platform-summary" href="#platforms"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${e(platformMark(p.id))}</div><div class="platform-label"><strong>${e(platformName(p.id))}</strong><small>${n(models().filter((m) => m.platform === p.id).length || p.models || 0)} ${e(L("个模型", "models"))} · ${s.cache.accounts ? `${health.ready}/${health.enabled}` : "—"} ${e(L("就绪 / 启用", "ready / enabled"))}</small></div>${tag(label, health.ready && !health.attention ? "green" : "amber", true)}</a>`;
       })
       .join("") || empty(L("暂无平台", "No platforms"))
   );
 }
+
 function ranking(rows) {
-  if (!rows?.length)
-    return `<p class="ranking-empty">${e(L("开始调用后显示模型用量。", "Model usage appears after the first request."))}</p>`;
-  const top = [...rows].sort((a, b) => b.total - a.total).slice(0, 4),
-    max = Math.max(...top.map((row) => row.total), 1);
-  return `<div class="mini-ranking">${top.map((row) => `<div class="ranking-row"><span class="truncate mono" title="${e(row.key)}">${e(row.key)}</span><div class="load-track"><span style="width:${(row.total / max) * 100}%"></span></div><span class="numeric">${n(row.total)}</span></div>`).join("")}</div>`;
+  const top = usageShares(rows);
+  if (!top.length) return empty(L("暂无调用分布", "No usage breakdown"), L("有调用记录后显示累计分布。", "Cumulative breakdown appears after traffic is recorded."), "activity");
+  return `<div class="usage-ranking">${top.map((row, index) => `<button class="usage-ranking-row" data-action="usage-requests" data-kind="${e(s.usage)}" data-value="${e(row.key)}" title="${e(row.key)}"><span class="ranking-index">${index + 1}</span><div class="ranking-detail"><div><span class="truncate">${e(s.usage === "by_protocol" ? protocolName(row.key) : row.key)}</span><strong>${n(row.total)}<small>${e(L("次", "calls"))}</small></strong></div><div class="ranking-track"><i style="width:${row.share * 100}%"></i></div></div><span class="ranking-share">${(row.share * 100).toFixed(1)}%</span>${icon("chevron")}</button>`).join("")}</div>`;
+}
+function dashboardCard(label, glyph, value, note, tone = "blue", unit = "") {
+  return `<article class="card dashboard-kpi ${tone}"><div class="dashboard-kpi-heading"><span>${e(label)}</span>${icon(glyph)}</div><div class="dashboard-kpi-value">${e(value)}${unit ? `<small>${e(unit)}</small>` : ""}</div><div class="dashboard-kpi-note">${note}</div></article>`;
 }
 function overview() {
-  const m = s.cache.metrics || {},
-    status = s.cache.status || {},
-    ready = accounts().filter((a) => a.healthy).length;
-  const currentRPM = m.series?.at(-1)?.total ?? m.last_minute_rpm;
-  const recent = [...(m.recent || [])]
-    .sort((a, b) => new Date(b.time) - new Date(a.time))
-    .slice(0, 4);
-  const sample = summarizeRequests(m.recent || []);
-  const attention = accounts().filter((a) => !a.healthy && a.state !== "disabled");
-  const failures = recentRequests().filter((row) => !row.ok).slice(0, 3);
-  const enabled = accounts().filter((a) => a.state !== "disabled");
-  const capacity = !enabled.length ? "—" : enabled.some((a) => !a.max_concurrency) ? L("不限", "Unlimited") : enabled.reduce((sum, a) => sum + a.max_concurrency, 0);
-  return `<div class="runtime-strip"><span class="runtime-live"><span class="status-dot ${s.errors.status ? "offline" : "online"}"></span>${e(s.errors.status ? L("连接异常", "Connection issue") : L("网关在线", "Gateway online"))}</span><span>${e(L("实时并发", "In flight"))}<strong>${n(m.in_flight)}</strong></span><span>${e(L("本分钟调用", "Current minute"))}<strong>${n(currentRPM)}</strong></span><span>${e(L("账号就绪", "Ready accounts"))}<strong>${ready}/${accounts().length}</strong></span><span>${e(L("运行时间", "Uptime"))}<strong>${e(countdown(status.uptime_sec || 0))}</strong></span><a href="#connection">${icon("external")}${e(L("接入客户端", "Connect a client"))}</a></div>
-  <div class="section-heading"><h2>${e(L("累计用量", "Cumulative usage"))}</h2><span>${e(L("累计指标可跨网关重启保留，趋势按最近分钟展示", "Persisted totals · recent minute-based trends"))}</span></div>
-  <div class="stats-grid operations-stats">
-    ${metricCard(L("累计调用", "Total requests"), "activity", n(m.total), `${e(L("当前分钟已完成", "Completed this minute"))} <strong>${n(currentRPM)}</strong>`)}
-    ${metricCard(L("调用成功率", "Success rate"), "check", m.total ? `${(m.success_rate * 100).toFixed(1)}%` : "—", `<span class="positive">${n(m.ok)} ${e(L("成功", "successful"))}</span><span>·</span><span>${n(m.failed)} ${e(L("失败", "failed"))}</span>`)}
-    ${metricCard(L("平均响应耗时", "Average duration"), "clock", m.total ? (m.avg_latency_ms / 1000).toFixed(2) : "—", e(L("包含连接与完整生成时间", "Includes connection and full generation")), m.total ? "s" : "")}
-    ${metricCard(L("输入 Token", "Input tokens"), "tokens", compact(m.input_tokens), `<span title="${n(m.input_tokens)}">${n(m.input_tokens)} tokens</span>`)}
-    ${metricCard(L("输出 Token", "Output tokens"), "tokens", compact(m.output_tokens), `${e(L("思考 Token", "Reasoning tokens"))} ${n(m.reasoning_tokens)}`)}
-    ${metricCard(L("平均生成速度", "Generation speed"), "bolt", m.tps_samples ? Number(m.avg_tps).toFixed(1) : "—", `${n(m.tps_samples)} ${e(L("个有效测速样本", "measured samples"))}`, m.tps_samples ? "tok/s" : "")}
+  const m = s.cache.metrics, status = s.cache.status;
+  const pool = s.cache.accounts ? accounts() : null;
+  const readiness = accountReadiness(pool);
+  const metrics = dashboardMetrics(m, s.dashboardScope, s.trendMinutes);
+  const window = dashboardMetrics(m, "window", s.trendMinutes);
+  const currentMinute = m?.series?.at(-1)?.total;
+  const recent = [...(m?.recent || [])].sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 5);
+  const sample = summarizeRequests(m?.recent || []);
+  const attention = (pool || []).filter((a) => accountReadiness([a]).attention);
+  const failures = [...(m?.recent || [])].filter((row) => !row.ok).sort((a, b) => new Date(b.time) - new Date(a.time));
+  const scope = s.dashboardScope === "all" ? L("累计统计", "Cumulative totals") : L(`最近 ${s.trendMinutes} 分钟`, `Last ${s.trendMinutes} minutes`);
+  const totalTokens = metrics ? metrics.input_tokens + metrics.output_tokens : null;
+  const value = (v, formatter = n) => v == null ? "—" : formatter(v);
+  const connected = status && !s.errors.status;
+  const attentionTitle = !readiness ? L("等待账号状态", "Waiting for accounts") : readiness.attention ? L(`${readiness.attention} 个账号需要关注`, `${readiness.attention} accounts need attention`) : readiness.enabled ? L("启用账号均可调度", "Enabled accounts are ready") : L("没有已启用账号", "No enabled accounts");
+  const trendControl = `<div class="chart-caption"><span><i class="legend-dot"></i>${e(s.trend === "requests" ? L("成功", "Success") : L("输入", "Input"))}</span><span><i class="legend-dot red"></i>${e(s.trend === "requests" ? L("失败", "Failed") : L("输出", "Output"))}</span><select id="trendSelect" class="select" aria-label="${e(L("趋势类型", "Trend type"))}">${options([["requests", L("调用", "Requests")], ["tokens", "Token"]], s.trend)}</select></div>`;
+  return `<div class="dashboard">
+  <div class="gateway-pulse"><span class="pulse-state ${connected ? "positive" : "negative"}"><span class="status-dot ${connected ? "online" : "offline"}"></span>${e(connected ? L("网关在线", "Gateway online") : status ? L("连接异常", "Connection issue") : L("连接中", "Connecting"))}</span><span>${e(L("运行时间", "Uptime"))}<strong>${status ? e(countdown(status.uptime_sec || 0)) : "—"}</strong></span><span>${e(L("实时并发", "In flight"))}<strong>${value(m?.in_flight)}</strong></span><span>${e(L("本分钟已完成", "Completed this minute"))}<strong>${value(currentMinute)}</strong></span><a href="#connection">${e(L("接入客户端", "Connect a client"))}${icon("arrow")}</a></div>
+  <div class="dashboard-section-head"><div><h2>${e(L("核心指标", "Key metrics"))}<span class="scope-pill">${e(scope)}</span></div><div class="segmented dashboard-scope" aria-label="${e(L("指标统计范围", "Metric scope"))}">${[["all", L("累计", "All time")], ["15", L("15 分钟", "15 min")], ["30", L("30 分钟", "30 min")]].map(([id, label]) => `<button data-action="dashboard-scope" data-value="${id}" aria-pressed="${id === "all" ? s.dashboardScope === "all" : s.dashboardScope === "window" && s.trendMinutes === Number(id)}" class="${id === "all" ? s.dashboardScope === "all" ? "active" : "" : s.dashboardScope === "window" && s.trendMinutes === Number(id) ? "active" : ""}">${e(label)}</button>`).join("")}</div></div>
+  <div class="dashboard-kpis">
+    ${dashboardCard(L("完成调用", "Completed requests"), "activity", value(metrics?.total), metrics ? `${e(L("成功", "Success"))} <strong>${n(metrics.ok)}</strong><span class="kpi-separator">/</span>${e(L("失败", "Failed"))} <strong class="${metrics.failed ? "negative" : ""}">${n(metrics.failed)}</strong>` : e(L("等待用量数据", "Waiting for metrics")))}
+    ${dashboardCard(L("调用成功率", "Success rate"), "check", value(metrics?.success_rate, (v) => `${(v * 100).toFixed(1)}%`), metrics?.success_rate != null ? `<span class="kpi-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, metrics.success_rate * 100))}%"></i></span>${e(L("按完成调用计算", "Of completed requests"))}` : e(L("当前范围尚无完成调用", "No completed requests in this scope")), "green")}
+    ${dashboardCard(L("Token 用量", "Token usage"), "tokens", value(totalTokens, compact), metrics ? `${e(L("输入", "In"))} <strong title="${n(metrics.input_tokens)}">${compact(metrics.input_tokens)}</strong><span class="kpi-separator">/</span>${e(L("输出", "Out"))} <strong title="${n(metrics.output_tokens)}">${compact(metrics.output_tokens)}</strong>` : e(L("等待用量数据", "Waiting for metrics")), "violet")}
+    ${dashboardCard(L("平均生成速度", "Generation speed"), "bolt", value(metrics?.avg_tps, (v) => v.toFixed(1)), metrics?.avg_tps != null ? e(s.dashboardScope === "all" ? L(`${n(metrics.tps_samples)} 个有效测速样本`, `${n(metrics.tps_samples)} measured requests`) : L("按有效生成时长加权", "Weighted by measured generation time")) : e(L("当前范围尚无测速样本", "No measured generation in this scope")), "amber", metrics?.avg_tps != null ? "tok/s" : "")}
+  </div><p class="dashboard-scope-note">${e(s.dashboardScope === "all" ? L("累计数据可跨重启保留；下方流量趋势单独使用分钟窗口。", "Totals can persist across restarts. The traffic chart uses a separate minute window.") : L("核心指标与下方趋势使用同一组分钟桶，当前分钟仍在累计。", "Key metrics and traffic use the same minute buckets; the current minute is still accumulating."))}</p>
+  <div class="dashboard-main-grid">
+    <section class="card dashboard-traffic" data-trend="${e(s.trend)}">${cardHead(L("流量趋势", "Traffic activity"), L(`最近 ${s.trendMinutes} 分钟 · 每分钟聚合`, `Last ${s.trendMinutes} minutes · minute buckets`), trendControl)}
+      <div class="traffic-totals"><div><span>${e(L("窗口完成调用", "Window requests"))}</span><strong>${value(window?.total)}</strong></div><div><span>${e(L("平均每分钟", "Average per minute"))}</span><strong>${value(window?.average_rpm, (v) => v.toFixed(1))}<small>RPM</small></strong></div><div><span>${e(L("窗口 Token", "Window tokens"))}</span><strong>${window ? compact(window.input_tokens + window.output_tokens) : "—"}</strong></div><div class="segmented traffic-range">${[15, 30].map((minutes) => `<button data-action="trend-range" data-value="${minutes}" aria-pressed="${s.trendMinutes === minutes}" class="${s.trendMinutes === minutes ? "active" : ""}">${minutes} ${e(L("分钟", "min"))}</button>`).join("")}</div></div>
+      <div class="dashboard-chart">${chart(m?.series, s.trend)}${window?.series.length && !window.total ? `<div class="chart-idle"><span>${icon("activity")}</span><strong>${e(L("这个时段还没有完成调用", "No completed requests in this window"))}</strong><small>${e(L("新调用完成后，趋势会自动更新", "Traffic updates as new requests complete"))}</small></div>` : ""}</div>
+      <div class="chart-footnote"><span>${icon("clock")}${e(L("当前分钟未结束", "Current minute is incomplete"))}</span><span>${e(L("悬停或聚焦查看分钟读数", "Hover or focus for minute details"))}</span></div>
+    </section>
+    <section class="card dashboard-platforms">${cardHead(L("平台状态", "Platform health"), L("账号池独立调度", "Independent account pools"), `<a class="text-link" href="#platforms">${e(L("管理", "Manage"))}${icon("arrow")}</a>`)}
+      <div class="pool-readiness"><div><span>${e(L("就绪账号", "Ready accounts"))}</span><strong>${readiness ? `${readiness.ready}<small>/ ${readiness.enabled}</small>` : "—"}</strong></div>${tag(!readiness ? L("待加载", "Loading") : readiness.attention ? L("需关注", "Attention") : readiness.enabled ? L("可调度", "Ready") : L("未启用", "Inactive"), readiness?.enabled && !readiness.attention ? "green" : "amber", true)}<div class="pool-segments" aria-label="${e(L("账号状态分布", "Account state distribution"))}">${(pool || []).map((a) => `<i class="${a.state === "disabled" ? "disabled" : accountReadiness([a]).ready ? "ready" : "attention"}" title="${e(`${a.label} · ${accountStatus(a)[0]}`)}"></i>`).join("")}</div><small>${e(readiness ? L(`${readiness.attention} 需关注 · ${readiness.disabled} 已停用`, `${readiness.attention} need attention · ${readiness.disabled} disabled`) : L("等待账号数据", "Waiting for account data"))}</small></div>
+      <div class="dashboard-platform-list">${platformSummary()}</div><div class="platform-inventory"><span>${e(L("已接入平台", "Platforms"))}<strong>${status ? platforms().length : "—"}</strong></span><span>${e(L("模型条目", "Model entries"))}<strong>${s.cache.models ? models().length : "—"}</strong></span></div>
+    </section>
   </div>
-  <div class="overview-grid"><section class="card">${cardHead(
-    L("流量趋势", "Traffic activity"),
-    L(`最近 ${s.trendMinutes} 分钟 · 每分钟聚合`, `Last ${s.trendMinutes} minutes · per-minute buckets`),
-    `<div class="chart-caption"><span><i class="legend-dot"></i>${e(s.trend === "requests" ? L("成功", "Success") : L("输入", "Input"))}</span><span><i class="legend-dot red"></i>${e(s.trend === "requests" ? L("失败", "Failed") : L("输出", "Output"))}</span><select id="trendSelect" class="select" aria-label="${e(L("趋势类型", "Trend type"))}">${options(
-      [
-        ["requests", L("调用", "Requests")],
-        ["tokens", "Token"],
-      ],
-      s.trend,
-    )}</select></div>`,
-  )}<div class="chart-controls"><div class="segmented">${[15, 30].map((minutes) => `<button data-action="trend-range" data-value="${minutes}" aria-pressed="${s.trendMinutes === minutes}" class="${s.trendMinutes === minutes ? "active" : ""}">${minutes} ${e(L("分钟", "min"))}</button>`).join("")}</div><span>${e(L("悬停或聚焦查看每分钟读数", "Hover or focus for minute details"))}</span></div><div class="card-body">${chart(m.series, s.trend)}</div><div class="summary-metrics"><div><small>${e(L("记录样本", "Sample size"))}</small><strong>${n(sample.total)}</strong><small>${e(L("最近最多 200 条", "Latest 200 at most"))}</small></div><div><small>${e(L("完整耗时 P50", "Duration P50"))}</small><strong>${e(duration(sample.p50))}</strong></div><div><small>${e(L("完整耗时 P95", "Duration P95"))}</small><strong>${e(duration(sample.p95))}</strong></div></div></section>
-  <section class="card">${cardHead(L("平台与账号", "Platforms & accounts"), L("统一入口，按平台独立调度", "One endpoint, independent platform pools"), `<a class="text-link" href="#platforms">${e(L("管理", "Manage"))} →</a>`)}<div class="card-body">${platformSummary()}<div class="subtle-strip"><span>${e(L("平台", "Platforms"))} <strong>${platforms().length}</strong></span><span>${e(L("模型条目", "Model entries"))} <strong>${models().length}</strong></span><span>${e(L("账号", "Accounts"))} <strong>${accounts().length}</strong></span></div></div>${cardHead(
-    L("调用分布", "Usage breakdown"),
-    L("累计调用次数", "Cumulative requests"),
-    `<select id="usageSelect" class="select" aria-label="${e(L("统计维度", "Usage dimension"))}">${options(
-      [
-        ["by_model", L("模型", "Model")],
-        ["by_protocol", L("协议", "Protocol")],
-        ["by_account", L("账号", "Account")],
-      ],
-      s.usage,
-    )}</select>`,
-  )}<div class="card-body">${ranking(s.usage === "by_protocol" ? (m.by_protocol || []).map((row) => ({ ...row, key: protocolName(row.key) })) : m[s.usage])}</div></section></div>
-  <section class="card operations-attention">${cardHead(L("运行诊断", "Operational checks"), L("账号调度与最近记录中的失败", "Account scheduling and failures in the recent sample"), `<button class="button small" data-action="inspect-failures">${e(L("查看失败调用", "Inspect failures"))}${icon("arrow")}</button>`)}<div class="diagnostic-grid"><div class="diagnostic-summary"><span class="diagnostic-icon ${attention.length ? "negative" : "positive"}">${icon(attention.length ? "info" : "check")}</span><div><strong>${e(attention.length ? L(`${attention.length} 个账号需要关注`, `${attention.length} accounts need attention`) : enabled.length ? L("全部启用账号可调度", "Enabled accounts are ready") : L("没有已启用账号", "No enabled accounts"))}</strong><p>${e(L(`账号槽位 ${capacity} · ${failures.length ? "最近记录存在失败调用" : "最近记录未发现失败"}`, `Account slots ${capacity} · ${failures.length ? "Recent failures found" : "No failures in recent records"}`))}</p></div></div><div class="diagnostic-items">${attention.slice(0, 2).map((a) => `<button data-action="account-detail" data-index="${accounts().indexOf(a)}">${regionTag(a.platform)}<span>${e(a.identity?.nickname || a.label)}</span>${tag(...accountStatus(a))}${icon("chevron")}</button>`).join("")}${failures.slice(0, 2).map((row) => `<button data-action="request-detail" data-key="${e(requestKey(row))}">${tag(String(row.status), "red")}<span class="truncate">${e(row.model)} · ${e(row.error || L("调用失败", "Request failed"))}</span>${icon("chevron")}</button>`).join("")}${!attention.length && !failures.length ? `<a href="#models">${icon("models")}${e(L("查看模型与账号可用性", "Review model availability"))}${icon("arrow")}</a>` : ""}</div></div></section>
-  <section class="card">${cardHead(L("最近调用", "Recent requests"), L("实际路由、账号与完整耗时", "Actual route, account and full duration"), `<a class="text-link" href="#requests">${e(L("查看全部", "View all"))} →</a>`)}${requestTable(recent, false)}</section>`;
+  <div class="dashboard-detail-grid">
+    <section class="card dashboard-performance">${cardHead(L("响应表现", "Response performance"), L(`最近记录样本 · ${sample.total} / 200 条`, `Recent sample · ${sample.total} / 200 records`), `<a class="text-link" href="#requests">${e(L("分析调用", "Inspect requests"))}${icon("arrow")}</a>`)}<div class="performance-values"><div><span>${e(L("典型完整耗时", "Typical full duration"))}<b>P50</b></span><strong>${e(duration(sample.p50))}</strong></div><div><span>${e(L("长尾完整耗时", "Tail full duration"))}<b>P95</b></span><strong>${e(duration(sample.p95))}</strong></div></div><div class="performance-baseline"><span>${e(L("累计平均完整耗时", "Cumulative mean duration"))}</span><strong>${e(duration(m?.total ? m.avg_latency_ms : null))}</strong></div><div class="sample-observed">${icon("clock")}${e(recent.length ? L(`样本最新记录：${timestamp(recent[0].time, true)}`, `Latest record: ${timestamp(recent[0].time, true)}`) : L("尚无调用记录", "No request records"))}</div><p class="dashboard-panel-note">${e(L("完整耗时包含连接与回复生成；P50 / P95 仅来自最近记录样本，不随上方统计范围变化。", "Full duration includes connection and generation. P50 / P95 use only recent request records and do not follow the metric scope."))}</p></section>
+    <section class="card dashboard-distribution">${cardHead(L("调用分布", "Request distribution"), L("累计调用占比 · 前四项", "Cumulative request share · top four"), `<select id="usageSelect" class="select" aria-label="${e(L("统计维度", "Usage dimension"))}">${options([["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]], s.usage)}</select>`)}${ranking(m?.[s.usage])}<p class="dashboard-panel-note">${e(s.usage === "by_protocol" ? L("点击条目查看对应的最近调用记录。", "Select a row to inspect its recent requests.") : L("同名模型或账号标签可能跨平台合并；点击查看对应记录。", "Identical model or account labels may combine platforms. Select a row to inspect records."))}</p></section>
+  </div>
+  <section class="card dashboard-diagnostics">${cardHead(L("运行诊断", "Operational checks"), L("当前账号状态与最近 200 条调用记录", "Current accounts and latest 200 request records"), `<button class="button small" data-action="inspect-failures">${e(L("查看失败调用", "Inspect failures"))}${icon("arrow")}</button>`)}<div class="diagnostic-grid"><div class="diagnostic-summary"><span class="diagnostic-icon ${readiness?.attention ? "negative" : readiness?.enabled ? "positive" : "muted"}">${icon(readiness?.attention ? "info" : readiness?.enabled ? "check" : "info")}</span><div><strong>${e(attentionTitle)}</strong><p>${e(m ? L(`最近样本 ${failures.length} 次失败 / ${sample.total} 次调用`, `Recent sample: ${failures.length} failures / ${sample.total} requests`) : L("等待调用数据", "Waiting for request data"))}</p></div></div><div class="diagnostic-items">${attention.slice(0, 2).map((a) => `<button data-action="account-detail" data-index="${accounts().indexOf(a)}">${regionTag(a.platform)}<span>${e(a.identity?.nickname || a.label)}</span>${tag(...accountStatus(a))}${icon("chevron")}</button>`).join("")}${failures.slice(0, 2).map((row) => `<button data-action="request-detail" data-key="${e(requestKey(row))}">${tag(String(row.status), "red")}<span class="diagnostic-time" title="${e(timestamp(row.time, true))}">${e(timestamp(row.time))}</span><span class="truncate">${e(row.model)} · ${e(row.error || L("调用失败", "Request failed"))}</span>${icon("chevron")}</button>`).join("")}${!attention.length && !failures.length ? `<a href="#models">${icon("models")}${e(L("查看模型与账号可用性", "Review model availability"))}${icon("arrow")}</a>` : ""}</div></div></section>
+  <section class="card dashboard-recent">${cardHead(L("最近调用", "Recent requests"), L("实际路由、账号与完整耗时", "Actual route, account and full duration"), `<a class="text-link" href="#requests">${e(L("查看记录", "View records"))}${icon("arrow")}</a>`)}${requestTable(recent, false)}</section>
+  </div>`;
 }
 
 function platformTabs(kind, selected) {
@@ -1436,6 +1437,10 @@ document.addEventListener("click", async (event) => {
         return;
       case "trend-range":
         s.trendMinutes = Number(value);
+        return draw();
+      case "dashboard-scope":
+        s.dashboardScope = value === "all" ? "all" : "window";
+        if (value !== "all") s.trendMinutes = Number(value) === 15 ? 15 : 30;
         return draw();
       case "analytics-dimension":
         s.analytics.dimension = value;
