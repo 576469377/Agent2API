@@ -14,15 +14,26 @@ import (
 //
 // 有了它，/v1/models 的输出与本地能力校验都不需要知道具体平台。
 type ModelInfo struct {
-	ID               string `json:"id"`
-	DisplayName      string `json:"display_name"`
-	Description      string `json:"description,omitempty"`
-	ContextTokens    int    `json:"context_tokens"`
-	MaxOutputTokens  int    `json:"max_output_tokens"`
-	SupportsImages   bool   `json:"supports_images"`
-	SupportsTools    bool   `json:"supports_tools"`
-	SupportsThinking bool   `json:"supports_thinking"`
-	IsDefault        bool   `json:"is_default"`
+	ID               string        `json:"id"`
+	DisplayName      string        `json:"display_name"`
+	Description      string        `json:"description,omitempty"`
+	ContextTokens    int           `json:"context_tokens"`
+	MaxOutputTokens  int           `json:"max_output_tokens"`
+	SupportsImages   bool          `json:"supports_images"`
+	SupportsTools    bool          `json:"supports_tools"`
+	SupportsThinking bool          `json:"supports_thinking"`
+	IsDefault        bool          `json:"is_default"`
+	Pricing          *ModelPricing `json:"pricing,omitempty"`
+}
+
+// ModelPricing reports upstream catalogue metadata, never an account balance
+// or a currency/token price. Missing metadata must not be interpreted as free.
+type ModelPricing struct {
+	Status           string   `json:"status"` // free (zero credits), credits, dynamic, unknown
+	CreditMultiplier *float64 `json:"credit_multiplier,omitempty"`
+	UpstreamLabel    string   `json:"upstream_label,omitempty"`
+	Source           string   `json:"source"`
+	ObservedAt       string   `json:"observed_at"`
 }
 
 // Adapter 把供应商无关的请求转换为具体平台调用，并返回有序响应流。

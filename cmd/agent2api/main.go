@@ -480,6 +480,7 @@ func runModels(args []string) {
 	credentialPath := fs.String("credential", "", "凭证文件路径")
 	baseURL := fs.String("base-url", "", "上游地址")
 	platform := fs.String("platform", "", "只列指定平台（缺省列出全部已集成平台）")
+	pricingSnapshot := fs.String("pricing-snapshot", "", "只读上游配置并导出控制台费率快照，不启动网关或刷新凭证")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load(*configPath)
@@ -491,6 +492,13 @@ func runModels(args []string) {
 	}
 	if *baseURL != "" {
 		cfg.Upstream.BaseURL = *baseURL
+	}
+	if *pricingSnapshot != "" {
+		if err := exportPricingSnapshot(cfg, *platform, *pricingSnapshot); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("模型费率快照已更新（仅配置读取，无生成请求）")
+		return
 	}
 
 	logger := log.New(os.Stderr, "", 0)

@@ -23,6 +23,8 @@
 
 `GET /v1/models` 返回唯一裸名及各平台限定名。`GET /api/models` 提供完整元数据：`platform`、`routing_id`、`default_route`、上下文窗口、输出上限与能力。客户端配置推荐使用 `routing_id`。模式入口的名字不代表某个固定底层模型；没有元数据时不要猜测窗口大小。
 
+新版本的 WorkBuddy 目录还包含 `pricing`：`status`（`free` 表示零积分倍率、`credits`、`dynamic`、`unknown`）、可选的 `credit_multiplier`、`upstream_label`、`source` 和 `observed_at`。来源为上游模型配置，按平台区分，不代表账号余额或金额单价；缺失倍率不能当作零。其他适配器或内置兜底目录可省略此字段。详见[控制台费率说明](console.md#模型费率)。
+
 ## 请求示例
 
 以下是 macOS / Linux shell 示例。把 `YOUR_ROUTING_ID` 换成目录中的完整模型 ID；启用鉴权后将 `agent2api-local` 换成实际网关密钥。

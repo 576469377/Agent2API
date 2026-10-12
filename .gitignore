@@ -3,6 +3,9 @@
 /agent2api.exe
 /dist/
 /bin/
+# Optional local catalogue metadata for a separate console on an older gateway.
+/internal/web/static/_model-pricing.json
+/internal/web/static/.model-pricing-*.tmp
 
 # ── 本地配置与凭证【切勿提交】────────────────────────────────
 # config.json 里可能有 api_key，凭证文件里是账号的 access/refresh token。

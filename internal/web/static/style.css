@@ -2246,6 +2246,15 @@ kbd { font: 10px Consolas, monospace; border: 1px solid var(--border); border-ra
 .diagnostic-items > button, .diagnostic-items > a { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--surface-alt); display: flex; align-items: center; gap: 8px; font-size: 11px; text-align: left; min-width: 0; }
 .diagnostic-items .icon:last-child { margin-left: auto; width: 13px; flex: none; }
 .scope-note { font-size: 11px; color: var(--muted); line-height: 1.8; margin-top: 14px; }
+.model-catalog-table th { padding: 13px 12px; }
+.model-catalog-table td { padding: 15px 12px; }
+.model-catalog-table .cell-model .cell-main,
+.model-catalog-table .cell-model .cell-sub { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-catalog-table .cell-pricing { min-width: 85px; }
+@media (max-width: 1200px) {
+  .model-catalog-table .cell-model .cell-main,
+  .model-catalog-table .cell-model .cell-sub { max-width: 210px; }
+}
 .request-filters { padding: 16px 19px; margin-bottom: 14px; overflow: visible; }
 .request-filters .toolbar { margin: 0; gap: 10px; }
 .filter-secondary { border-top: 1px solid var(--border); margin-top: 13px !important; padding-top: 13px; }

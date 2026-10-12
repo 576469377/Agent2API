@@ -12,6 +12,7 @@ import {
 } from "./core.js";
 import { renderMath } from "./math.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "./monitor.js";
+import { mergePricingSnapshot, modelPricing, compareModelRates } from "./pricing.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -47,6 +48,7 @@ const s = {
     query: "",
     platform: "all",
     capability: "all",
+    pricing: "all",
     view: "list",
     page: 1,
     sort: "name",
@@ -284,6 +286,14 @@ async function refresh(keys = pageKeys[s.page], manual = false) {
               ? data.error
               : JSON.stringify(data.error),
           );
+        if (key === "models" && Array.isArray(data.models) && data.models.some((m) => !Object.hasOwn(m, "pricing"))) {
+          // Optional metadata for a separate console on an older running gateway.
+          // A missing snapshot remains unknown; generation is never probed.
+          try {
+            const snapshot = await fetch("/static/_model-pricing.json", { cache: "no-store", signal: AbortSignal.timeout(3000) });
+            if (snapshot.ok) data.models = mergePricingSnapshot(data.models, await snapshot.json());
+          } catch {}
+        }
         s.cache[key] = data;
         delete s.errors[key];
         if (key === "status") {
@@ -606,8 +616,16 @@ function modelPage() {
       ["supports_thinking", L("思考", "Reasoning")],
     ],
     s.models.capability,
-  )}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
-  <section class="card" id="modelResults"></section>`;
+  )}</select><select id="pricingFilter" class="select" aria-label="${e(L("费率筛选", "Rate filter"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["all", L("全部费率", "All rates")], ["free", L("零积分", "Zero credits")], ["credits", L("积分计费", "Uses credits")], ["dynamic", L("浮动倍率", "Variable rate")], ["unknown", L("费率未知", "Unknown rate")]], s.models.pricing)}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["rate", L("积分倍率从低到高", "Lowest credit rate")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
+  <section class="card" id="modelResults"></section><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
+}
+function pricingName(status) {
+  return ({ free: L("零积分", "Zero credits"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
+}
+function pricingCell(m) {
+  const p = modelPricing(m), rate = p.multiplier;
+  const value = p.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : rate !== undefined ? `${p.stale ? L("上次 ", "Previously ") : ""}×${String(rate)}` : "—";
+  return `${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${p.observedAt ? e((p.stale ? L("待更新 · ", "Stale · ") : "") + timestamp(p.observedAt)) : e(L("上游未提供", "Not reported"))}</div>`;
 }
 function updateModelTable() {
   if (!$("modelResults")) return;
@@ -617,23 +635,24 @@ function updateModelTable() {
     (m) =>
       (s.models.platform === "all" || m.platform === s.models.platform) &&
       (s.models.capability === "all" || m[s.models.capability]) &&
+      (s.models.pricing === "all" || modelPricing(m).status === s.models.pricing) &&
       `${m.id} ${m.display_name} ${routeId(m)}`.toLowerCase().includes(q),
   );
-  filtered.sort((a, b) => (s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || routeId(a).localeCompare(routeId(b)));
+  filtered.sort((a, b) => (s.models.sort === "rate" ? compareModelRates(a, b) : s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || routeId(a).localeCompare(routeId(b)));
   const { rows, footer } = paginate(filtered, "models", 20);
   const body = rows
     .map(
       (m) =>
-        `<tr><td class="cell-model"><div class="cell-main mono" title="${e(routeId(m))}">${e(m.id)}</div><div class="cell-sub mono truncate" title="${e(routeId(m))}">${e(routeId(m))}</div></td><td>${regionTag(m.platform)}<div class="cell-sub mono">${e(m.platform || "—")}</div></td><td class="num mono">${m.context_tokens ? e(compact(m.context_tokens)) : "—"}</td><td class="num mono">${m.max_output_tokens ? e(compact(m.max_output_tokens)) : "—"}</td><td><div class="tags">${m.supports_images ? tag(L("视觉", "Vision"), "blue") : ""}${m.supports_tools ? tag(L("工具", "Tools"), "outline") : ""}${m.supports_thinking ? tag(L("思考", "Reasoning"), "outline") : ""}${!m.supports_images && !m.supports_tools && !m.supports_thinking ? '<span class="muted">—</span>' : ""}</div></td><td><div class="row-actions">${iconButton("copy", L("复制完整模型 ID", "Copy full model ID"), "copy-model", `data-model="${e(routeId(m))}"`)}${iconButton("chat", L("测试此模型", "Try this model"), "try-model", `data-model="${e(routeId(m))}"`)}${iconButton("more", L("模型详情", "Model details"), "model-detail", `data-model="${e(routeId(m))}"`)}</div></td></tr>`,
+        `<tr><td class="cell-model"><div class="cell-main mono" title="${e(routeId(m))}">${e(m.id)}</div><div class="cell-sub mono truncate" title="${e(routeId(m))}">${e(routeId(m))}</div></td><td>${regionTag(m.platform)}<div class="cell-sub mono">${e(m.platform || "—")}</div></td><td class="cell-pricing">${pricingCell(m)}</td><td class="num mono">${m.context_tokens ? e(compact(m.context_tokens)) : "—"}</td><td class="num mono">${m.max_output_tokens ? e(compact(m.max_output_tokens)) : "—"}</td><td><div class="tags">${m.supports_images ? tag(L("视觉", "Vision"), "blue") : ""}${m.supports_tools ? tag(L("工具", "Tools"), "outline") : ""}${m.supports_thinking ? tag(L("思考", "Reasoning"), "outline") : ""}${!m.supports_images && !m.supports_tools && !m.supports_thinking ? '<span class="muted">—</span>' : ""}</div></td><td><div class="row-actions">${iconButton("copy", L("复制完整模型 ID", "Copy full model ID"), "copy-model", `data-model="${e(routeId(m))}"`)}${iconButton("chat", L("测试此模型", "Try this model"), "try-model", `data-model="${e(routeId(m))}"`)}${iconButton("more", L("模型详情", "Model details"), "model-detail", `data-model="${e(routeId(m))}"`)}</div></td></tr>`,
     )
     .join("");
   $("modelResults").innerHTML = rows.length
-    ? `<div class="table-wrap"><table><thead><tr><th>${e(L("模型", "Model"))}</th><th>${e(L("来源平台", "Source"))}</th><th class="num">${e(L("上下文", "Context"))}</th><th class="num">${e(L("最大输出", "Max output"))}</th><th>${e(L("能力", "Capabilities"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${body}</tbody></table></div>${footer}`
+    ? `<div class="table-wrap"><table class="model-catalog-table"><thead><tr><th>${e(L("模型", "Model"))}</th><th>${e(L("来源平台", "Source"))}</th><th>${e(L("积分倍率", "Credit rate"))}</th><th class="num">${e(L("上下文", "Context"))}</th><th class="num">${e(L("最大输出", "Max output"))}</th><th>${e(L("能力", "Capabilities"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${body}</tbody></table></div>${footer}`
     : empty(
         L("没有匹配的模型", "No matching models"),
         L(
-          "尝试更换平台、能力或搜索关键词。",
-          "Try another platform, capability or search term.",
+          "尝试更换平台、费率、能力或搜索关键词。",
+          "Try another platform, rate, capability or search term.",
         ),
       );
 }
@@ -912,7 +931,7 @@ function showModelDetail(id) {
   if (!m) return;
   showDrawer(
     L("模型详情", "Model details"),
-    `<div class="detail-hero"><div class="platform-avatar ${m.platform === "workbuddy-global" ? "global" : ""}">${icon("models")}</div><div><h2>${e(m.display_name || m.id)}</h2><p>${e(platformName(m.platform))}</p></div></div><dl class="details-list">${detailItem(L("完整模型 ID", "Full model ID"), routeId(m), "mono")}${detailItem(L("原始模型名", "Original model name"), m.id, "mono")}${detailItem(L("上下文窗口", "Context window"), m.context_tokens ? n(m.context_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("最大输出", "Maximum output"), m.max_output_tokens ? n(m.max_output_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("模型能力", "Capabilities"), [m.supports_images ? L("视觉", "Vision") : "", m.supports_tools ? L("工具调用", "Tools") : "", m.supports_thinking ? L("思考", "Reasoning") : ""].filter(Boolean).join(" / ") || L("未提供", "Unreported"))}${detailItem(L("裸模型名默认路由", "Default route for bare ID"), m.default_route ? L("默认优先使用此平台", "This platform is preferred") : L("完整 ID 可固定到此平台", "Use the full ID to select this platform"))}${m.description ? detailItem(L("说明", "Description"), m.description) : ""}</dl><div class="detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}">${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`,
+    `<div class="detail-hero"><div class="platform-avatar ${m.platform === "workbuddy-global" ? "global" : ""}">${icon("models")}</div><div><h2>${e(m.display_name || m.id)}</h2><p>${e(platformName(m.platform))}</p></div></div><dl class="details-list">${detailItem(L("完整模型 ID", "Full model ID"), routeId(m), "mono")}${detailItem(L("原始模型名", "Original model name"), m.id, "mono")}${detailItem(L("费率类型", "Rate type"), pricingName(modelPricing(m).status))}${detailItem(L("积分倍率", "Credit multiplier"), modelPricing(m).multiplier !== undefined ? "×" + modelPricing(m).multiplier : modelPricing(m).status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : L("未知", "Unknown"))}${detailItem(L("上游费率标注", "Original rate label"), modelPricing(m).raw || L("未提供", "Not reported"))}${detailItem(L("费率来源与时间", "Rate source and time"), modelPricing(m).observedAt ? L("上游模型配置 · ", "Upstream configuration · ") + timestamp(modelPricing(m).observedAt, true) + (modelPricing(m).stale ? L(" · 已超过 24 小时，需更新", " · Older than 24 hours, refresh needed") : "") : L("无可核实信息", "No verified metadata"))}${detailItem(L("上下文窗口", "Context window"), m.context_tokens ? n(m.context_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("最大输出", "Maximum output"), m.max_output_tokens ? n(m.max_output_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("模型能力", "Capabilities"), [m.supports_images ? L("视觉", "Vision") : "", m.supports_tools ? L("工具调用", "Tools") : "", m.supports_thinking ? L("思考", "Reasoning") : ""].filter(Boolean).join(" / ") || L("未提供", "Unreported"))}${detailItem(L("裸模型名默认路由", "Default route for bare ID"), m.default_route ? L("默认优先使用此平台", "This platform is preferred") : L("完整 ID 可固定到此平台", "Use the full ID to select this platform"))}${m.description ? detailItem(L("说明", "Description"), m.description) : ""}</dl><div class="detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}">${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`,
   );
 }
 function showAccountDetail(index) {
@@ -1605,6 +1624,7 @@ document.addEventListener("change", async (event) => {
   }
   if (id === "analyticsSort") { s.analytics.sort = value; updateAnalyticsTable(); }
   if (id === "modelSort") { s.models.sort = value; s.models.page = 1; updateModelTable(); }
+  if (id === "pricingFilter") { s.models.pricing = value; s.models.page = 1; updateModelTable(); }
   if (id === "connectionModel") { s.connectionModel = value; draw(); }
   const requestFilters = { requestModelFilter: "model", requestAccountFilter: "account", requestRangeFilter: "range", requestSort: "sort", requestPageSize: "size" };
   if (requestFilters[id]) {
