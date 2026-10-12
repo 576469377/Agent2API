@@ -33,6 +33,7 @@ const s = {
   lang: saved("agent2api_lang", "zh"),
   theme: saved("agent2api_theme", "auto"),
   sidebarCollapsed: saved("agent2api_sidebar_collapsed") === "true",
+  density: saved("agent2api_density", "comfortable") === "compact" ? "compact" : "comfortable",
   key: saved("agent2api_key"),
   page: "overview",
   cache: {},
@@ -312,6 +313,7 @@ function chrome() {
   document.documentElement.lang = s.lang === "en" ? "en" : "zh-CN";
   document.body.dataset.page = s.page;
   document.body.dataset.nav = s.sidebarCollapsed ? "compact" : "expanded";
+  document.body.dataset.density = s.density;
   $("sidebarToggle").innerHTML = icon("panel");
   $("sidebarToggle").setAttribute("aria-label", s.sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"));
   $("sidebarToggle").setAttribute("aria-expanded", String(!s.sidebarCollapsed));
@@ -409,7 +411,11 @@ function draw(force = false) {
     active instanceof HTMLInputElement
       ? [active.selectionStart, active.selectionEnd]
       : null;
-  const scroll = $("pageContent").querySelector(".table-wrap")?.scrollLeft || 0;
+  const samePage = $("pageContent").dataset.page === s.page,
+    scrollContainer = samePage ? $("pageContent").querySelector(".table-wrap") : null,
+    scroll = { left: scrollContainer?.scrollLeft || 0, top: scrollContainer?.scrollTop || 0 },
+    scrollFocused = active === scrollContainer,
+    advancedOpen = samePage ? $("requestAdvanced")?.open : undefined;
   const primary = pageKeys[s.page][0];
   if (!s.cache[primary] && !s.errors[primary])
     $("pageContent").innerHTML =
@@ -438,7 +444,13 @@ function draw(force = false) {
     renderMessages();
   }
   const table = $("pageContent").querySelector(".table-wrap");
-  if (table) table.scrollLeft = scroll;
+  if (table) {
+    table.scrollLeft = scroll.left;
+    table.scrollTop = scroll.top;
+    if (scrollFocused) table.focus({ preventScroll: true });
+  }
+  if ($("requestAdvanced") && advancedOpen != null) $("requestAdvanced").open = advancedOpen;
+  $("pageContent").dataset.page = s.page;
 }
 
 function metricCard(label, glyph, value, note, unit = "") {
@@ -604,8 +616,11 @@ function connectionExample() {
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
   return `curl ${quote(`${gatewayURL() || "http://127.0.0.1:8787"}/v1/${path}`)} \\\n  -H 'Content-Type: application/json' \\\n  -H ${quote(header)} \\\n${protocol === "anthropic-messages" ? "  -H 'anthropic-version: 2023-06-01' \\\n" : ""}  -d ${quote(JSON.stringify(payload, null, 2))}`;
 }
+function densityControl() {
+  return `<button class="button small density-control" data-action="toggle-density" aria-pressed="${s.density === "compact"}" title="${e(L("切换列表行间距", "Toggle table row spacing"))}">${icon("rows")}${e(s.density === "compact" ? L("紧凑", "Compact") : L("舒适", "Comfortable"))}</button>`;
+}
 function modelPage() {
-  return `<div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div>
+  return `<section class="card resource-workspace model-workspace"><div class="workspace-controls">
   <div class="toolbar catalog-platform-toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型清单", "Refresh catalogue"), "reload-models", "", "refresh")}</div></div>
   <div class="toolbar catalog-filter-toolbar"><div class="toolbar-group">${search("modelSearch", s.models.query, L("搜索模型名称或 ID…", "Search model name or ID…"))}<select id="capabilityFilter" class="select" aria-label="${e(L("能力筛选", "Capability filter"))}">${options(
     [
@@ -616,7 +631,7 @@ function modelPage() {
     ],
     s.models.capability,
   )}</select><select id="pricingFilter" class="select" aria-label="${e(L("费率筛选", "Rate filter"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["all", L("全部费率", "All rates")], ["free", L("零积分", "Zero credits")], ["credits", L("积分计费", "Uses credits")], ["dynamic", L("浮动倍率", "Variable rate")], ["unknown", L("费率未知", "Unknown rate")]], s.models.pricing)}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["rate", L("积分倍率从低到高", "Lowest credit rate")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
-  <div id="modelInsights"></div><section class="card" id="modelResults"></section><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
+  </div><div id="modelInsights"></div><div class="resource-table" id="modelResults"></div></section><div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
 }
 function pricingName(status) {
   return ({ free: L("零积分", "Zero credits"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
@@ -628,8 +643,9 @@ function updateModelInsights() {
   for (const model of matching) counts[modelPricing(model).status]++;
   const times = matching.map((m) => Date.parse(modelPricing(m).observedAt || "")).filter(Number.isFinite);
   const filters = [s.models.query.trim(), s.models.platform !== "all", s.models.capability !== "all", !matrix && s.models.pricing !== "all"].filter(Boolean).length;
+  const displayed = !matrix && s.models.pricing !== "all" ? counts[s.models.pricing] || 0 : matching.length;
   $("modelInsights").innerHTML = `<div class="catalog-summary">${Object.entries(counts).map(([key,count]) => `<button class="card catalog-summary-item ${!matrix && s.models.pricing === key ? "selected" : ""}" data-action="model-summary-filter" data-value="${key}" aria-pressed="${!matrix && s.models.pricing === key}" ${matrix ? "disabled" : ""}><span>${e(pricingName(key))}</span><strong>${n(count)}</strong><small>${e(key === "free" ? L("倍率为零，仍有用量限制", "Zero rate, usage limits apply") : key === "credits" ? L("显示上游积分倍率", "Upstream credit multipliers") : key === "dynamic" ? L("随自动选择的模型变化", "Depends on automatic selection") : L("缺失或已过期的信息", "Missing or stale metadata"))}</small></button>`).join("")}</div>
-  <div class="catalog-context"><span>${e(L("平台、能力与搜索匹配", "Matches platform, capability and search"))} <strong>${n(matching.length)}</strong> / ${n(models().length)}${!matrix && s.models.pricing !== "all" ? ` · ${e(pricingName(s.models.pricing))} ${n(counts[s.models.pricing])}` : ""}</span>${filters ? `<button class="button ghost small" data-action="reset-model-filters">${icon("close")}${e(L("清除筛选", "Reset filters"))} (${filters})</button>` : ""}</div>
+  <div class="catalog-context"><span><strong>${e(matrix ? L("账号可用性", "Account availability") : L("模型列表", "Model list"))}</strong><span class="result-count">${n(displayed)} / ${n(models().length)}${!matrix && s.models.pricing !== "all" ? ` · ${e(pricingName(s.models.pricing))}` : ""}</span></span><div class="toolbar-group">${filters ? `<button class="button ghost small" data-action="reset-model-filters">${icon("close")}${e(L("清除筛选", "Reset filters"))} (${filters})</button>` : ""}${densityControl()}</div></div>
   <div class="catalog-source">${icon("clock")}<span>${times.length ? e(L("最早费率记录：", "Oldest rate observation: ") + timestamp(Math.min(...times), true)) : e(L("没有可核实的费率记录", "No verified rate metadata"))}${s.cache.models?.pricing_snapshot ? ` · ${e(L("费率为读取快照，更新模型清单不会更新费率", "Rates use an observed snapshot; catalogue refresh does not refresh rates"))}` : ""}</span></div>`;
 }
 function pricingCell(m) {
@@ -648,11 +664,11 @@ function updateModelTable() {
   const body = rows
     .map(
       (m) =>
-        `<tr><td class="cell-model"><div class="cell-main mono" title="${e(routeId(m))}">${e(m.id)}</div><div class="cell-sub mono truncate" title="${e(routeId(m))}">${e(routeId(m))}</div></td><td>${regionTag(m.platform)}<div class="cell-sub mono">${e(m.platform || "—")}</div></td><td class="cell-pricing">${pricingCell(m)}</td><td class="num mono">${m.context_tokens ? e(compact(m.context_tokens)) : "—"}</td><td class="num mono">${m.max_output_tokens ? e(compact(m.max_output_tokens)) : "—"}</td><td><div class="tags">${m.supports_images ? tag(L("视觉", "Vision"), "blue") : ""}${m.supports_tools ? tag(L("工具", "Tools"), "outline") : ""}${m.supports_thinking ? tag(L("思考", "Reasoning"), "outline") : ""}${!m.supports_images && !m.supports_tools && !m.supports_thinking ? '<span class="muted">—</span>' : ""}</div></td><td><div class="row-actions">${iconButton("copy", L("复制完整模型 ID", "Copy full model ID"), "copy-model", `data-model="${e(routeId(m))}"`)}${iconButton("chat", L("测试此模型", "Try this model"), "try-model", `data-model="${e(routeId(m))}"`)}${iconButton("more", L("模型详情", "Model details"), "model-detail", `data-model="${e(routeId(m))}"`)}</div></td></tr>`,
+        `<tr><td class="cell-model"><div class="cell-main mono" title="${e(routeId(m))}">${e(m.id)}</div><div class="cell-sub mono truncate" title="${e(routeId(m))}">${e(routeId(m))}</div></td><td class="cell-platform">${regionTag(m.platform)}<div class="cell-sub mono">${e(m.platform || "—")}</div></td><td class="cell-pricing">${pricingCell(m)}</td><td class="num mono">${m.context_tokens ? e(compact(m.context_tokens)) : "—"}</td><td class="num mono">${m.max_output_tokens ? e(compact(m.max_output_tokens)) : "—"}</td><td><div class="tags model-capabilities">${m.supports_images ? tag(L("视觉", "Vision"), "blue") : ""}${m.supports_tools ? tag(L("工具", "Tools"), "outline") : ""}${m.supports_thinking ? tag(L("思考", "Reasoning"), "outline") : ""}${!m.supports_images && !m.supports_tools && !m.supports_thinking ? '<span class="muted">—</span>' : ""}</div></td><td><div class="row-actions">${iconButton("copy", L("复制完整模型 ID", "Copy full model ID"), "copy-model", `data-model="${e(routeId(m))}"`)}${iconButton("chat", L("测试此模型", "Try this model"), "try-model", `data-model="${e(routeId(m))}"`)}${iconButton("more", L("模型详情", "Model details"), "model-detail", `data-model="${e(routeId(m))}"`)}</div></td></tr>`,
     )
     .join("");
   $("modelResults").innerHTML = rows.length
-    ? `<div class="table-wrap"><table class="model-catalog-table"><thead><tr><th>${e(L("模型", "Model"))}</th><th>${e(L("来源平台", "Source"))}</th><th>${e(L("积分倍率", "Credit rate"))}</th><th class="num">${e(L("上下文", "Context"))}</th><th class="num">${e(L("最大输出", "Max output"))}</th><th>${e(L("能力", "Capabilities"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${body}</tbody></table></div>${footer}`
+    ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("模型列表，可滚动", "Scrollable model list"))}"><table class="model-catalog-table"><thead><tr><th>${e(L("模型", "Model"))}</th><th>${e(L("来源平台", "Source"))}</th><th>${e(L("积分倍率", "Credit rate"))}</th><th class="num">${e(L("上下文", "Context"))}</th><th class="num">${e(L("最大输出", "Max output"))}</th><th>${e(L("能力", "Capabilities"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${body}</tbody></table></div>${footer}`
     : empty(
         L("没有匹配的模型", "No matching models"),
         L(
@@ -735,12 +751,12 @@ function renderMatrix() {
     )
     .join("");
   $("modelResults").innerHTML =
-    `${cardHead(L("模型 × 账号", "Models × accounts"), L("✓ 表示当前账号目录支持；停用、需登录和冷却会单独标注。", "✓ means the account catalogue supports this model. Disabled, login-required and cooling states are shown separately."))}<div class="table-wrap"><table class="matrix"><thead><tr><th>${e(L("模型", "Model"))}</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="table-footer">${e(L("目录支持不代表剩余额度，实际调用结果以日志为准。", "Catalog support does not guarantee quota. Check request logs for actual results."))}</div>`;
+    `${cardHead(L("模型 × 账号", "Models × accounts"), L("✓ 表示当前账号目录支持；停用、需登录和冷却会单独标注。", "✓ means the account catalogue supports this model. Disabled, login-required and cooling states are shown separately."))}<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("账号可用性，可滚动", "Scrollable account availability"))}"><table class="matrix"><thead><tr><th>${e(L("模型", "Model"))}</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="table-footer">${e(L("目录支持不代表剩余额度，实际调用结果以日志为准。", "Catalog support does not guarantee quota. Check request logs for actual results."))}</div>`;
 }
 
 function accountStatus(a) {
   if (a.state === "disabled") return [L("已停用", "Disabled"), ""];
-  if (a.healthy) return [L("就绪", "Ready"), "green"];
+  if (accountReadiness([a]).ready) return [L("就绪", "Ready"), "green"];
   if (a.reason === "quota_exhausted" || a.reason === "quota")
     return [L("额度耗尽", "Quota exhausted"), "amber"];
   if (a.reason === "unauthorized" || a.reason === "auth")
@@ -757,10 +773,8 @@ function credentialStatus(a) {
 }
 function accountPage() {
   const all = accounts().filter((a) => s.accounts.platform === "all" || a.platform === s.accounts.platform),
-    ready = all.filter((a) => a.healthy).length,
-    cooling = all.filter((a) => !a.healthy && a.state !== "disabled").length,
-    disabled = all.filter((a) => a.state === "disabled").length;
-  return `<div class="health-summary"><span class="item"><span class="status-dot online"></span><strong>${ready}</strong>${e(L("就绪", "Ready"))}</span><span class="item"><span class="status-dot" style="background:var(--amber)"></span><strong>${cooling}</strong>${e(L("需关注", "Need attention"))}</span><span class="item"><span class="status-dot"></span><strong>${disabled}</strong>${e(L("停用", "Disabled"))}</span><span class="item"><strong>${n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0))}</strong>${e(L("处理中的请求", "Active requests"))}</span></div>
+    health = accountReadiness(all);
+  return `<section class="card resource-workspace account-workspace"><div class="health-summary metric-strip"><span class="item"><span>${e(L("就绪账号", "Ready accounts"))}</span><strong class="positive">${s.cache.accounts ? n(health.ready) : "—"}</strong></span><span class="item"><span>${e(L("需关注", "Need attention"))}</span><strong class="${health.attention ? "negative" : ""}">${s.cache.accounts ? n(health.attention) : "—"}</strong></span><span class="item"><span>${e(L("已停用", "Disabled"))}</span><strong>${s.cache.accounts ? n(health.disabled) : "—"}</strong></span><span class="item"><span>${e(L("处理中的请求", "Active requests"))}</span><strong>${s.cache.accounts ? n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0)) : "—"}</strong></span></div><div class="workspace-controls">
   <div class="toolbar"><div class="toolbar-group">${platformTabs("accounts", s.accounts.platform)}</div>${button(L("添加账号", "Add account"), "add-account", "primary", "plus")}</div>
   <div class="toolbar"><div class="toolbar-group">${search("accountSearch", s.accounts.query, L("搜索昵称、账号或 UID…", "Search name, account or UID…"))}<select id="accountStatusFilter" class="select" aria-label="${e(L("账号状态", "Account status"))}">${options(
     [
@@ -770,7 +784,7 @@ function accountPage() {
       ["disabled", L("已停用", "Disabled")],
     ],
     s.accounts.status,
-  )}</select></div><div class="toolbar-group"><span class="result-count" id="accountCount"></span><div class="segmented">${[["table", L("表格", "Table")], ["cards", L("卡片", "Cards")]].map(([id, title]) => `<button data-action="account-view" data-value="${id}" class="${s.accounts.view === id ? "active" : ""}" aria-pressed="${s.accounts.view === id}">${e(title)}</button>`).join("")}</div></div></div><div class="${s.accounts.view === "table" ? "card" : "account-grid"}" id="accountCards"></div>`;
+  )}</select></div><div class="toolbar-group"><span class="result-count" id="accountCount"></span>${densityControl()}<div class="segmented">${[["table", L("表格", "Table")], ["cards", L("卡片", "Cards")]].map(([id, title]) => `<button data-action="account-view" data-value="${id}" class="${s.accounts.view === id ? "active" : ""}" aria-pressed="${s.accounts.view === id}">${e(title)}</button>`).join("")}</div></div></div></div><div class="${s.accounts.view === "table" ? "resource-table" : "account-grid"}" id="accountCards"></div></section>`;
 }
 function updateAccountCards() {
   if (!$("accountCards")) return;
@@ -782,10 +796,10 @@ function updateAccountCards() {
         .toLowerCase()
         .includes(q) &&
       (s.accounts.status === "all" ||
-        (s.accounts.status === "ready" && a.healthy) ||
+        (s.accounts.status === "ready" && accountReadiness([a]).ready) ||
         (s.accounts.status === "disabled" && a.state === "disabled") ||
         (s.accounts.status === "attention" &&
-          !a.healthy &&
+          !accountReadiness([a]).ready &&
           a.state !== "disabled")),
   );
   $("accountCount").textContent = L(
@@ -793,7 +807,7 @@ function updateAccountCards() {
     `${rows.length} accounts`,
   );
   if (s.accounts.view === "table") {
-    $("accountCards").innerHTML = rows.length ? `<div class="table-wrap"><table class="account-table"><thead><tr><th>${e(L("账号", "Account"))}</th><th>${e(L("平台", "Platform"))}</th><th>${e(L("调度状态", "Scheduling"))}</th><th>${e(L("登录状态", "Credentials"))}</th><th>${e(L("并发", "Concurrency"))}</th><th class="num">${e(L("累计调用", "Requests"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${rows.map((a) => {
+    $("accountCards").innerHTML = rows.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("账号列表，可滚动", "Scrollable account list"))}"><table class="account-table"><thead><tr><th>${e(L("账号", "Account"))}</th><th>${e(L("平台", "Platform"))}</th><th>${e(L("调度状态", "Scheduling"))}</th><th>${e(L("登录状态", "Credentials"))}</th><th>${e(L("并发", "Concurrency"))}</th><th class="num">${e(L("累计调用", "Requests"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${rows.map((a) => {
       const index = accounts().indexOf(a), name = a.identity?.nickname || a.label;
       const ambiguous = accounts().filter((other) => other.label === a.label).length > 1;
       const usage = s.cache.metrics?.by_account?.find((row) => row.key === a.label);
@@ -864,7 +878,7 @@ function requestPage() {
   }
   const modelOptions = [...new Set(sample.map((row) => row.model))];
   if (s.requests.model !== "all" && !modelOptions.includes(s.requests.model)) modelOptions.push(s.requests.model);
-  return `<div class="card request-filters"><div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号、状态码或错误…", "Search model, account, status or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
+  return `<section class="card resource-workspace request-workspace"><div class="card-head request-table-head"><div><h2>${e(L("调用记录", "Request records"))}</h2><p>${e(L("网关仅保留最近 200 条；筛选与导出作用于这些记录", "The gateway retains the latest 200 records; filters and exports apply to this sample"))}</p></div><div class="toolbar-group"><select id="requestSort" class="select" aria-label="${e(L("记录排序", "Request sort"))}">${options([["time", L("最新优先", "Newest first")], ["latency", L("耗时优先", "Longest duration")], ["tokens", L("Token 优先", "Most tokens")]], s.requests.sort)}</select><select id="requestPageSize" class="select" aria-label="${e(L("每页记录数", "Records per page"))}">${options([["20", "20 / " + L("页", "page")], ["50", "50 / " + L("页", "page")], ["100", "100 / " + L("页", "page")]], String(s.requests.size))}</select>${densityControl()}${button(L("导出", "Export"), "export-requests", "small", "requests")}</div></div><div class="request-filters"><div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号、状态码或错误…", "Search model, account, status or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
     [
       ["all", L("全部状态", "All states")],
       ["ok", L("成功", "Success")],
@@ -879,7 +893,7 @@ function requestPage() {
       ["anthropic-messages", "Anthropic"],
     ],
     s.requests.protocol,
-  )}</select></div></div><div class="toolbar filter-secondary"><div class="toolbar-group"><select id="requestModelFilter" class="select" aria-label="${e(L("模型筛选", "Model filter"))}">${options([["all", L("全部模型", "All models")], ...modelOptions.sort().map((id) => [id, id])], s.requests.model)}</select><select id="requestAccountFilter" class="select" aria-label="${e(L("账号筛选", "Account filter"))}">${options([["all", L("全部账号", "All accounts")], ...accountOptions], s.requests.account)}</select><select id="requestRangeFilter" class="select" aria-label="${e(L("记录时间范围", "Request time range"))}">${options([["all", L("全部缓存记录", "All buffered records")], ["15", L("最近 15 分钟", "Last 15 minutes")], ["30", L("最近 30 分钟", "Last 30 minutes")], ["60", L("最近 1 小时", "Last hour")]], s.requests.range)}</select></div>${button(L("清空筛选", "Reset filters"), "reset-request-filters", "ghost", "close")}</div></div><div class="sample-summary" id="requestSampleStats"></div><section class="card"><div class="card-head request-table-head"><div><h2>${e(L("调用记录", "Request records"))}</h2><p>${e(L("网关仅保留最近 200 条；筛选与导出作用于这些记录", "The gateway retains the latest 200 records; filters and exports apply to this sample"))}</p></div><div class="toolbar-group"><select id="requestSort" class="select" aria-label="${e(L("记录排序", "Request sort"))}">${options([["time", L("最新优先", "Newest first")], ["latency", L("耗时优先", "Longest duration")], ["tokens", L("Token 优先", "Most tokens")]], s.requests.sort)}</select><select id="requestPageSize" class="select" aria-label="${e(L("每页记录数", "Records per page"))}">${options([["20", "20 / " + L("页", "page")], ["50", "50 / " + L("页", "page")], ["100", "100 / " + L("页", "page")]], String(s.requests.size))}</select>${button(L("导出", "Export"), "export-requests", "small", "requests")}</div></div><div id="requestResults"></div></section>`;
+  )}</select></div></div><details class="advanced-filters" id="requestAdvanced" ${[s.requests.model, s.requests.account, s.requests.range].some(v => v !== "all") ? "open" : ""}><summary>${icon("settings")}${e(L("更多筛选", "More filters"))}<span class="filter-count" id="requestFilterCount"></span>${icon("chevron")}</summary><div class="toolbar filter-secondary"><div class="toolbar-group"><select id="requestModelFilter" class="select" aria-label="${e(L("模型筛选", "Model filter"))}">${options([["all", L("全部模型", "All models")], ...modelOptions.sort().map((id) => [id, id])], s.requests.model)}</select><select id="requestAccountFilter" class="select" aria-label="${e(L("账号筛选", "Account filter"))}">${options([["all", L("全部账号", "All accounts")], ...accountOptions], s.requests.account)}</select><select id="requestRangeFilter" class="select" aria-label="${e(L("记录时间范围", "Request time range"))}">${options([["all", L("全部缓存记录", "All buffered records")], ["15", L("最近 15 分钟", "Last 15 minutes")], ["30", L("最近 30 分钟", "Last 30 minutes")], ["60", L("最近 1 小时", "Last hour")]], s.requests.range)}</select></div>${button(L("清空筛选", "Reset filters"), "reset-request-filters", "ghost", "close")}</div></details></div><div class="sample-summary metric-strip" id="requestSampleStats"></div><div class="resource-table" id="requestResults"></div></section>`;
 }
 function filteredRequests() {
   return filterRequests(recentRequests(), s.requests);
@@ -894,7 +908,7 @@ function requestTable(rows, details = true) {
       ),
       "requests",
     );
-  return `<div class="table-wrap"><table><thead><tr><th>${e(L("时间", "Time"))}</th><th>${e(L("模型与平台", "Model & platform"))}</th><th>${e(L("协议", "Protocol"))}</th><th>${e(L("状态", "Status"))}</th><th class="num">${e(L("耗时", "Duration"))}</th><th class="num">${e(L("输入 / 输出", "Input / output"))}</th><th></th></tr></thead><tbody>${rows
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("调用记录，可滚动", "Scrollable request records"))}"><table class="request-table"><thead><tr><th>${e(L("时间", "Time"))}</th><th>${e(L("模型与平台", "Model & platform"))}</th><th>${e(L("协议", "Protocol"))}</th><th>${e(L("状态", "Status"))}</th><th class="num">${e(L("耗时", "Duration"))}</th><th class="num">${e(L("输入 / 输出", "Input / output"))}</th><th></th></tr></thead><tbody>${rows
     .map((row) => {
       // Use a stable key instead of object identity: overview and logs have separate array copies.
       const key = requestKey(row);
@@ -908,7 +922,9 @@ function updateRequestTable() {
     { rows, footer } = paginate(filtered, "requests", s.requests.size);
   $("requestResults").innerHTML = requestTable(rows) + footer;
   const stats = summarizeRequests(filtered);
-  $("requestSampleStats").innerHTML = `<span>${e(L("匹配记录", "Matched"))}<strong>${n(stats.total)}</strong><small>/ ${recentRequests().length}</small></span><span>${e(L("成功率", "Success rate"))}<strong>${stats.total ? (stats.success_rate * 100).toFixed(1) + "%" : "—"}</strong></span><span>${e(L("失败", "Failed"))}<strong class="${stats.failed ? "negative" : ""}">${n(stats.failed)}</strong></span><span>P95<strong>${e(duration(stats.p95))}</strong></span><span>${e(L("输出 Token", "Output tokens"))}<strong>${compact(stats.output_tokens)}</strong></span>`;
+  const advancedCount = [s.requests.model, s.requests.account, s.requests.range].filter(v => v !== "all").length;
+  $("requestFilterCount").textContent = advancedCount ? String(advancedCount) : "";
+  $("requestSampleStats").innerHTML = `<span><span>${e(L("匹配记录", "Matched records"))}</span><strong>${n(stats.total)}</strong><small>/ ${recentRequests().length}</small></span><span><span>${e(L("成功率", "Success rate"))}</span><strong>${stats.total ? (stats.success_rate * 100).toFixed(1) + "%" : "—"}</strong></span><span><span>${e(L("失败", "Failed"))}</span><strong class="${stats.failed ? "negative" : ""}">${n(stats.failed)}</strong></span><span><span>${e(L("P95 完整耗时", "P95 total duration"))}</span><strong>${e(duration(stats.p95))}</strong></span><span><span>${e(L("输出 Token", "Output tokens"))}</span><strong>${compact(stats.output_tokens)}</strong></span>`;
 }
 
 function settingsPage() {
@@ -1436,6 +1452,13 @@ document.addEventListener("click", async (event) => {
         s.sidebarCollapsed = !s.sidebarCollapsed;
         save("agent2api_sidebar_collapsed", String(s.sidebarCollapsed));
         return chrome();
+      case "toggle-density":
+        s.density = s.density === "compact" ? "comfortable" : "compact";
+        save("agent2api_density", s.density);
+        chrome();
+        draw(true);
+        $("pageContent").querySelector('[data-action="toggle-density"]')?.focus({ preventScroll: true });
+        return;
       case "jump-page":
         $("modal").close();
         location.hash = value;
