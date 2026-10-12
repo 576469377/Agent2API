@@ -7,7 +7,7 @@
     <title>Agent2API · 控制台</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%232562eb'/%3E%3Cpath d='M23 8 12 23h8l-3 9 12-16h-8z' fill='white'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23222225%22%2F%3E%3Cg%20stroke%3D%22%23e7a077%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M9%207h5l6%209h5M9%2025h5l6-9M9%2016h11%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%23e7a077%22%3E%3Ccircle%20cx%3D%227%22%20cy%3D%227%22%20r%3D%222.5%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2216%22%20r%3D%222.5%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2225%22%20r%3D%222.5%22%2F%3E%3Ccircle%20cx%3D%2226%22%20cy%3D%2216%22%20r%3D%222.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"
     />
     <script>
       try {
@@ -16,13 +16,14 @@
       } catch {}
     </script>
     <link rel="stylesheet" href="/static/style.css?v=operations-1" />
-    <link rel="stylesheet" href="/static/dashboard.css?v=design-1" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=studio-1" />
+    <link rel="stylesheet" href="/static/workbench.css?v=studio-1" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar" aria-label="主导航">
         <a class="brand" href="#overview"
-          ><span class="brand-icon">A<span>2</span></span
+          ><span class="brand-icon"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M9 7h5l6 9h5M9 25h5l6-9M9 16h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="7" r="2.5" fill="currentColor"/><circle cx="7" cy="16" r="2.5" fill="currentColor"/><circle cx="7" cy="25" r="2.5" fill="currentColor"/><circle cx="26" cy="16" r="2.5" fill="currentColor"/></svg></span
           ><span
             ><strong>Agent2API</strong
             ><small id="brandSubtitle">统一模型网关</small></span
@@ -56,10 +57,10 @@
             id="menuButton"
             aria-label="展开导航"
           ></button>
-          <div class="breadcrumbs">
+          <div class="topbar-leading"><button class="icon-button sidebar-toggle" id="sidebarToggle" data-action="toggle-sidebar" aria-label="收起侧栏" aria-expanded="true"></button><div class="breadcrumbs">
             <span>Agent2API</span><span class="breadcrumb-divider">/</span
             ><strong id="breadcrumb">概览</strong>
-          </div>
+          </div></div>
           <div class="topbar-actions">
             <button class="quick-search" id="quickSearch" data-action="command-search" aria-label="搜索与快捷跳转"></button>
             <span class="connection-badge" id="connectionBadge"
@@ -102,6 +103,6 @@
     </dialog>
     <dialog id="modal" class="modal"><div id="modalContent"></div></dialog>
     <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
-    <script type="module" src="/static/app.js?v=design-1"></script>
+    <script type="module" src="/static/app.js?v=studio-1"></script>
   </body>
 </html>

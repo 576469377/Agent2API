@@ -80,6 +80,7 @@ const paths = {
   stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   external: '<path d="M14 3h7v7M21 3l-11 11M11 3H3v18h18v-8"/>',
 };
 export const icon = (name) =>

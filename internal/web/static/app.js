@@ -32,6 +32,7 @@ const save = (key, value) => {
 const s = {
   lang: saved("agent2api_lang", "zh"),
   theme: saved("agent2api_theme", "auto"),
+  sidebarCollapsed: saved("agent2api_sidebar_collapsed") === "true",
   key: saved("agent2api_key"),
   page: "overview",
   cache: {},
@@ -175,7 +176,7 @@ const regionName = (id) =>
       : id === "(别名)" ? L("别名", "Alias") : id || "—";
 const platformMark = (id) => id === "workbuddy" ? "CN" : id === "workbuddy-global" ? "GL" : String(id || "AP").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const regionTag = (id) =>
-  `<span class="tag ${id === "workbuddy-global" ? "green" : "blue"}">${e(regionName(id))}</span>`;
+  `<span class="tag region-tag">${e(regionName(id))}</span>`;
 const routeId = (model) =>
   model.routing_id ||
   (platforms().some((p) => p.id === model.platform) ? `${model.platform}/${model.id}` : model.id);
@@ -309,6 +310,11 @@ async function refresh(keys = currentResources(), manual = false) {
 }
 function chrome() {
   document.documentElement.lang = s.lang === "en" ? "en" : "zh-CN";
+  document.body.dataset.page = s.page;
+  document.body.dataset.nav = s.sidebarCollapsed ? "compact" : "expanded";
+  $("sidebarToggle").innerHTML = icon("panel");
+  $("sidebarToggle").setAttribute("aria-label", s.sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"));
+  $("sidebarToggle").setAttribute("aria-expanded", String(!s.sidebarCollapsed));
   $("brandSubtitle").textContent = L("统一模型网关", "UNIFIED MODEL GATEWAY");
   $("navCaption").textContent = L("工作空间", "WORKSPACE");
   const navSignature = `${s.page}|${s.lang}|${models().length}|${accounts().length}`;
@@ -317,7 +323,7 @@ function chrome() {
       [L("运行监控", "MONITORING"), ["overview", "requests", "analytics"]],
       [L("资源管理", "RESOURCES"), ["accounts", "platforms", "models"]],
       [L("工具与配置", "TOOLS & SETTINGS"), ["chat", "connection", "settings"]],
-    ].map(([title, pages]) => `<div class="nav-group-label">${e(title)}</div>${pages.map((page) => `<a class="nav-item ${page === s.page ? "active" : ""}" href="#${page}" ${page === s.page ? 'aria-current="page"' : ""}>${icon(page === "analytics" ? "activity" : page === "connection" ? "external" : page)}<span>${e(page === "overview" ? L("概览", "Overview") : names[page]())}</span>${["models", "accounts"].includes(page) && s.cache[page] ? `<span class="nav-count">${page === "models" ? models().length : accounts().length}</span>` : ""}</a>`).join("")}`).join("");
+    ].map(([title, pages]) => `<div class="nav-group-label">${e(title)}</div>${pages.map((page) => `<a class="nav-item ${page === s.page ? "active" : ""}" href="#${page}" aria-label="${e(page === "overview" ? L("概览", "Overview") : names[page]())}" title="${e(page === "overview" ? L("概览", "Overview") : names[page]())}" ${page === s.page ? 'aria-current="page"' : ""}>${icon(page === "analytics" ? "activity" : page === "connection" ? "external" : page)}<span>${e(page === "overview" ? L("概览", "Overview") : names[page]())}</span>${["models", "accounts"].includes(page) && s.cache[page] ? `<span class="nav-count">${page === "models" ? models().length : accounts().length}</span>` : ""}</a>`).join("")}`).join("");
   chrome.navSignature = navSignature;
   $("sidebarShortcut").innerHTML =
     icon("bolt") + e(L("快速测试模型", "Try a model")) + icon("arrow");
@@ -360,6 +366,7 @@ function chrome() {
       ? L("需要 API Key", "API key required")
       : L("连接不可用", "Disconnected");
   $("version").textContent = s.cache.status ? `v${s.cache.status.version}` : "";
+  $("healthText").parentElement.title = $("healthText").textContent;
   $("connectionBadge").className =
     `connection-badge ${connected ? "online" : "offline"}`;
   $("connectionBadge").textContent = connected
@@ -598,9 +605,9 @@ function connectionExample() {
   return `curl ${quote(`${gatewayURL() || "http://127.0.0.1:8787"}/v1/${path}`)} \\\n  -H 'Content-Type: application/json' \\\n  -H ${quote(header)} \\\n${protocol === "anthropic-messages" ? "  -H 'anthropic-version: 2023-06-01' \\\n" : ""}  -d ${quote(JSON.stringify(payload, null, 2))}`;
 }
 function modelPage() {
-  return `<div class="notice info catalog-route-note">${icon("info")}<div><strong>${e(L("同名模型，明确选择来源", "Same model name, explicit source"))}</strong><p>${e(L("带前缀的 ID 固定平台；不带前缀的 ID 按平台顺序调度，可按配置回退到另一平台。", "A prefixed ID pins its platform. Bare IDs follow platform priority and configured fallback."))} <a href="#platforms">${e(L("查看路由规则", "View routing policy"))} →</a></p></div></div>
-  <div class="toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型清单", "Refresh catalogue"), "reload-models", "", "refresh")}</div></div>
-  <div class="toolbar"><div class="toolbar-group">${search("modelSearch", s.models.query, L("搜索模型名称或 ID…", "Search model name or ID…"))}<select id="capabilityFilter" class="select" aria-label="${e(L("能力筛选", "Capability filter"))}">${options(
+  return `<div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div>
+  <div class="toolbar catalog-platform-toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型清单", "Refresh catalogue"), "reload-models", "", "refresh")}</div></div>
+  <div class="toolbar catalog-filter-toolbar"><div class="toolbar-group">${search("modelSearch", s.models.query, L("搜索模型名称或 ID…", "Search model name or ID…"))}<select id="capabilityFilter" class="select" aria-label="${e(L("能力筛选", "Capability filter"))}">${options(
     [
       ["all", L("全部能力", "All capabilities")],
       ["supports_images", L("视觉", "Vision")],
@@ -822,19 +829,13 @@ function routePolicy() {
   return `<div class="route-policy"><section class="card">${cardHead(L("自动路由", "Automatic routing"), L("使用不带平台前缀的模型名", "Use a model name without a prefix"))}<div class="card-body"><div class="route-path"><code>${e(example)}</code>${icon("arrow")}${order.map((id, index) => `${index ? icon("arrow") : ""}${regionTag(id)}`).join("")}</div><p>${e(L("按配置中的平台顺序，选择支持该模型的平台。", "Selects a platform supporting the model, in configured order."))}</p><div class="tags" style="margin-top:14px">${tag(routing ? (routing.fallback_on_unavailable ? L("不可用时同名模型回退已启用", "Same-model fallback enabled") : L("自动回退未启用", "Fallback disabled")) : L("路由信息加载中", "Loading routing policy"), routing?.fallback_on_unavailable ? "green" : "")}</div></div></section><section class="card">${cardHead(L("固定平台", "Pinned platform"), L("使用完整的平台 / 模型 ID", "Use the full platform / model ID"))}<div class="card-body"><div class="route-path"><code>${e(order.find((id) => id === "workbuddy-global") || order[0] || "platform")}/${e(example)}</code>${icon("arrow")}${regionTag(order.find((id) => id === "workbuddy-global") || order[0])}</div><p>${e(L("只在指定平台的账号池内调度。显式前缀与模型别名不进行跨平台回退。", "Uses only the selected platform pool. Prefixed IDs and aliases never fall back across platforms."))}</p><div class="tags" style="margin-top:14px">${tag(L("适合 ZCode 的平台前缀配置", "Ideal for prefixed ZCode models"), "blue")}</div></div></section></div>`;
 }
 function platformPage() {
-  const active = s.cache.platforms?.active || platforms(),
-    planned = s.cache.platforms?.planned || [];
-  return `<div class="platform-grid">${active
-    .map((p) => {
-      const pool = accounts().filter((a) => a.platform === p.id),
-        ready = pool.filter((a) => a.healthy).length,
-        count =
-          models().filter((m) => m.platform === p.id).length || p.models || 0;
-      return `<article class="card platform-card"><div class="platform-card-top"><div class="platform-avatar ${p.id === "workbuddy-global" ? "global" : ""}">${e(platformMark(p.id))}</div><div><h2>${e(platformName(p.id))}</h2><p class="mono">${e(p.id)}</p></div>${tag(p.status === "active" ? L("已连接", "Connected") : L("需关注", "Attention"), p.status === "active" ? "green" : "amber", true)}</div><div class="platform-card-stats"><div><strong>${count}</strong><small>${e(L("模型条目", "Model entries"))}</small></div><div><strong>${pool.length}</strong><small>${e(L("账号总数", "Accounts"))}</small></div><div><strong>${ready}</strong><small>${e(L("账号就绪", "Ready accounts"))}</small></div></div><div class="platform-url mono">${e(p.base_url || "—")}</div><div class="platform-card-footer"><span>${e(L("模型前缀", "Model prefix"))} <code>${e(p.id)}/</code></span><button class="button small" data-action="platform-models" data-value="${e(p.id)}">${e(L("查看模型", "View models"))}${icon("arrow")}</button></div></article>`;
-    })
-    .join(
-      "",
-    )}</div><div class="section-label">${e(L("同名模型路由规则", "SHARED MODEL ROUTING"))}</div>${routePolicy()}${planned.length ? `<details class="card planned-platforms"><summary>${e(L("尚未接入的平台", "Platforms not yet integrated"))} · ${planned.map((p) => e(p.name)).join(" / ")}</summary>${planned.map((p) => `<p><strong>${e(p.name)}</strong> · ${e(p.note || p.id)}</p>`).join("")}</details>` : ""}`;
+  const active = s.cache.platforms?.active || platforms(), planned = s.cache.platforms?.planned || [];
+  const knownAccounts = !!s.cache.accounts;
+  return `<section class="connected-providers"><div class="resource-section-head"><div><h2>${e(L("已接入平台", "Connected platforms"))}</h2><span class="resource-count">${active.length}</span></div><a class="text-link" href="#connection">${e(L("客户端接入指南", "Client setup"))}${icon("arrow")}</a></div><div class="provider-list">${active.map((p) => {
+    const pool = accounts().filter((a) => a.platform === p.id), health = accountReadiness(pool);
+    const count = s.cache.models ? models().filter((m) => m.platform === p.id).length : p.models;
+    return `<article class="card provider-row"><div class="provider-heading"><div class="provider-emblem" aria-hidden="true">${icon("platforms")}</div><div class="provider-identity"><h2>${e(platformName(p.id))}</h2><span class="provider-id mono">${e(p.id)}</span></div><span class="provider-state ${p.status === "active" ? "positive" : "muted"}"><i></i>${e(p.status === "active" ? L("已接入", "Integrated") : L("需关注", "Attention"))}</span></div><div class="provider-resources"><div><span>${e(L("模型目录", "Models"))}</span><strong>${count == null ? "—" : n(count)}<small>${e(L("个模型", "models"))}</small></strong></div><div><span>${e(L("就绪账号 / 已启用", "Ready / enabled accounts"))}</span><strong>${knownAccounts ? `${health.ready}<small>/ ${health.enabled}</small>` : "—"}</strong></div><div><span>${e(L("账号总数", "Total accounts"))}</span><strong>${knownAccounts ? n(health.total) : "—"}</strong></div><div class="provider-actions"><button class="button" data-action="platform-accounts" data-value="${e(p.id)}">${e(L("管理账号", "Accounts"))}</button><button class="button provider-model-action" data-action="platform-models" data-value="${e(p.id)}">${e(L("浏览模型", "Models"))}${icon("arrow")}</button></div></div><div class="provider-footer"><span class="provider-origin"><span>${e(L("上游地址", "Upstream"))}</span><code>${e(p.base_url || "—")}</code></span><span class="provider-prefix"><span>${e(L("路由前缀", "Route prefix"))}</span><code>${e(p.id)}/</code>${iconButton("copy", L("复制路由前缀", "Copy route prefix"), "copy-model", `data-model="${e(p.id)}/"`)}</span></div></article>`;
+  }).join("")}</div></section><section class="routing-section"><div class="resource-section-head"><div><h2>${e(L("模型路由", "Model routing"))}</h2></div><span>${e(L("同名模型，按调用方式选择来源", "Choose the source through the model ID"))}</span></div>${routePolicy()}</section>${planned.length ? `<details class="planned-platforms"><summary>${e(L("后续平台接入", "Upcoming integrations"))}<span>${planned.map((p) => e(p.name)).join(" · ")}</span></summary>${planned.map((p) => `<p><strong>${e(p.name)}</strong> · ${e(p.note || p.id)}</p>`).join("")}</details>` : ""}`;
 }
 
 function protocolName(protocol) {
@@ -1431,6 +1432,10 @@ document.addEventListener("click", async (event) => {
         return refresh(currentResources(), true);
       case "command-search":
         return commandSearch();
+      case "toggle-sidebar":
+        s.sidebarCollapsed = !s.sidebarCollapsed;
+        save("agent2api_sidebar_collapsed", String(s.sidebarCollapsed));
+        return chrome();
       case "jump-page":
         $("modal").close();
         location.hash = value;
@@ -1519,6 +1524,10 @@ document.addEventListener("click", async (event) => {
         s.models.platform = value;
         s.models.page = 1;
         location.hash = "models";
+        return;
+      case "platform-accounts":
+        Object.assign(s.accounts, { platform: value, query: "", status: "all" });
+        location.hash = "accounts";
         return;
       case "model-view":
         s.models.view = value;
