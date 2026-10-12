@@ -133,7 +133,7 @@ var autoPlatforms = []PlatformConfig{
 //
 // 优先级：Platforms 列表 > 单 platform 字段 > 自动集成。
 // 自动集成（零配置默认）返回全部内置平台，由装配层逐个探测本机登录态——
-// 探测不到的平台跳过并告警，能登录哪个就集成哪个。
+// 探测不到凭证的平台保留空号池，允许从控制台完成首次登录。
 func (c Config) ResolvePlatforms() []PlatformConfig {
 	if len(c.Upstream.Platforms) > 0 {
 		return c.Upstream.Platforms

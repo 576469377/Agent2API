@@ -386,8 +386,8 @@ var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlat
 // buildHub 按配置装配多平台枢纽。
 //
 // ResolvePlatforms 得到要集成的平台列表后，每个平台独立构建适配器/号池：
-// 单个平台失败（凭证缺失、文件损坏、不认识的平台）只跳过并告警，
-// 其余平台照常服务；全部失败才返回错误。
+// 缺少可用凭证的平台保留空池与登录入口；不支持的平台跳过并告警。
+// 其余平台照常服务；没有支持的平台才返回错误。
 // 多账号、凭证探测、号池冷却等逻辑全部复用 buildAdapter，只是按平台各跑一遍。
 func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
 	pcs := cfg.ResolvePlatforms()

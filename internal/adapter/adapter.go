@@ -62,7 +62,7 @@ type Description struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	Account string `json:"account,omitempty"`
-	// Status: active / degraded / error
+	// Status: active / unauthenticated (empty pool) / degraded / error
 	Status string `json:"status"`
 	Models int    `json:"models,omitempty"`
 	Notes  string `json:"notes,omitempty"`

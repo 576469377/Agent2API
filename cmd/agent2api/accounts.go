@@ -10,7 +10,6 @@ import (
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/config"
-	"github.com/576469377/Agent2API/internal/llm"
 )
 
 // platformDefaultPaths 返回平台各自的默认凭证位置。
@@ -27,7 +26,7 @@ func platformDefaultPaths(platform string) []string {
 //
 // 返回 *adapter.Adapter（即号池）与号池本体（供横幅展示账号明细）。
 // 任一账号加载失败只记日志不阻断启动——多账号场景下坏一个文件不该拖死网关；
-// 全部失败时才返回错误。
+// 没有可用凭证时保留空池，供控制台首次登录和目录监视器后续入池。
 func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) }) (adapter.Adapter, *adapter.Pool, error) {
 	paths := collectCredentialPaths(cfg)
 
@@ -66,10 +65,7 @@ func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) })
 	}
 
 	if loaded == 0 {
-		return nil, nil, &llm.Failure{
-			Code:    "no_credential",
-			Message: "未找到任何可用凭证。请先用桌面客户端登录，或运行 agent2api login；多账号请把凭证文件放进 accounts_dir",
-		}
+		logf("平台 %s 暂无可用账号，已保留登录入口；请在控制台添加账号或运行 login", cfg.Upstream.Platform)
 	}
 	return pool, pool, nil
 }

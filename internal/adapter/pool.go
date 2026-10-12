@@ -1071,7 +1071,7 @@ func (p *Pool) HealthyCount() int {
 }
 
 // Describe 实现 adapter.Describer（纯本地状态，不发网络请求）：
-// 任一账号健康即为 active，全部冷却即为 degraded。
+// 空池为 unauthenticated，任一账号健康为 active，全部不可用为 degraded。
 func (p *Pool) Describe() Description {
 	sts := p.Statuses()
 	healthy := 0
@@ -1089,7 +1089,10 @@ func (p *Pool) Describe() Description {
 		notes = "冷却中: " + joinLabels(cooling)
 	}
 	status := "active"
-	if healthy == 0 && len(sts) > 0 {
+	if len(sts) == 0 {
+		status = "unauthenticated"
+		notes = "暂无可用账号，请在控制台添加账号"
+	} else if healthy == 0 {
 		status = "degraded"
 		notes = "全部账号冷却中 " + notes
 	}

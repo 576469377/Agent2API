@@ -30,7 +30,7 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 
 ## Quick start
 
-Install **Go 1.23+**. The examples use WorkBuddy, the currently supported integration, and require an authorized desktop login. These commands build the current default branch.
+Install **Go 1.23+**. The examples use WorkBuddy, the currently supported integration. Reuse an authorized desktop login or start the gateway and sign in through its console. These commands build the current default branch.
 
 ```powershell
 # Windows PowerShell
@@ -50,9 +50,9 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 
 Open **[http://127.0.0.1:8787](http://127.0.0.1:8787)**. Confirm the region on Platforms, copy a complete model ID from Models, then verify a reply in the playground.
 
-- Default startup discovers both regions and skips platforms without usable credentials.
+- Default startup keeps both regions available. Platforms without usable credentials show “Sign in needed” and accept a first account through the console.
 - Select China with `-platform workbuddy`, or International with `-platform workbuddy-global`.
-- Without a desktop login, run `login -region cn` or `login -region global` before starting.
+- Without a desktop login, open Accounts → Add account and choose China or Global; the `login -region cn/global` command also works.
 - International encrypted desktop credentials are verified on Windows. Their macOS / Linux path has not yet been verified end to end; see the [integration report](docs/research/04-WorkBuddy国际版接入.md).
 
 The detailed [quick-start guide](docs/quickstart.md) is in Chinese; commands and flags work in either language.

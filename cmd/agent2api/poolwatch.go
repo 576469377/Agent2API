@@ -41,71 +41,76 @@ func startPoolWatchers(hub *app.Hub, cfg config.Config, logger *log.Logger) {
 // watchAccountDir 周期扫描 dir，把新出现的凭证加入运行中的号池。
 // 失败的文件每个周期重试（可能是写到一半被抓到），但同一种错误只记一次日志。
 func watchAccountDir(rt *app.PlatformRuntime, dir string, cfg config.Config, logger *log.Logger) {
-	logf := func(format string, args ...any) { logger.Printf(format, args...) }
 	lastErr := map[string]string{}
 
 	for range time.Tick(poolWatchInterval) {
-		pool := rt.Pool
-		if pool == nil {
-			continue // 理论不可达：buildAdapter 恒返回号池
-		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // 目录还没建：等控制台添加账号时创建
-		}
+		scanAccountDir(rt, dir, cfg, logger, lastErr)
+	}
+}
 
-		// 现有账号的 UID 集合：同一账号多份凭证只入池一次。
-		existingUID := map[string]bool{}
-		existingLabel := map[string]bool{}
-		for _, st := range rt.AccountStatuses() {
-			existingLabel[st.Label] = true
-			if u, ok := st.Adapter.(interface{ AccountUID() string }); ok {
-				if uid := u.AccountUID(); uid != "" {
-					existingUID[uid] = true
-				}
-			}
-		}
+// scanAccountDir performs one watcher pass, including the first account in an empty pool.
+func scanAccountDir(rt *app.PlatformRuntime, dir string, cfg config.Config, logger *log.Logger, lastErr map[string]string) {
+	logf := func(format string, args ...any) { logger.Printf(format, args...) }
+	pool := rt.Pool
+	if pool == nil {
+		return // 理论不可达：buildAdapter 恒返回号池
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // 目录还没建：等控制台添加账号时创建
+	}
 
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.EqualFold(filepath.Ext(name), ".json") {
-				continue
-			}
-			if existingLabel[name] {
-				continue
-			}
-			path := filepath.Join(dir, name)
-			if !looksLikeCredential(path) {
-				continue
-			}
-
-			adp, err := newPlatformAdapter(cfg.CloneForPlatform(rt.Cfg), path, logf)
-			if err != nil {
-				// 凭证无效（损坏/缺字段/或与现有账号同一 UID）——静默重试，
-				// 同一错误只记一次日志，避免每 10 秒刷屏。
-				if lastErr[name] != err.Error() {
-					lastErr[name] = err.Error()
-					logf("号池目录候选 %s 暂不可入池: %v", name, err)
-				}
-				continue
-			}
-			// Factories return the shared adapter interface.
-			uid := ""
-			if u, ok := adp.(interface{ AccountUID() string }); ok {
-				uid = u.AccountUID()
-			}
-			if uid != "" && existingUID[uid] {
-				// 与已有账号同一身份（如桌面凭证的导出副本）——不入池不报错。
-				lastErr[name] = "duplicate"
-				continue
-			}
-			if uid != "" {
+	// 现有账号的 UID 集合：同一账号多份凭证只入池一次。
+	existingUID := map[string]bool{}
+	existingLabel := map[string]bool{}
+	for _, st := range rt.AccountStatuses() {
+		existingLabel[st.Label] = true
+		if u, ok := st.Adapter.(interface{ AccountUID() string }); ok {
+			if uid := u.AccountUID(); uid != "" {
 				existingUID[uid] = true
 			}
-			existingLabel[name] = true
-			pool.Add(name, adp)
-			delete(lastErr, name)
-			logf("新账号已入池: %s（%s）", name, dir)
 		}
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(name), ".json") {
+			continue
+		}
+		if existingLabel[name] {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if !looksLikeCredential(path) {
+			continue
+		}
+
+		adp, err := newPlatformAdapter(cfg.CloneForPlatform(rt.Cfg), path, logf)
+		if err != nil {
+			// 凭证无效（损坏/缺字段/或与现有账号同一 UID）——静默重试，
+			// 同一错误只记一次日志，避免每 10 秒刷屏。
+			if lastErr[name] != err.Error() {
+				lastErr[name] = err.Error()
+				logf("号池目录候选 %s 暂不可入池: %v", name, err)
+			}
+			continue
+		}
+		// Factories return the shared adapter interface.
+		uid := ""
+		if u, ok := adp.(interface{ AccountUID() string }); ok {
+			uid = u.AccountUID()
+		}
+		if uid != "" && existingUID[uid] {
+			// 与已有账号同一身份（如桌面凭证的导出副本）——不入池不报错。
+			lastErr[name] = "duplicate"
+			continue
+		}
+		if uid != "" {
+			existingUID[uid] = true
+		}
+		existingLabel[name] = true
+		pool.Add(name, adp)
+		delete(lastErr, name)
+		logf("新账号已入池: %s（%s）", name, dir)
 	}
 }

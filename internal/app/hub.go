@@ -183,16 +183,20 @@ func (h *Hub) OwnerOf(model string) string {
 func (h *Hub) Describe() []adapter.Description {
 	out := make([]adapter.Description, 0, len(h.order))
 	for _, rt := range h.Platforms() {
+		var desc adapter.Description
 		if d, ok := rt.Adapter.(adapter.Describer); ok {
-			out = append(out, d.Describe())
-			continue
+			desc = d.Describe()
+		} else {
+			desc = adapter.Description{
+				ID: rt.ID, Name: rt.ID, Status: "active",
+				Notes: "该平台未实现 Describer 接口",
+			}
 		}
-		out = append(out, adapter.Description{
-			ID:     rt.ID,
-			Name:   rt.ID,
-			Status: "active",
-			Notes:  "该平台未实现 Describer 接口",
-		})
+		// Empty pools have no account adapter to supply their upstream address.
+		if desc.BaseURL == "" {
+			desc.BaseURL = rt.baseURL()
+		}
+		out = append(out, desc)
 	}
 	return out
 }

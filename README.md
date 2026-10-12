@@ -30,7 +30,7 @@
 
 ## 快速开始
 
-需要 **Go 1.23+**。以下以目前支持的 WorkBuddy 为例，需要先在相应桌面客户端登录。从默认分支构建当前代码；完整安装、设备登录与验证步骤见[快速开始](docs/quickstart.md)。
+需要 **Go 1.23+**。以下以目前支持的 WorkBuddy 为例，可复用桌面客户端登录态，也可先启动网关再从控制台登录。从默认分支构建当前代码；完整安装、设备登录与验证步骤见[快速开始](docs/quickstart.md)。
 
 ```powershell
 # Windows PowerShell
@@ -50,9 +50,9 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 
 启动后打开 **[http://127.0.0.1:8787](http://127.0.0.1:8787)**，在「平台连接」确认区域，在「模型目录」复制完整模型 ID，再到「模型测试」验证一次回复。
 
-- 默认自动探测两个区域，探测不到凭证的平台会跳过。
+- 默认保留国内版与国际版；没有凭证的平台显示「待登录」，可以在控制台添加首个账号。
 - 只启用国内版：启动参数 `-platform workbuddy`；国际版：`-platform workbuddy-global`。
-- 没有桌面登录态：国内版先执行 `login -region cn`；国际版执行 `login -region global`。
+- 没有桌面登录态：在「账号管理 → 添加账号」选择国内版或国际版；也可执行 `login -region cn/global`。
 - 国际桌面加密凭证已在 Windows 验证；macOS / Linux 尚未完成该凭证路径的端到端验证，见[国际版说明](docs/research/04-WorkBuddy国际版接入.md)。
 
 ## 接入客户端
