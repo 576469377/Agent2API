@@ -10,7 +10,7 @@ agent2api login -region cn -out auths/cn/account-b.json
 agent2api -platform workbuddy -accounts-dir auths/cn
 ```
 
-也可以在控制台「账号」页选择区域，再添加账号（设备码登录）。凭证自动落盘，号池每 10 秒扫描一次目录，无需重启。未配置目录时分别使用 `~/.workbuddy` / `~/.workbuddy-ai`。
+也可以在控制台「账号管理 → 添加账号」中，直接选择 **WorkBuddy 国内版** 或 **WorkBuddy 国际版**，再点击「开始登录」完成浏览器授权（设备码登录）。两个入口分别对应 `workbuddy` / `workbuddy-global`，国内与国际账号不会混入同一个号池；在账号页面先筛选平台时，弹窗会默认选中该平台。这里只展示当前网关已配置的平台，缺少某个入口时请检查[多平台配置](configuration.md#多平台配置upstreamplatforms)。凭证自动落盘，号池每 10 秒扫描一次目录，无需重启。未配置目录时分别使用 `~/.workbuddy` / `~/.workbuddy-ai`。
 
 国际版设备登录使用 `agent2api login -region global -out auths/global/account-a.json`。同时管理两个区域时，请显式配置不同的 `accounts_dir`，见[双平台配置](configuration.md#多平台配置upstreamplatforms)。不要混放两种区域的凭证。
 

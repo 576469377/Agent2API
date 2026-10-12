@@ -1089,12 +1089,12 @@ async function saveAuth(event) {
   }
 }
 function addAccountDialog() {
+  const available = platforms();
+  const selected = available.some((p) => p.id === s.accounts.platform)
+    ? s.accounts.platform : available[0]?.id;
   modal(
     L("添加账号", "Add account"),
-    `<p>${e(L("选择账号所属的平台，然后在浏览器中完成授权。新账号会自动加入对应账号池。", "Choose a platform and authorize in your browser. The new account will join its pool automatically."))}</p><form id="addAccountForm"><label class="field"><span>${e(L("来源平台", "Platform"))}</span><select id="loginPlatform">${options(
-      platforms().map((p) => [p.id, platformName(p.id)]),
-      s.accounts.platform === "all" ? platforms()[0]?.id : s.accounts.platform,
-    )}</select></label><div class="modal-actions">${button(L("取消", "Cancel"), "close-modal")}<button class="button primary" type="submit">${icon("external")}${e(L("开始登录", "Start login"))}</button></div></form>`,
+    `<p>${e(L("选择账号所属的平台，然后在浏览器中完成授权。", "Choose the account's platform, then authorize in your browser."))}</p><form id="addAccountForm"><fieldset class="login-platforms"><legend>${e(L("选择登录平台", "Choose a login platform"))}</legend>${available.map((p) => `<label class="login-platform"><input type="radio" name="loginPlatform" value="${e(p.id)}" ${p.id === selected ? "checked" : ""} required><span class="platform-mark" aria-hidden="true">${e(platformMark(p.id))}</span><span class="login-platform-copy"><strong>${e(platformName(p.id))}</strong><small>${e(p.id)}</small></span>${icon("check")}</label>`).join("")}</fieldset><p class="login-platform-note">${e(available.length ? L("国内版与国际版分别授权，账号会加入所选平台的独立账号池。", "China and Global require separate authorization. Accounts join the selected platform's own pool.") : L("尚未取得可登录的平台，请关闭窗口并刷新账号页面后重试。", "No login platforms are available. Close this dialog and refresh the accounts page to retry."))}</p><div class="modal-actions">${button(L("取消", "Cancel"), "close-modal")}<button class="button primary" type="submit" ${available.length ? "" : "disabled"}>${icon("external")}${e(L("开始登录", "Start login"))}</button></div></form>`,
   );
 }
 let loginGeneration = 0;
@@ -1743,7 +1743,8 @@ document.addEventListener("submit", (event) => {
   if (event.target.id === "authForm") saveAuth(event);
   if (event.target.id === "addAccountForm") {
     event.preventDefault();
-    startLogin($("loginPlatform").value);
+    const platform = new FormData(event.target).get("loginPlatform");
+    if (platform) startLogin(platform);
   }
   if (event.target.id === "chatSettingsForm") {
     event.preventDefault();
