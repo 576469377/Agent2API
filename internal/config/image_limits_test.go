@@ -43,3 +43,29 @@ func TestInvalidImageLimitConfigurationIsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestImageCleanupRequiresExplicitPerModelOptIn(t *testing.T) {
+	cfg := Default()
+	if cfg.Models.ImageLimitFor("workbuddy-global", "hy3").OverflowPolicy != ImageOverflowReject {
+		t.Fatal("image removal must never become a silent default")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"models":{"image_overflow_policies":{"workbuddy-global/hy3":"trim_oldest","workbuddy-global/step-5-preview":"reject"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Models.ImageLimitFor("workbuddy-global", "hy3").OverflowPolicy != ImageOverflowTrimOldest || loaded.Models.ImageLimitFor("workbuddy-global", "step-5-preview").OverflowPolicy != ImageOverflowReject || loaded.Models.ImageOverflowPolicyFor("workbuddy", "hy3") != ImageOverflowReject {
+		t.Fatal("opt-in crossed models or regions")
+	}
+	for _, raw := range []string{`{"hy3":"trim_oldest"}`, `{"workbuddy-global/hy3":"automatic"}`, `{"workbuddy-global/hy3":""}`} {
+		if err := os.WriteFile(path, []byte(`{"models":{"image_overflow_policies":`+raw+`}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Fatal("invalid image policy was accepted")
+		}
+	}
+}

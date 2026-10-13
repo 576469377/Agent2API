@@ -27,7 +27,9 @@
 
 `/api/models` 还会为已知护栏返回 `image_limit`（扁平目录和分平台目录均提供）：`max_images`、`enabled`、`source`（`builtin_empirical` / `config`），内置实测还包含 `observed_on`。未配置时省略该字段，不代表上游无限制；`max_images: 0, enabled: false` 表示本地显式关闭护栏。它描述的是网关当前有效规则，详见[图片护栏配置](configuration.md#单请求图片数量护栏modelsimage_limits)。
 
-调用记录中的 `image_count` 是原请求图片内容块总数，含历史与工具结果；`max_images` 是当次实际平台的护栏值。旧记录没有这些字段，不应解释为 0 张。超限请求在上游调用前返回 `image_count_exceeded` / HTTP 400，并且不裁剪内容。
+调用记录中的 `image_count` 是原请求图片内容块总数，含历史与工具结果；`max_images` 是当次实际平台的护栏值。旧记录没有这些字段，不应解释为 0 张。默认 `reject` 模式下，超限请求在上游调用前返回 `image_count_exceeded` / HTTP 400，并且不裁剪内容。
+
+显式启用 `models.image_overflow_policies` 的 `trim_oldest` 时，已知超限请求改为省略最旧图片并继续转发；默认 `reject` 不变。`image_limit.overflow_policy` 提供有效策略；记录另含 `forwarded_image_count`（准备发往最后实际平台的数量）、`removed_image_count`、`image_overflow_policy`。清理响应头为 `X-Agent2API-Images-Removed` / `X-Agent2API-Images-Forwarded` / `X-Agent2API-Image-Overflow-Policy`，本地对话未被修改。护栏配置、行为和代价见[旧对话续聊策略](configuration.md#旧对话超限后的续聊策略modelsimage_overflow_policies)。
 
 ## 请求示例
 

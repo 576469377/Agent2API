@@ -41,8 +41,11 @@ type Record struct {
 	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
 	Error           string    `json:"error,omitempty"`
 	// Pointers distinguish newly measured zero from legacy records with no count.
-	ImageCount *int `json:"image_count,omitempty"`
-	MaxImages  *int `json:"max_images,omitempty"` // Effective guard; 0 means explicitly disabled.
+	ImageCount          *int   `json:"image_count,omitempty"`
+	MaxImages           *int   `json:"max_images,omitempty"` // Effective guard; 0 means explicitly disabled.
+	ForwardedImageCount *int   `json:"forwarded_image_count,omitempty"`
+	RemovedImageCount   int    `json:"removed_image_count,omitempty"`
+	ImageOverflowPolicy string `json:"image_overflow_policy,omitempty"`
 
 	// Account 是本次请求实际使用的上游账号标识（号池的凭证文件名）。
 	// 单账号模式为空。它是「每个账号用了多少额度」的唯一归因来源——

@@ -82,6 +82,27 @@
 
 上游变化后，可以先覆盖本地配置并记录实测依据，再更新内置表、日期与边界测试。此配置在新版后端启动时读取，控制台未提供热修改；正在使用的反代应在合适时段更新，不会因只刷新网页而生效。
 
+### 旧对话超限后的续聊策略（models.image_overflow_policies）
+
+默认 `reject` 保留完整请求并拒绝超限。ZCode 的「继续」会再次附带同一份历史图片，因此默认模式下仍会超限。如果接受模型不再看到最旧图片，可以显式为目标模型启用 `trim_oldest`：
+
+```json
+{
+  "models": {
+    "image_overflow_policies": {
+      "workbuddy-global/hy3": "trim_oldest",
+      "workbuddy-global/step-5-preview": "trim_oldest"
+    }
+  }
+}
+```
+
+把此字段合并到已有 `models`，保留其他配置。开启后，每次请求超过该模型已启用的图片护栏时，按请求中的时间 / 内容顺序省略最旧图片，仅向上游保留最近的 200 / 60 张（或本地覆盖值）。它只改变本次上游请求，不修改 ZCode 的对话记录、磁盘图片或凭证；再发「继续」时仍会从原历史独立处理，不会再次被相同图片数量卡住。
+
+原有文字、工具调用 / 结果及关联 ID 保留，省略的图片替换为文字标记。模型无法查看已省略图片的细节，需要时应重新附图或通过工具重新读取。策略按完整平台 / 模型隔离，未知或关闭护栏的模型不自动清理；当前一条消息独自包含超限图片时，也按顺序保留最近图片。清理不保证修复坏图、额度或其他上游错误。
+
+控制台记录原始数量、处理后数量、省略数量与策略；模型元数据的 `image_limit.overflow_policy` 也会显示策略。清理后的响应增加 `X-Agent2API-Images-Removed`、`X-Agent2API-Images-Forwarded` 和 `X-Agent2API-Image-Overflow-Policy`，请求日志包含 `images_forwarded` / `images_removed` / `image_policy`。解码计数与原始请求不一致时返回 `image_cleanup_unavailable`，不猜测删除哪些内容。策略在后端启动时读取。
+
 ### 模型别名（models.aliases）
 
 客户端可能发送不在上游模型目录中的名字。别名表把它们映射到账号实际可用的模型上，

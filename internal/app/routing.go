@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/576469377/Agent2API/internal/llm"
+	"github.com/576469377/Agent2API/internal/obs"
 )
 
 // openRoutedStream only falls back before an upstream stream has been accepted.
 // Once accepted, every event in that response stays on that platform.
-func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hint string) (llm.ResponseStream, *PlatformRuntime, error) {
+func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hint string, records ...*obs.Record) (llm.ResponseStream, *PlatformRuntime, error) {
 	primary := a.hub.RouteWithHint(req.Model, hint)
-	stream, err := a.openPlatformStream(ctx, primary, req)
+	stream, err := a.openPlatformStream(ctx, primary, req, records...)
 	if err == nil || hint != "" || !a.cfg.Models.FallbackOnUnavailable || ctx.Err() != nil {
 		return stream, primary, err
 	}
@@ -41,7 +42,7 @@ func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hin
 			break
 		}
 		a.logger.Printf("模型 %s: %s 在建流前拒绝请求，尝试同名模型 %s", req.Model, primary.ID, rt.ID)
-		next, nextErr := a.openPlatformStream(ctx, rt, req)
+		next, nextErr := a.openPlatformStream(ctx, rt, req, records...)
 		if nextErr == nil {
 			return next, rt, nil
 		}

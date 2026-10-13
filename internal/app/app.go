@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -312,8 +313,12 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	req.InputImageCount = &imageCount
 	rec.ImageCount = &imageCount
 	defer func() {
-		a.logger.Printf("protocol=%s platform=%s model=%s stream=%v images=%d dur_ms=%d ok=%v status=%d",
-			proto.Name(), rec.Platform, rec.Model, rec.Stream, imageCount, time.Since(start).Milliseconds(), rec.OK, rec.Status)
+		forwarded := "not_forwarded"
+		if rec.ForwardedImageCount != nil {
+			forwarded = fmt.Sprint(*rec.ForwardedImageCount)
+		}
+		a.logger.Printf("protocol=%s platform=%s model=%s stream=%v images=%d images_forwarded=%s images_removed=%d image_policy=%s dur_ms=%d ok=%v status=%d",
+			proto.Name(), rec.Platform, rec.Model, rec.Stream, imageCount, forwarded, rec.RemovedImageCount, rec.ImageOverflowPolicy, time.Since(start).Milliseconds(), rec.OK, rec.Status)
 	}()
 	// 会话亲和的路由键：同一会话的多轮请求粘住同一账号。
 	// 请求头优先（客户端显式声明），其次 body 里的稳定字段，详见 affinity.go。
@@ -342,8 +347,9 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.RequestTimeout())
 	defer cancel()
 
-	stream, rt, err := a.openRoutedStream(ctx, req, platformHint)
+	stream, rt, err := a.openRoutedStream(ctx, req, platformHint, rec)
 	a.setRouteRecord(rec, rt)
+	writeImageCleanupHeaders(w, rec)
 	if err != nil {
 		common.WriteError(w, a.fail(rec, err))
 		return
@@ -385,7 +391,11 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 func (a *App) fail(rec *obs.Record, err error) *llm.Failure {
 	f := llm.Wrap(err)
 	if rec.ImageCount != nil {
-		f = a.explainImageFailure(f, rec.Platform, rec.Model, *rec.ImageCount)
+		count := *rec.ImageCount
+		if rec.ForwardedImageCount != nil {
+			count = *rec.ForwardedImageCount
+		}
+		f = a.explainImageFailure(f, rec.Platform, rec.Model, count)
 	}
 	rec.OK = false
 	rec.Status = f.HTTPStatus()
@@ -399,8 +409,9 @@ func (a *App) fail(rec *obs.Record, err error) *llm.Failure {
 // 此后的错误只能降级为流内错误事件。
 // platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
 func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
-	stream, rt, err := a.openRoutedStream(r.Context(), req, platformHint)
+	stream, rt, err := a.openRoutedStream(r.Context(), req, platformHint, rec)
 	a.setRouteRecord(rec, rt)
+	writeImageCleanupHeaders(w, rec)
 	if err != nil {
 		common.WriteError(w, a.fail(rec, err))
 		return

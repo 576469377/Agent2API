@@ -25,6 +25,9 @@ type ModelsConfig struct {
 	// ImageLimits overrides empirical guards by exact platform/model ID.
 	// Missing entries retain built-in defaults; 0 disables only that guard.
 	ImageLimits map[string]int `json:"image_limits,omitempty"`
+	// ImageOverflowPolicies opts individual platform/model IDs into transient
+	// image cleanup. Default is reject; ZCode's stored history is never modified.
+	ImageOverflowPolicies map[string]string `json:"image_overflow_policies,omitempty"`
 	// Bare IDs may try the same model in other platforms after a quota or HTTP 5xx refusal.
 	// Explicit platform/model IDs and aliases pinned to a platform never cross regions.
 	FallbackOnUnavailable bool `json:"fallback_on_unavailable,omitempty"`

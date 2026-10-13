@@ -14,6 +14,7 @@
   },
   "models": {
     "image_limits": {},
+    "image_overflow_policies": {},
     "aliases": {
       "claude-sonnet-4-5-20250929": "glm-5.3",
       "gpt-4o": "workbuddy/deepseek-v4-pro"
