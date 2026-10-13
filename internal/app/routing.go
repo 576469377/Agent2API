@@ -11,7 +11,7 @@ import (
 // Once accepted, every event in that response stays on that platform.
 func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hint string) (llm.ResponseStream, *PlatformRuntime, error) {
 	primary := a.hub.RouteWithHint(req.Model, hint)
-	stream, err := primary.Adapter.Stream(ctx, req)
+	stream, err := a.openPlatformStream(ctx, primary, req)
 	if err == nil || hint != "" || !a.cfg.Models.FallbackOnUnavailable || ctx.Err() != nil {
 		return stream, primary, err
 	}
@@ -41,7 +41,7 @@ func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hin
 			break
 		}
 		a.logger.Printf("模型 %s: %s 在建流前拒绝请求，尝试同名模型 %s", req.Model, primary.ID, rt.ID)
-		next, nextErr := rt.Adapter.Stream(ctx, req)
+		next, nextErr := a.openPlatformStream(ctx, rt, req)
 		if nextErr == nil {
 			return next, rt, nil
 		}

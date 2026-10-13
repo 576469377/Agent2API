@@ -308,6 +308,13 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		common.WriteError(w, f)
 		return
 	}
+	imageCount := countWireImages(body, proto.Name())
+	req.InputImageCount = &imageCount
+	rec.ImageCount = &imageCount
+	defer func() {
+		a.logger.Printf("protocol=%s platform=%s model=%s stream=%v images=%d dur_ms=%d ok=%v status=%d",
+			proto.Name(), rec.Platform, rec.Model, rec.Stream, imageCount, time.Since(start).Milliseconds(), rec.OK, rec.Status)
+	}()
 	// 会话亲和的路由键：同一会话的多轮请求粘住同一账号。
 	// 请求头优先（客户端显式声明），其次 body 里的稳定字段，详见 affinity.go。
 	req.SessionKey = sessionKeyOf(body, r.Header)
@@ -327,8 +334,6 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	} else {
 		a.writeFinal(w, r, proto, req, rec, platformHint)
 	}
-	a.logger.Printf("protocol=%s model=%s stream=%v dur_ms=%d ok=%v",
-		proto.Name(), req.Model, req.Stream, time.Since(start).Milliseconds(), rec.OK)
 }
 
 // writeFinal 走非流式：上游恒为流式，这里在本地聚合成单个 JSON。
@@ -338,10 +343,9 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	defer cancel()
 
 	stream, rt, err := a.openRoutedStream(ctx, req, platformHint)
-	rec.Platform = rt.ID
+	a.setRouteRecord(rec, rt)
 	if err != nil {
-		a.fail(rec, err)
-		common.WriteError(w, llm.Wrap(err))
+		common.WriteError(w, a.fail(rec, err))
 		return
 	}
 	// 账号归因：控制台的「每账号用量」完全依赖这一行。
@@ -357,8 +361,7 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	msg, err := aggregate(ctx, stream)
 	genMs := time.Since(genStart).Milliseconds()
 	if err != nil {
-		a.fail(rec, err)
-		common.WriteError(w, llm.Wrap(err))
+		common.WriteError(w, a.fail(rec, err))
 		return
 	}
 	rec.InputTokens = int64(msg.Usage.InputTokens)
@@ -371,8 +374,7 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 
 	payload, err := proto.EncodeFinal(msg, req.Model)
 	if err != nil {
-		a.fail(rec, err)
-		common.WriteError(w, llm.Wrap(err))
+		common.WriteError(w, a.fail(rec, err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -380,11 +382,15 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 }
 
 // fail 把失败信息写入观测记录。
-func (a *App) fail(rec *obs.Record, err error) {
+func (a *App) fail(rec *obs.Record, err error) *llm.Failure {
 	f := llm.Wrap(err)
+	if rec.ImageCount != nil {
+		f = a.explainImageFailure(f, rec.Platform, rec.Model, *rec.ImageCount)
+	}
 	rec.OK = false
 	rec.Status = f.HTTPStatus()
 	rec.Error = f.Error()
+	return f
 }
 
 // writeStream 走流式：逐帧编码并即时下发。
@@ -394,10 +400,9 @@ func (a *App) fail(rec *obs.Record, err error) {
 // platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
 func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
 	stream, rt, err := a.openRoutedStream(r.Context(), req, platformHint)
-	rec.Platform = rt.ID
+	a.setRouteRecord(rec, rt)
 	if err != nil {
-		a.fail(rec, err)
-		common.WriteError(w, llm.Wrap(err))
+		common.WriteError(w, a.fail(rec, err))
 		return
 	}
 	// 账号归因：控制台的「每账号用量」完全依赖这一行。
@@ -425,8 +430,7 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 			if errors.Is(err, llm.ErrStreamDone) {
 				break
 			}
-			failure := llm.Wrap(err)
-			a.fail(rec, failure)
+			failure := a.fail(rec, err)
 			a.logger.Printf("上游流错误: %s", failure)
 			if !committed {
 				common.WriteError(w, failure)

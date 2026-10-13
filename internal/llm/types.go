@@ -139,4 +139,7 @@ type RequestMessages struct {
 	// 内稳定，而完整消息列表逐轮增长，直接哈希会每轮变化。
 	// 空串表示无法确定会话（如纯 API 单轮调用），不做亲和。
 	SessionKey string
+	// InputImageCount is counted at the gateway ingress, including image blocks
+	// inside tool results and malformed sources. It is never sent upstream.
+	InputImageCount *int
 }

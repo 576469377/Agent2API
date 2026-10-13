@@ -25,6 +25,10 @@
 
 新版本的 WorkBuddy 目录还包含 `pricing`：`status`（`free` 表示零积分倍率、`credits`、`dynamic`、`unknown`）、可选的 `credit_multiplier`、`upstream_label`、`source` 和 `observed_at`。来源为上游模型配置，按平台区分，不代表账号余额或金额单价；缺失倍率不能当作零。其他适配器或内置兜底目录可省略此字段。详见[控制台费率说明](console.md#模型费率)。
 
+`/api/models` 还会为已知护栏返回 `image_limit`（扁平目录和分平台目录均提供）：`max_images`、`enabled`、`source`（`builtin_empirical` / `config`），内置实测还包含 `observed_on`。未配置时省略该字段，不代表上游无限制；`max_images: 0, enabled: false` 表示本地显式关闭护栏。它描述的是网关当前有效规则，详见[图片护栏配置](configuration.md#单请求图片数量护栏modelsimage_limits)。
+
+调用记录中的 `image_count` 是原请求图片内容块总数，含历史与工具结果；`max_images` 是当次实际平台的护栏值。旧记录没有这些字段，不应解释为 0 张。超限请求在上游调用前返回 `image_count_exceeded` / HTTP 400，并且不裁剪内容。
+
 ## 请求示例
 
 以下是 macOS / Linux shell 示例。把 `YOUR_ROUTING_ID` 换成目录中的完整模型 ID；启用鉴权后将 `agent2api-local` 换成实际网关密钥。

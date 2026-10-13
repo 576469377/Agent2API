@@ -33,6 +33,24 @@ def request_summary(raw):
         if value is not None:
             result[key] = value if type(value) in (int, float) and abs(value) < 1e12 else "non_numeric"
     result["stream"] = body.get("stream") is True
+
+    def count_images(items):
+        if not isinstance(items, list):
+            return 0
+        total = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            kind = item.get("type")
+            if kind in ("image", "image_url", "input_image"):
+                total += 1
+            elif kind in ("tool_result", "message", None):
+                total += count_images(item.get("content"))
+            elif kind == "function_call_output":
+                total += count_images(item.get("output"))
+        return total
+
+    result["image_count"] = count_images(body.get("messages")) + count_images(body.get("input"))
     thinking = body.get("thinking")
     if isinstance(thinking, dict):
         result["thinking_type"] = safe_enum(thinking.get("type"), {"enabled", "disabled", "adaptive"})

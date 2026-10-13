@@ -22,6 +22,9 @@ type Config struct {
 
 // ModelsConfig 是模型层的配置（别名与路由）。
 type ModelsConfig struct {
+	// ImageLimits overrides empirical guards by exact platform/model ID.
+	// Missing entries retain built-in defaults; 0 disables only that guard.
+	ImageLimits map[string]int `json:"image_limits,omitempty"`
 	// Bare IDs may try the same model in other platforms after a quota or HTTP 5xx refusal.
 	// Explicit platform/model IDs and aliases pinned to a platform never cross regions.
 	FallbackOnUnavailable bool `json:"fallback_on_unavailable,omitempty"`
@@ -253,6 +256,9 @@ func Load(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return cfg, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if err := cfg.Models.validateImageLimits(); err != nil {
+		return cfg, err
 	}
 	cfg.applyEnv()
 	return cfg, nil

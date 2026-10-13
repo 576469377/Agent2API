@@ -23,12 +23,13 @@ class DiagnosticTest(unittest.TestCase):
                     {"role": "assistant", "content": [{"type": "thinking", "thinking": secret, "signature": secret},
                         {"type": "tool_use", "id": "call-1", "name": secret, "input": {"text": secret}},
                         {"type": "tool_use", "id": "call-2", "name": secret, "input": {}}]},
-                    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-1", "content": secret},
+                    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-1", "content": [{"type":"image","source":{"data":secret}},{"type":"text","text":secret}]},
                         {"type": "tool_result", "tool_use_id": "call-1", "content": secret},
                         {"type": "tool_result", "tool_use_id": "call-orphan", "content": secret},
                         {"type": "text", "text": secret}, {"type": "image", "source": {"data": secret}}]}]}
         summary = relay.request_summary(json.dumps(body).encode())
         self.assertEqual(summary["tool_call_count"], 2)
+        self.assertEqual(summary["image_count"], 2)
         self.assertEqual(summary["unanswered_tool_calls"], 1)
         self.assertEqual(summary["orphan_tool_results"], 2)
         self.assertEqual(summary["duplicate_tool_results"], 1)

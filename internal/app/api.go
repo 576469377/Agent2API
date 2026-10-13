@@ -15,6 +15,7 @@ import (
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/api/common"
+	"github.com/576469377/Agent2API/internal/config"
 	"github.com/576469377/Agent2API/internal/llm"
 	"github.com/576469377/Agent2API/internal/obs"
 )
@@ -704,6 +705,20 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 
 // ───────────────────────── 模型 ─────────────────────────
 
+type modelWithImageLimit struct {
+	ModelInfo
+	ImageLimit *config.ImageLimit `json:"image_limit,omitempty"`
+}
+
+func (a *App) modelWithLimit(model ModelInfo) modelWithImageLimit {
+	platform, id := model.Platform, model.ID
+	if platform == "(别名)" {
+		resolved, hint := a.hub.ResolveAlias(id)
+		platform, id = a.hub.RouteWithHint(resolved, hint).ID, resolved
+	}
+	return modelWithImageLimit{ModelInfo: model, ImageLimit: a.cfg.Models.ImageLimitFor(platform, id)}
+}
+
 // apiModels 返回全部平台的模型目录（多平台合并，每项带来源 platform 字段）。
 //
 // 响应三层结构：
@@ -721,9 +736,9 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type platformModels struct {
-		ID     string              `json:"id"`
-		Name   string              `json:"name"`
-		Models []adapter.ModelInfo `json:"models"`
+		ID     string                `json:"id"`
+		Name   string                `json:"name"`
+		Models []modelWithImageLimit `json:"models"`
 	}
 	var platforms []platformModels
 	for _, rt := range a.hub.Platforms() {
@@ -731,7 +746,15 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		platforms = append(platforms, platformModels{ID: rt.ID, Name: rt.ID, Models: ms})
+		group := platformModels{ID: rt.ID, Name: rt.ID, Models: make([]modelWithImageLimit, 0, len(ms))}
+		for _, model := range ms {
+			group.Models = append(group.Models, a.modelWithLimit(ModelInfo{ModelInfo: model, Platform: rt.ID, RoutingID: rt.ID + "/" + model.ID, DefaultRoute: a.hub.OwnerOf(model.ID) == rt.ID}))
+		}
+		platforms = append(platforms, group)
+	}
+	catalog := make([]modelWithImageLimit, 0, len(all))
+	for _, model := range all {
+		catalog = append(catalog, a.modelWithLimit(model))
 	}
 
 	def := a.hub.DefaultPlatform()
@@ -742,7 +765,7 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"platform":  defID,
 		"platforms": platforms,
-		"models":    all,
+		"models":    catalog,
 		"routing":   map[string]any{"priority": "platform_configuration_order", "fallback_on_unavailable": a.cfg.Models.FallbackOnUnavailable, "qualified_ids_pin_platform": true},
 	})
 }

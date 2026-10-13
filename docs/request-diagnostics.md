@@ -6,6 +6,16 @@
 
 如果问题只在旧对话继续执行、调用工具或切换模型后出现，需要对比失败请求的历史结构和参数。其他机器上短请求成功，不能证明原对话已经修复。控制台里的输入 / 输出 Token 为 0 表示尚未取得用量，不表示请求里没有输入；失败详情的账号为 `—` 也不能据此判断账号没登录。
 
+## 先统计历史图片
+
+2026-10-13/14 用户提供的真实请求对照实验发现：国际版 `hy3` 的 200/201 张、`step-5-preview` 的 60/61 张分别是受理 / 拒绝边界，计数包括工具结果嵌套图片。国内版和其他模型不套用这些值；测到 201 / 248 张成功只说明该次请求受理，不能推断无限制。
+
+新版后端会在转发前按[图片护栏配置](configuration.md#单请求图片数量护栏modelsimage_limits)拦截已知超限请求。控制台调用详情提供 `image_count` 和当次生效的 `max_images`，日志行提供 `images=N`；旧指标未记录的图片数量显示「未记录」。模型详情和 `/api/models` 的 `image_limit` 显示有效护栏及来源。
+
+不要只匹配英文就判定超限：Step 的 `Invalid request parameters` 同时出现在图片超限和图片数据非法的实测中；Hy3 的 `the request parameters were rejected by the model provider` 也需结合计数。国内版 `Please start a new conversation, replace the image, and try again.` 出现在图片数据非法的实测中，但仍不能把文案当作唯一诊断依据。未命中已启用护栏的超限条件时，保留英文并附「原因未知」与图片数量，不断言超限或坏图。
+
+处理时先看图片数量与实际平台的护栏：超限可开新对话、减少历史图片或选择适用模型；未超限仍失败时，再核查图片数据及其他参数。网关不会静默删除历史图片。
+
 ## 在出错机器取得结构摘要
 
 无需停止已有反代。需要 Python 3.9+，在 Agent2API 项目目录运行：
@@ -27,6 +37,7 @@ python scripts/diagnose-proxy.py --upstream http://127.0.0.1:8787 --port 8790
 
 | 字段 | 用途 |
 |---|---|
+| `image_count` | 先检查图片总数（包括工具结果嵌套图片），再比较实际平台 / 模型的有效护栏 |
 | `max_tokens`、`thinking_type`、`reasoning_effort` | 检查实际请求的输出、思考配置，而非只看客户端模型配置 |
 | `message_count`、`roles`、`content_blocks` | 检查旧对话包含多少历史消息和哪些内容类型 |
 | `body_bytes`、`text_bytes`、`system_bytes`、`tool_schema_bytes` | 比较失败请求和短请求的体积；**字节数不是 Token 数** |
