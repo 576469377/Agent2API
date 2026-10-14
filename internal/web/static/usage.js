@@ -1,0 +1,103 @@
+// UTC calendar aggregates, separate from the latest-200 request log.
+export const DAY = 86400000;
+export const palette = ["#438ff4", "#36b989", "#9b78ec", "#ef9860", "#ec6883", "#31afc7", "#ccaf53", "#798cae"];
+const count = (v) => Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0;
+export const dateKey = (ms) => new Date(ms).toISOString().slice(0, 10);
+export const modelKey = (platform, model) => JSON.stringify([platform || "", model || ""]);
+export function modelColor(key) {
+  let hash = 0;
+  for (const char of key) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return palette[hash % palette.length];
+}
+function sourceHistory(metrics, now) {
+  if (metrics?.usage_history?.timezone === "UTC" && Array.isArray(metrics.usage_history.days)) return metrics.usage_history;
+  const days = new Map();
+  for (const r of metrics?.recent || []) {
+    const ms = Date.parse(r.time);
+    if (!Number.isFinite(ms)) continue;
+    const date = dateKey(ms), rows = days.get(date) || [];
+    rows.push({ platform: r.platform || "", model: r.model || "", total: 1,
+      ok: r.ok ? 1 : 0, failed: r.ok ? 0 : 1, input_tokens: r.input_tokens, output_tokens: r.output_tokens, duration_sum: r.duration_ms });
+    days.set(date, rows);
+  }
+  return { timezone: "UTC", tracking_since: new Date(now).toISOString(), legacy_requests: metrics?.total || 0,
+    retention_days: 366, preview: true, days: [...days].map(([date, models]) => ({ date, models })) };
+}
+export function buildUsage(metrics, { range = "7", platform = "all", now = Date.now() } = {}) {
+  if (!metrics) return null;
+  const history = sourceHistory(metrics, now), today = Math.floor(now / DAY) * DAY;
+  const tracking = Date.parse(history.tracking_since);
+  const trackingMs = Number.isFinite(tracking) ? tracking : now;
+  const retention = Math.min(366, Math.max(1, count(history.retention_days) || 366));
+  const earliest = today - (retention - 1) * DAY;
+  const source = new Map(), platforms = new Set();
+  for (const day of history.days) {
+    const ms = Date.parse(`${day.date}T00:00:00Z`);
+    if (!Number.isFinite(ms) || dateKey(ms) !== day.date || ms < earliest || ms > today) continue;
+    const models = new Map();
+    for (const row of day.models || []) {
+      platforms.add(row.platform || "");
+      if (platform !== "all" && (row.platform || "") !== platform) continue;
+      const key = modelKey(row.platform, row.model), c = models.get(key) || {
+        key, platform: row.platform || "", model: row.model || "", total: 0, ok: 0, failed: 0,
+        input_tokens: 0, output_tokens: 0, duration_sum: 0, tokens: 0, color: modelColor(key) };
+      for (const field of ["total", "ok", "failed", "input_tokens", "output_tokens", "duration_sum"]) c[field] += count(row[field]);
+      c.tokens = c.input_tokens + c.output_tokens;
+      models.set(key, c);
+    }
+    source.set(day.date, models);
+  }
+  const calendar = [];
+  for (let ms = earliest; ms <= today; ms += DAY) {
+    const date = dateKey(ms), models = [...(source.get(date)?.values() || [])];
+    const coverage = history.preview ? models.length ? "partial" : "unknown" : ms >= trackingMs ? "complete" : models.length || date === dateKey(trackingMs) ? "partial" : "unknown";
+    const day = { date, ms, coverage, models, tokens: 0, total: 0, input_tokens: 0, output_tokens: 0, failed: 0 };
+    for (const row of models) for (const field of ["tokens", "total", "input_tokens", "output_tokens", "failed"]) day[field] += row[field];
+    calendar.push(day);
+  }
+  const first = Math.max(earliest, Math.min(today, ...[...source.keys(), dateKey(trackingMs)].map((d) => Date.parse(`${d}T00:00:00Z`))));
+  const start = range === "all" ? first : today - ((range === "30" ? 30 : 7) - 1) * DAY;
+  const days = calendar.filter((d) => d.ms >= start), groups = new Map();
+  for (const day of days) for (const row of day.models) {
+    const c = groups.get(row.key) || { ...row, total: 0, ok: 0, failed: 0, input_tokens: 0, output_tokens: 0, duration_sum: 0, tokens: 0 };
+    for (const field of ["total", "ok", "failed", "input_tokens", "output_tokens", "duration_sum", "tokens"]) c[field] += row[field];
+    groups.set(row.key, c);
+  }
+  const models = [...groups.values()].sort((a, b) => b.tokens - a.tokens || b.total - a.total || a.key.localeCompare(b.key));
+  const totals = { tokens: 0, total: 0, input_tokens: 0, output_tokens: 0, failed: 0 };
+  for (const day of days) for (const field of Object.keys(totals)) totals[field] += day[field];
+  let streak = 0, longest = 0;
+  for (const day of days) { streak = day.total > 0 ? streak + 1 : 0; longest = Math.max(streak, longest); }
+  const peak = days.reduce((max, day) => day.tokens > (max?.tokens || 0) ? day : max, null);
+  return { ...totals, days, calendar, models, platforms: [...platforms].sort(), peak,
+    activeDays: days.filter((d) => d.total > 0).length, longestStreak: longest, trackingSince: trackingMs,
+    preview: !!history.preview, legacyRequests: count(history.legacy_requests),
+    partial: days.some((d) => d.coverage !== "complete"), retention };
+}
+// Top models plus an explicit remainder keep the curve totals accountable.
+export function curveSeries(usage, metric = "tokens", hidden = new Set()) {
+  const ranked = [...usage.models].sort((a, b) => b[metric] - a[metric] || a.key.localeCompare(b.key));
+  const top = ranked.slice(0, 6), tail = new Set(ranked.slice(6).map((m) => m.key));
+  const models = [...top, ...(tail.size ? [{ key: "other", model: "other", platform: "", color: "#8493a7" }] : [])];
+  return models.map((model) => ({ ...model, hidden: hidden.has(model.key), values: usage.days.map((day) => {
+    if (day.coverage === "unknown") return null;
+    return day.models.reduce((sum, row) => sum + ((model.key === "other" ? tail.has(row.key) : row.key === model.key) ? row[metric] : 0), 0);
+  }) }));
+}
+// Monotone cubic interpolation: no negative/overshooting invented peaks.
+export function curvePath(values, x, y) {
+  const segments = [], points = [];
+  const flush = () => {
+    if (!points.length) return;
+    const slopes = points.slice(1).map((p, i) => (p[1] - points[i][1]) / (p[0] - points[i][0]));
+    const tangents = points.map((_, i) => i === 0 ? slopes[0] || 0 : i === points.length - 1 ? slopes.at(-1) || 0 : slopes[i - 1] * slopes[i] <= 0 ? 0 : 2 / (1 / slopes[i - 1] + 1 / slopes[i]));
+    let path = `M${points[0][0]},${points[0][1]}`;
+    for (let i = 1; i < points.length; i++) {
+      const [ax, ay] = points[i - 1], [bx, by] = points[i], dx = (bx - ax) / 3;
+      path += ` C${ax + dx},${ay + tangents[i - 1] * dx} ${bx - dx},${by - tangents[i] * dx} ${bx},${by}`;
+    }
+    segments.push(path); points.length = 0;
+  };
+  values.forEach((value, i) => { if (value == null) flush(); else points.push([x(i), y(value)]); }); flush();
+  return segments.join(" ");
+}

@@ -116,23 +116,28 @@ type Metrics struct {
 	genTokSum atomic.Int64
 	genCount  atomic.Int64
 
-	mu        sync.Mutex
-	byModel   map[string]*groupCounter
-	byProto   map[string]*groupCounter
-	byAccount map[string]*groupCounter
-	recent    []Record
-	series    []minuteBucket
+	mu             sync.Mutex
+	byModel        map[string]*groupCounter
+	byProto        map[string]*groupCounter
+	byAccount      map[string]*groupCounter
+	recent         []Record
+	series         []minuteBucket
+	daily          map[string]map[usageKey]*UsageModel
+	trackingSince  time.Time
+	legacyRequests int64
 }
 
 // New 创建指标采集器。
 func New() *Metrics {
 	return &Metrics{
-		started:   time.Now(),
-		byModel:   map[string]*groupCounter{},
-		byProto:   map[string]*groupCounter{},
-		byAccount: map[string]*groupCounter{},
-		recent:    make([]Record, 0, recentCap),
-		series:    make([]minuteBucket, 0, seriesCap),
+		started:       time.Now(),
+		byModel:       map[string]*groupCounter{},
+		byProto:       map[string]*groupCounter{},
+		byAccount:     map[string]*groupCounter{},
+		recent:        make([]Record, 0, recentCap),
+		series:        make([]minuteBucket, 0, seriesCap),
+		daily:         make(map[string]map[usageKey]*UsageModel),
+		trackingSince: time.Now().UTC(),
 	}
 }
 
@@ -180,6 +185,7 @@ func (m *Metrics) Record(r Record) {
 	m.bump(m.byModel, r.Model, r)
 	m.bump(m.byProto, r.Protocol, r)
 	m.bump(m.byAccount, r.Account, r)
+	m.recordHistory(r)
 
 	// 最近请求（新在前）
 	m.recent = append(m.recent, r)
@@ -261,11 +267,12 @@ type Snapshot struct {
 	AvgTPS     float64 `json:"avg_tps"`
 	TPSSamples int64   `json:"tps_samples"`
 
-	ByModel    []GroupStat    `json:"by_model"`
-	ByProtocol []GroupStat    `json:"by_protocol"`
-	ByAccount  []GroupStat    `json:"by_account"`
-	Series     []minuteBucket `json:"series"`
-	Recent     []Record       `json:"recent"`
+	ByModel      []GroupStat    `json:"by_model"`
+	ByProtocol   []GroupStat    `json:"by_protocol"`
+	ByAccount    []GroupStat    `json:"by_account"`
+	Series       []minuteBucket `json:"series"`
+	Recent       []Record       `json:"recent"`
+	UsageHistory UsageHistory   `json:"usage_history"`
 }
 
 // Snapshot 生成当前快照。
@@ -296,6 +303,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	byModel := toStats(m.byModel)
 	byProto := toStats(m.byProto)
 	byAccount := toStats(m.byAccount)
+	history := m.historySnapshot()
 	rawSeries := make([]minuteBucket, len(m.series))
 	copy(rawSeries, m.series)
 	series := fillSeriesBuckets(rawSeries, seriesWindow)
@@ -329,6 +337,7 @@ func (m *Metrics) Snapshot() Snapshot {
 		ByAccount:       byAccount,
 		Series:          series,
 		Recent:          recent,
+		UsageHistory:    history,
 	}
 }
 
@@ -410,22 +419,23 @@ type persistCounter struct {
 // TPS 三元组只做顶层持久化，不进 persistCounter —— 分组维度的 TPS 当前无人消费，
 // 而 groupCounter/persistCounter 是逐字段手写拷贝，每加一个字段就多一处漏改风险。
 type persisted struct {
-	Total     int64                     `json:"total"`
-	OK        int64                     `json:"ok"`
-	Failed    int64                     `json:"failed"`
-	InputTok  int64                     `json:"input_tokens"`
-	OutputTok int64                     `json:"output_tokens"`
-	ReasonTok int64                     `json:"reasoning_tokens"`
-	DurSum    int64                     `json:"duration_sum"`
-	GenMsSum  int64                     `json:"gen_ms_sum,omitempty"`
-	GenTokSum int64                     `json:"gen_tok_sum,omitempty"`
-	GenCount  int64                     `json:"gen_count,omitempty"`
-	ByModel   map[string]persistCounter `json:"by_model"`
-	ByProto   map[string]persistCounter `json:"by_proto"`
-	ByAccount map[string]persistCounter `json:"by_account,omitempty"`
-	Recent    []Record                  `json:"recent"`
-	Series    []minuteBucket            `json:"series"`
-	SavedAt   int64                     `json:"saved_at"`
+	Total        int64                     `json:"total"`
+	OK           int64                     `json:"ok"`
+	Failed       int64                     `json:"failed"`
+	InputTok     int64                     `json:"input_tokens"`
+	OutputTok    int64                     `json:"output_tokens"`
+	ReasonTok    int64                     `json:"reasoning_tokens"`
+	DurSum       int64                     `json:"duration_sum"`
+	GenMsSum     int64                     `json:"gen_ms_sum,omitempty"`
+	GenTokSum    int64                     `json:"gen_tok_sum,omitempty"`
+	GenCount     int64                     `json:"gen_count,omitempty"`
+	ByModel      map[string]persistCounter `json:"by_model"`
+	ByProto      map[string]persistCounter `json:"by_proto"`
+	ByAccount    map[string]persistCounter `json:"by_account,omitempty"`
+	Recent       []Record                  `json:"recent"`
+	Series       []minuteBucket            `json:"series"`
+	SavedAt      int64                     `json:"saved_at"`
+	UsageHistory *UsageHistory             `json:"usage_history,omitempty"`
 }
 
 // Save 把当前指标写入 path；path 为空时直接跳过。
@@ -437,23 +447,25 @@ func (m *Metrics) Save(path string) error {
 		return nil
 	}
 	m.mu.Lock()
+	history := m.historySnapshot()
 	p := persisted{
-		Total:     m.total.Load(),
-		OK:        m.okCount.Load(),
-		Failed:    m.failed.Load(),
-		InputTok:  m.inputTok.Load(),
-		OutputTok: m.outputTok.Load(),
-		ReasonTok: m.reasonTok.Load(),
-		DurSum:    m.durSum.Load(),
-		GenMsSum:  m.genMsSum.Load(),
-		GenTokSum: m.genTokSum.Load(),
-		GenCount:  m.genCount.Load(),
-		ByModel:   cloneCounters(m.byModel),
-		ByProto:   cloneCounters(m.byProto),
-		ByAccount: cloneCounters(m.byAccount),
-		Recent:    append([]Record(nil), m.recent...),
-		Series:    append([]minuteBucket(nil), m.series...),
-		SavedAt:   time.Now().Unix(),
+		Total:        m.total.Load(),
+		OK:           m.okCount.Load(),
+		Failed:       m.failed.Load(),
+		InputTok:     m.inputTok.Load(),
+		OutputTok:    m.outputTok.Load(),
+		ReasonTok:    m.reasonTok.Load(),
+		DurSum:       m.durSum.Load(),
+		GenMsSum:     m.genMsSum.Load(),
+		GenTokSum:    m.genTokSum.Load(),
+		GenCount:     m.genCount.Load(),
+		ByModel:      cloneCounters(m.byModel),
+		ByProto:      cloneCounters(m.byProto),
+		ByAccount:    cloneCounters(m.byAccount),
+		Recent:       append([]Record(nil), m.recent...),
+		Series:       append([]minuteBucket(nil), m.series...),
+		SavedAt:      time.Now().Unix(),
+		UsageHistory: &history,
 	}
 	m.mu.Unlock()
 
@@ -498,6 +510,7 @@ func (m *Metrics) Load(path string) error {
 	m.byAccount = rebuildCounters(p.ByAccount)
 	m.recent = append([]Record(nil), p.Recent...)
 	m.series = append([]minuteBucket(nil), p.Series...)
+	m.loadHistory(p.UsageHistory, p.Recent, p.Total)
 	m.mu.Unlock()
 	return nil
 }
