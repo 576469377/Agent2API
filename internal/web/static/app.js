@@ -15,6 +15,7 @@ import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend,
 import { mergePricingSnapshot, modelPricing, compareModelRates } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
+import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState } from "./operations.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -260,7 +261,7 @@ async function api(path, body) {
   });
   if (!response.ok) {
     if (response.status === 401) s.authRequired = true;
-    const error = new Error(await responseError(response));
+    const error = new Error(await responseError(response, s.lang));
     error.status = response.status;
     throw error;
   }
@@ -338,6 +339,11 @@ function chrome() {
   $("breadcrumb").textContent = names[s.page]();
   $("pageTitle").textContent = names[s.page]();
   $("pageDescription").textContent = descriptions[s.page]();
+  const primarySignature = `${s.page}|${s.lang}`;
+  if (chrome.primarySignature !== primarySignature) {
+    $("pagePrimary").innerHTML = ["accounts", "platforms"].includes(s.page) ? button(L("添加账号", "Add account"), "add-account", "primary", "plus") : s.page === "requests" ? button(L("查看失败调用", "Inspect failures"), "inspect-failures", "", "info") : ["overview", "models"].includes(s.page) ? `<a class="button primary" href="#connection">${icon("external")}${e(L("接入客户端", "Connect a client"))}</a>` : "";
+    chrome.primarySignature = primarySignature;
+  }
   $("pageEyebrow").textContent = eyebrows[s.page];
   $("refreshButton").innerHTML = icon("refresh") + e(L("刷新", "Refresh"));
   $("quickSearch").innerHTML = icon("search") + `<span>${e(L("搜索 / 快捷跳转", "Search / jump to"))}</span><kbd>Ctrl K</kbd>`;
@@ -528,6 +534,13 @@ function ranking(rows) {
 function dashboardCard(label, glyph, value, note, tone = "blue", unit = "") {
   return `<article class="card dashboard-kpi ${tone}"><div class="dashboard-kpi-heading"><span>${e(label)}</span>${icon(glyph)}</div><div class="dashboard-kpi-value">${e(value)}${unit ? `<small>${e(unit)}</small>` : ""}</div><div class="dashboard-kpi-note">${note}</div></article>`;
 }
+function operationalNotices(pool, metrics) {
+  const readiness = accountReadiness(pool);
+  const failures = (metrics?.recent || []).filter(row => !row.ok);
+  const attention = readiness?.attention || 0;
+  return `<section class="operations-notices" aria-label="${e(L("运行提醒", "Operational notices"))}"><div class="operations-notices-heading">${icon(attention || failures.length || !readiness?.enabled ? "info" : "check")}<div><strong>${e(L("运行提醒", "Operational notices"))}</strong><small>${e(L("当前账号状态 · 最近调用样本", "Current accounts · recent request sample"))}</small></div></div><button data-action="attention-accounts" ${!readiness ? "disabled" : ""}><span class="notice-value ${attention ? "negative" : "positive"}">${readiness ? n(attention) : "—"}</span><span><strong>${e(L("需关注账号", "Accounts needing attention"))}</strong><small>${e(readiness ? attention ? L("检查登录与调度状态", "Review sign-in and scheduling") : readiness.enabled ? L("启用账号当前均就绪", "Enabled accounts are ready") : L("没有已启用账号", "No enabled accounts") : L("等待账号数据", "Waiting for accounts"))}</small></span>${icon("arrow")}</button><button data-action="inspect-failures" ${!metrics ? "disabled" : ""}><span class="notice-value ${failures.length ? "negative" : ""}">${metrics ? n(failures.length) : "—"}</span><span><strong>${e(L("最近样本失败", "Recent sample failures"))}</strong><small>${e(metrics ? L(`共 ${metrics.recent?.length || 0} 条记录 · 查看原因`, `${metrics.recent?.length || 0} records · inspect causes`) : L("等待调用数据", "Waiting for requests"))}</small></span>${icon("arrow")}</button></section>`;
+}
+
 function overview() {
   const m = s.cache.metrics, status = s.cache.status;
   const pool = s.cache.accounts ? accounts() : null;
@@ -537,16 +550,14 @@ function overview() {
   const currentMinute = m?.series?.at(-1)?.total;
   const recent = [...(m?.recent || [])].sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 5);
   const sample = summarizeRequests(m?.recent || []);
-  const attention = (pool || []).filter((a) => accountReadiness([a]).attention);
-  const failures = [...(m?.recent || [])].filter((row) => !row.ok).sort((a, b) => new Date(b.time) - new Date(a.time));
   const scope = s.dashboardScope === "all" ? L("累计统计", "Cumulative totals") : L(`最近 ${s.trendMinutes} 分钟`, `Last ${s.trendMinutes} minutes`);
   const totalTokens = metrics ? metrics.input_tokens + metrics.output_tokens : null;
   const value = (v, formatter = n) => v == null ? "—" : formatter(v);
   const connected = status && !s.errors.status;
-  const attentionTitle = !readiness ? L("等待账号状态", "Waiting for accounts") : readiness.attention ? L(`${readiness.attention} 个账号需要关注`, `${readiness.attention} accounts need attention`) : readiness.enabled ? L("启用账号均可调度", "Enabled accounts are ready") : L("没有已启用账号", "No enabled accounts");
   const trendControl = `<div class="chart-caption"><span><i class="legend-dot"></i>${e(s.trend === "requests" ? L("成功", "Success") : L("输入", "Input"))}</span><span><i class="legend-dot red"></i>${e(s.trend === "requests" ? L("失败", "Failed") : L("输出", "Output"))}</span><select id="trendSelect" class="select" aria-label="${e(L("趋势类型", "Trend type"))}">${options([["requests", L("调用", "Requests")], ["tokens", "Token"]], s.trend)}</select></div>`;
   return `<div class="dashboard">
-  <div class="gateway-pulse"><span class="pulse-state ${connected ? "positive" : "negative"}"><span class="status-dot ${connected ? "online" : "offline"}"></span>${e(connected ? L("网关在线", "Gateway online") : status ? L("连接异常", "Connection issue") : L("连接中", "Connecting"))}</span><span>${e(L("运行时间", "Uptime"))}<strong>${status ? e(countdown(status.uptime_sec || 0)) : "—"}</strong></span><span>${e(L("实时并发", "In flight"))}<strong>${value(m?.in_flight)}</strong></span><span>${e(L("本分钟已完成", "Completed this minute"))}<strong>${value(currentMinute)}</strong></span><a href="#connection">${e(L("接入客户端", "Connect a client"))}${icon("arrow")}</a></div>
+  <div class="gateway-pulse"><span class="pulse-state ${connected ? "positive" : "negative"}"><span class="status-dot ${connected ? "online" : "offline"}"></span>${e(connected ? L("网关在线", "Gateway online") : status ? L("连接异常", "Connection issue") : L("连接中", "Connecting"))}</span><span>${e(L("运行时间", "Uptime"))}<strong>${status ? e(countdown(status.uptime_sec || 0)) : "—"}</strong></span><span>${e(L("实时并发", "In flight"))}<strong>${value(m?.in_flight)}</strong></span><span>${e(L("本分钟已完成", "Completed this minute"))}<strong>${value(currentMinute)}</strong></span></div>
+  ${operationalNotices(pool, m)}
   <div class="dashboard-section-head"><div><h2>${e(L("核心指标", "Key metrics"))}<span class="scope-pill">${e(scope)}</span></div><div class="segmented dashboard-scope" aria-label="${e(L("指标统计范围", "Metric scope"))}">${[["all", L("累计", "All time")], ["15", L("15 分钟", "15 min")], ["30", L("30 分钟", "30 min")]].map(([id, label]) => `<button data-action="dashboard-scope" data-value="${id}" aria-pressed="${id === "all" ? s.dashboardScope === "all" : s.dashboardScope === "window" && s.trendMinutes === Number(id)}" class="${id === "all" ? s.dashboardScope === "all" ? "active" : "" : s.dashboardScope === "window" && s.trendMinutes === Number(id) ? "active" : ""}">${e(label)}</button>`).join("")}</div></div>
   <div class="dashboard-kpis">
     ${dashboardCard(L("完成调用", "Completed requests"), "activity", value(metrics?.total), metrics ? `${e(L("成功", "Success"))} <strong>${n(metrics.ok)}</strong><span class="kpi-separator">/</span>${e(L("失败", "Failed"))} <strong class="${metrics.failed ? "negative" : ""}">${n(metrics.failed)}</strong>` : e(L("等待用量数据", "Waiting for metrics")))}
@@ -569,7 +580,7 @@ function overview() {
     <section class="card dashboard-performance">${cardHead(L("响应表现", "Response performance"), L(`最近记录样本 · ${sample.total} / 200 条`, `Recent sample · ${sample.total} / 200 records`), `<a class="text-link" href="#requests">${e(L("分析调用", "Inspect requests"))}${icon("arrow")}</a>`)}<div class="performance-values"><div><span>${e(L("典型完整耗时", "Typical full duration"))}<b>P50</b></span><strong>${e(duration(sample.p50))}</strong></div><div><span>${e(L("长尾完整耗时", "Tail full duration"))}<b>P95</b></span><strong>${e(duration(sample.p95))}</strong></div></div><div class="performance-baseline"><span>${e(L("累计平均完整耗时", "Cumulative mean duration"))}</span><strong>${e(duration(m?.total ? m.avg_latency_ms : null))}</strong></div><div class="sample-observed">${icon("clock")}${e(recent.length ? L(`样本最新记录：${timestamp(recent[0].time, true)}`, `Latest record: ${timestamp(recent[0].time, true)}`) : L("尚无调用记录", "No request records"))}</div><p class="dashboard-panel-note">${e(L("完整耗时包含连接与回复生成；P50 / P95 仅来自最近记录样本，不随上方统计范围变化。", "Full duration includes connection and generation. P50 / P95 use only recent request records and do not follow the metric scope."))}</p></section>
     <section class="card dashboard-distribution">${cardHead(L("调用分布", "Request distribution"), L("累计调用占比 · 前四项", "Cumulative request share · top four"), `<select id="usageSelect" class="select" aria-label="${e(L("统计维度", "Usage dimension"))}">${options([["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]], s.usage)}</select>`)}${ranking(m?.[s.usage])}<p class="dashboard-panel-note">${e(s.usage === "by_protocol" ? L("点击条目查看对应的最近调用记录。", "Select a row to inspect its recent requests.") : L("同名模型或账号标签可能跨平台合并；点击查看对应记录。", "Identical model or account labels may combine platforms. Select a row to inspect records."))}</p></section>
   </div>
-  <section class="card dashboard-diagnostics">${cardHead(L("运行诊断", "Operational checks"), L("当前账号状态与最近 200 条调用记录", "Current accounts and latest 200 request records"), `<button class="button small" data-action="inspect-failures">${e(L("查看失败调用", "Inspect failures"))}${icon("arrow")}</button>`)}<div class="diagnostic-grid"><div class="diagnostic-summary"><span class="diagnostic-icon ${readiness?.attention ? "negative" : readiness?.enabled ? "positive" : "muted"}">${icon(readiness?.attention ? "info" : readiness?.enabled ? "check" : "info")}</span><div><strong>${e(attentionTitle)}</strong><p>${e(m ? L(`最近样本 ${failures.length} 次失败 / ${sample.total} 次调用`, `Recent sample: ${failures.length} failures / ${sample.total} requests`) : L("等待调用数据", "Waiting for request data"))}</p></div></div><div class="diagnostic-items">${attention.slice(0, 2).map((a) => `<button data-action="account-detail" data-index="${accounts().indexOf(a)}">${regionTag(a.platform)}<span>${e(a.identity?.nickname || a.label)}</span>${tag(...accountStatus(a))}${icon("chevron")}</button>`).join("")}${failures.slice(0, 2).map((row) => `<button data-action="request-detail" data-key="${e(requestKey(row))}">${tag(String(row.status), "red")}<span class="diagnostic-time" title="${e(timestamp(row.time, true))}">${e(timestamp(row.time))}</span><span class="truncate">${e(row.model)} · ${e(row.error || L("调用失败", "Request failed"))}</span>${icon("chevron")}</button>`).join("")}${!attention.length && !failures.length ? `<a href="#models">${icon("models")}${e(L("查看模型与账号可用性", "Review model availability"))}${icon("arrow")}</a>` : ""}</div></div></section>
+
   <section class="card dashboard-recent">${cardHead(L("最近调用", "Recent requests"), L("实际路由、账号与完整耗时", "Actual route, account and full duration"), `<a class="text-link" href="#requests">${e(L("查看记录", "View records"))}${icon("arrow")}</a>`)}${requestTable(recent, false)}</section>
   </div>`;
 }
@@ -766,17 +777,13 @@ function accountStatus(a) {
   return [L("暂不可用", "Unavailable"), "red"];
 }
 function credentialStatus(a) {
-  const identity = a.identity;
-  if (!identity) return L("未提供信息", "No information");
-  if (identity.refresh_expired) return L("需要重新登录", "Sign in again");
-  if (identity.needs_refresh) return L("等待自动刷新", "Awaiting refresh");
-  return L("已登录", "Signed in");
+  return { sign_in: L("需要重新登录", "Sign in again"), unknown: L("未提供信息", "No information"), refresh: L("等待自动刷新", "Awaiting refresh"), signed_in: L("已登录", "Signed in") }[credentialState(a)];
 }
 function accountPage() {
   const all = accounts().filter((a) => s.accounts.platform === "all" || a.platform === s.accounts.platform),
     health = accountReadiness(all);
-  return `<section class="card resource-workspace account-workspace"><div class="health-summary metric-strip"><span class="item"><span>${e(L("就绪账号", "Ready accounts"))}</span><strong class="positive">${s.cache.accounts ? n(health.ready) : "—"}</strong></span><span class="item"><span>${e(L("需关注", "Need attention"))}</span><strong class="${health.attention ? "negative" : ""}">${s.cache.accounts ? n(health.attention) : "—"}</strong></span><span class="item"><span>${e(L("已停用", "Disabled"))}</span><strong>${s.cache.accounts ? n(health.disabled) : "—"}</strong></span><span class="item"><span>${e(L("处理中的请求", "Active requests"))}</span><strong>${s.cache.accounts ? n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0)) : "—"}</strong></span></div><div class="workspace-controls">
-  <div class="toolbar"><div class="toolbar-group">${platformTabs("accounts", s.accounts.platform)}</div>${button(L("添加账号", "Add account"), "add-account", "primary", "plus")}</div>
+  return `<section class="card resource-workspace account-workspace"><div class="health-summary metric-strip">${[["ready", L("就绪账号", "Ready accounts"), health.ready, "positive"], ["attention", L("需关注", "Need attention"), health.attention, health.attention ? "negative" : ""], ["disabled", L("已停用", "Disabled"), health.disabled, ""]].map(([id, label, count, tone]) => `<button class="item metric-filter ${s.accounts.status === id ? "selected" : ""}" data-action="account-status" data-value="${id}" aria-pressed="${s.accounts.status === id}" ${!s.cache.accounts ? "disabled" : ""}><span>${e(label)}${icon("arrow")}</span><strong class="${tone}">${s.cache.accounts ? n(count) : "—"}</strong></button>`).join("")}<span class="item"><span>${e(L("处理中的请求", "Active requests"))}</span><strong>${s.cache.accounts ? n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0)) : "—"}</strong></span></div><div class="workspace-controls">
+  <div class="toolbar"><div class="toolbar-group">${platformTabs("accounts", s.accounts.platform)}</div></div>
   <div class="toolbar"><div class="toolbar-group">${search("accountSearch", s.accounts.query, L("搜索昵称、账号或 UID…", "Search name, account or UID…"))}<select id="accountStatusFilter" class="select" aria-label="${e(L("账号状态", "Account status"))}">${options(
     [
       ["all", L("全部状态", "All states")],
@@ -785,10 +792,16 @@ function accountPage() {
       ["disabled", L("已停用", "Disabled")],
     ],
     s.accounts.status,
-  )}</select></div><div class="toolbar-group"><span class="result-count" id="accountCount"></span>${densityControl()}<div class="segmented">${[["table", L("表格", "Table")], ["cards", L("卡片", "Cards")]].map(([id, title]) => `<button data-action="account-view" data-value="${id}" class="${s.accounts.view === id ? "active" : ""}" aria-pressed="${s.accounts.view === id}">${e(title)}</button>`).join("")}</div></div></div></div><div class="${s.accounts.view === "table" ? "resource-table" : "account-grid"}" id="accountCards"></div></section>`;
+  )}</select></div><div class="toolbar-group"><span class="result-count" id="accountCount"></span>${densityControl()}<div class="segmented">${[["table", L("表格", "Table")], ["cards", L("卡片", "Cards")]].map(([id, title]) => `<button data-action="account-view" data-value="${id}" class="${s.accounts.view === id ? "active" : ""}" aria-pressed="${s.accounts.view === id}">${e(title)}</button>`).join("")}</div></div></div><div id="activeAccountFilters" class="active-filters" hidden></div></div><div class="${s.accounts.view === "table" ? "resource-table" : "account-grid"}" id="accountCards"></div></section>`;
 }
 function updateAccountCards() {
   if (!$("accountCards")) return;
+  $("pageContent").querySelectorAll('[data-action="account-status"]').forEach(button => {
+    const selected = s.accounts.status === button.dataset.value;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  renderActiveFilters("accounts");
   const q = s.accounts.query.trim().toLowerCase();
   const rows = accounts().filter(
     (a) =>
@@ -869,6 +882,17 @@ function recentRequests() {
     (a, b) => new Date(b.time) - new Date(a.time),
   );
 }
+function renderActiveFilters(kind) {
+  const target = $(kind === "accounts" ? "activeAccountFilters" : "activeRequestFilters");
+  if (!target) return;
+  const filters = s[kind], keys = activeFilterKeys(filters, kind === "accounts" ? ["query", "platform", "status"] : ["query", "platform", "status", "protocol", "model", "account", "range"]);
+  const titles = { query: L("搜索", "Search"), platform: L("平台", "Platform"), status: L("状态", "Status"), protocol: L("协议", "Protocol"), model: L("模型", "Model"), account: L("账号", "Account"), range: L("时间", "Range") };
+  const labels = { ready: L("就绪", "Ready"), attention: L("需关注", "Attention"), disabled: L("已停用", "Disabled"), ok: L("成功", "Success"), failed: L("失败", "Failed") };
+  const label = key => key === "platform" ? platformName(filters[key]) : key === "protocol" ? protocolName(filters[key]) : key === "range" ? L(`最近 ${filters[key]} 分钟`, `Last ${filters[key]} min`) : key === "account" ? (filters[key].startsWith("label:") ? filters[key].slice(6) : (() => { try { const [p, a] = JSON.parse(filters[key]); return `${platformName(p)} / ${a || "—"}`; } catch { return filters[key]; } })()) : key === "status" ? labels[filters[key]] || filters[key] : filters[key];
+  target.hidden = !keys.length;
+  target.innerHTML = `<span>${e(L("当前筛选", "Active filters"))}</span>${keys.map(key => `<button class="filter-chip" data-action="clear-filter" data-kind="${kind}" data-key="${key}" aria-label="${e(L("移除", "Remove") + " " + titles[key] + ": " + label(key))}"><span>${e(titles[key])}: ${e(label(key))}</span>${icon("close")}</button>`).join("")}<button class="text-link" data-action="reset-${kind === "accounts" ? "account" : "request"}-filters">${e(L("清空", "Clear all"))}</button>`;
+}
+
 function requestPage() {
   const sample = recentRequests();
   const accountOptions = [...new Map(sample.map((row) => [accountKey(row), `${regionName(row.platform)} / ${row.account || L("未记录账号", "Unrecorded")}`])).entries()];
@@ -894,7 +918,7 @@ function requestPage() {
       ["anthropic-messages", "Anthropic"],
     ],
     s.requests.protocol,
-  )}</select></div></div><details class="advanced-filters" id="requestAdvanced" ${[s.requests.model, s.requests.account, s.requests.range].some(v => v !== "all") ? "open" : ""}><summary>${icon("settings")}${e(L("更多筛选", "More filters"))}<span class="filter-count" id="requestFilterCount"></span>${icon("chevron")}</summary><div class="toolbar filter-secondary"><div class="toolbar-group"><select id="requestModelFilter" class="select" aria-label="${e(L("模型筛选", "Model filter"))}">${options([["all", L("全部模型", "All models")], ...modelOptions.sort().map((id) => [id, id])], s.requests.model)}</select><select id="requestAccountFilter" class="select" aria-label="${e(L("账号筛选", "Account filter"))}">${options([["all", L("全部账号", "All accounts")], ...accountOptions], s.requests.account)}</select><select id="requestRangeFilter" class="select" aria-label="${e(L("记录时间范围", "Request time range"))}">${options([["all", L("全部缓存记录", "All buffered records")], ["15", L("最近 15 分钟", "Last 15 minutes")], ["30", L("最近 30 分钟", "Last 30 minutes")], ["60", L("最近 1 小时", "Last hour")]], s.requests.range)}</select></div>${button(L("清空筛选", "Reset filters"), "reset-request-filters", "ghost", "close")}</div></details></div><div class="sample-summary metric-strip" id="requestSampleStats"></div><div class="resource-table" id="requestResults"></div></section>`;
+  )}</select></div></div><details class="advanced-filters" id="requestAdvanced" ${[s.requests.model, s.requests.account, s.requests.range].some(v => v !== "all") ? "open" : ""}><summary>${icon("settings")}${e(L("更多筛选", "More filters"))}<span class="filter-count" id="requestFilterCount"></span>${icon("chevron")}</summary><div class="toolbar filter-secondary"><div class="toolbar-group"><select id="requestModelFilter" class="select" aria-label="${e(L("模型筛选", "Model filter"))}">${options([["all", L("全部模型", "All models")], ...modelOptions.sort().map((id) => [id, id])], s.requests.model)}</select><select id="requestAccountFilter" class="select" aria-label="${e(L("账号筛选", "Account filter"))}">${options([["all", L("全部账号", "All accounts")], ...accountOptions], s.requests.account)}</select><select id="requestRangeFilter" class="select" aria-label="${e(L("记录时间范围", "Request time range"))}">${options([["all", L("全部缓存记录", "All buffered records")], ["15", L("最近 15 分钟", "Last 15 minutes")], ["30", L("最近 30 分钟", "Last 30 minutes")], ["60", L("最近 1 小时", "Last hour")]], s.requests.range)}</select></div>${button(L("清空筛选", "Reset filters"), "reset-request-filters", "ghost", "close")}</div></details><div id="activeRequestFilters" class="active-filters" hidden></div></div><div class="sample-summary metric-strip" id="requestSampleStats"></div><div class="resource-table" id="requestResults"></div></section>`;
 }
 function filteredRequests() {
   return filterRequests(recentRequests(), s.requests);
@@ -919,6 +943,7 @@ function requestTable(rows, details = true) {
 }
 function updateRequestTable() {
   if (!$("requestResults")) return;
+  renderActiveFilters("requests");
   const filtered = filteredRequests(),
     { rows, footer } = paginate(filtered, "requests", s.requests.size);
   $("requestResults").innerHTML = requestTable(rows) + footer;
@@ -992,14 +1017,26 @@ function accountUsageDetails(account) {
   );
 }
 function showRequestDetail(key) {
-  const row = recentRequests().find(
-    (r) => requestKey(r) === key,
-  );
+  const row = recentRequests().find(r => requestKey(r) === key);
   if (!row) return;
-  showDrawer(
-    L("调用详情", "Request details"),
-    `<div class="detail-hero"><div class="platform-avatar">${icon("requests")}</div><div><h2>${e(row.model)}</h2><p>${e(timestamp(row.time, true))}</p></div></div><div class="tags" style="margin-top:17px">${tag(`${row.status} · ${row.ok ? L("成功", "Success") : L("失败", "Failed")}`, row.ok ? "green" : "red")}${regionTag(row.platform)}</div><dl class="details-list">${detailItem(L("客户端请求模型", "Requested model"), row.model_requested || row.model, "mono")}${detailItem(L("实际模型", "Actual model"), row.model, "mono")}${detailItem(L("实际平台", "Actual platform"), row.platform || L("未记录", "Unrecorded"), "mono")}${detailItem(L("账号", "Account"), row.account || "—")}${detailItem(L("协议", "Protocol"), protocolName(row.protocol))}${detailItem(L("输出方式", "Response mode"), row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}${detailItem(L("完整耗时", "Total duration"), duration(row.duration_ms))}${detailItem(L("本次图片数量", "Request image count"), row.image_count == null ? L("未记录", "Unrecorded") : `${n(row.image_count)} ${L("张（含历史与工具结果）", "images, including history and tool results")}`)}${row.max_images != null ? detailItem(L("图片数量护栏", "Image count guard"), row.max_images > 0 ? `${n(row.max_images)} ${L("张 / 请求", "images / request")}` : L("已关闭", "Disabled")) : ""}${row.forwarded_image_count != null ? detailItem(L("处理后图片数量", "Prepared image count"), `${n(row.forwarded_image_count)} ${L("张", "images")}`) : ""}${row.removed_image_count > 0 ? detailItem(L("本次省略的旧图", "Older images omitted"), `${n(row.removed_image_count)} ${L("张 · 文字及工具结果保留，本地对话未修改", "images · text and tool results retained; local history unchanged")}`) : ""}${row.image_overflow_policy ? detailItem(L("图片超限处理", "Image overflow handling"), imageOverflowName(row.image_overflow_policy)) : ""}${detailItem(L("输入 / 输出 Token", "Input / output tokens"), `${n(row.input_tokens)} / ${n(row.output_tokens)}`)}${detailItem(L("思考 Token", "Reasoning tokens"), n(row.reasoning_tokens))}${detailItem(L("生成速度", "Generation speed"), row.gen_ms > 0 && row.output_tokens ? `${(row.output_tokens / (row.gen_ms / 1000)).toFixed(1)} tok/s` : L("未测量", "Not measured"))}${row.error ? detailItem(L("错误详情", "Error details"), row.error, "error-text") : ""}</dl>`,
-  );
+  const images = imageRecordSummary(row), issue = requestIssue(row);
+  const hints = {
+    images: L("已明确命中图片数量护栏。检查图片数量与处理策略；仅发送“继续”不会减少 ZCode 携带的历史图片。", "The image count guard rejected this request. Review image counts and overflow policy; sending Continue alone does not reduce history."),
+    image_structure: L("图片结构无法可靠匹配，网关未自动清理。检查图片数据与请求结构。", "Images could not be matched reliably. The gateway did not trim them; review image data and request structure."),
+    auth: L("检查客户端 API Key、账号登录状态及上游访问权限。", "Review the client API key, account sign-in and upstream permissions."),
+    rate: L("检查上游额度与限流信息、账号冷却状态。原样重试可能再次失败。", "Review upstream quotas, rate limits and account cooldown; an unchanged retry may fail again."),
+    unknown: L("原因尚未确定。保留上游原文，请结合实际平台、模型、图片数据和其他请求参数排查。", "The cause is unconfirmed. Use the original provider message together with the actual route, images and other parameters."),
+  };
+  const section = (title, items, note = "") => `<section class="inspection-section"><h3>${e(title)}</h3><dl class="details-list">${items}</dl>${note ? `<p class="inspection-note">${e(note)}</p>` : ""}</section>`;
+  const speed = row.gen_ms > 0 && row.output_tokens ? `${(row.output_tokens / (row.gen_ms / 1000)).toFixed(1)} tok/s` : L("未测量", "Not measured");
+  showDrawer(L("调用详情", "Request details"),
+    `<div class="detail-hero"><div class="platform-avatar">${icon("requests")}</div><div><h2>${e(row.model)}</h2><p>${e(timestamp(row.time, true))}</p></div></div><div class="detail-status">${tag(`${row.status} · ${row.ok ? L("成功", "Success") : L("失败", "Failed")}`, row.ok ? "green" : "red")}${regionTag(row.platform)}${tag(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div>
+    ${row.error ? `<section class="inspection-error"><h3>${e(L("错误详情", "Error details"))}</h3><pre>${e(row.error)}</pre>${issue ? `<p>${e(hints[issue.hint])}</p>` : ""}</section>` : ""}
+    <div class="inspection-kpis"><div><span>${e(L("完整耗时", "Total duration"))}</span><strong>${e(duration(row.duration_ms))}</strong></div><div><span>${e(L("输出 Token", "Output tokens"))}</span><strong>${compact(row.output_tokens)}</strong></div><div><span>${e(L("生成速度", "Generation speed"))}</span><strong>${e(speed)}</strong></div></div>
+    ${section(L("请求与实际路由", "Request and actual route"), detailItem(L("客户端请求模型", "Requested model"), row.model_requested || row.model, "mono") + detailItem(L("实际模型", "Actual model"), row.model, "mono") + detailItem(L("实际平台", "Actual platform"), row.platform || L("未记录", "Unrecorded"), "mono") + detailItem(L("账号", "Account"), row.account || "—") + detailItem(L("协议", "Protocol"), protocolName(row.protocol)) + detailItem(L("输出方式", "Response mode"), row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming")))}
+    ${section(L("Token 用量", "Token usage"), detailItem(L("输入 Token", "Input tokens"), n(row.input_tokens)) + detailItem(L("输出 Token", "Output tokens"), n(row.output_tokens)) + detailItem(L("思考 Token", "Reasoning tokens"), n(row.reasoning_tokens)))}
+    ${section(L("图片与超限策略", "Images and overflow policy"), detailItem(L("本次图片数量", "Request image count"), images.received == null ? L("未记录", "Unrecorded") : `${n(images.received)} ${L("张（含历史与工具结果）", "images, including history and tool results")}`) + detailItem(L("图片数量护栏", "Image count guard"), images.limit == null ? L("未记录或无已知护栏", "Unrecorded or no known guard") : images.limit > 0 ? `${n(images.limit)} ${L("张 / 请求", "images / request")}` : L("已关闭", "Disabled")) + detailItem(L("处理后图片数量", "Prepared image count"), images.forwarded == null ? L("未记录或未转发", "Unrecorded or not forwarded") : `${n(images.forwarded)} ${L("张", "images")}`) + detailItem(L("本次省略的旧图", "Older images omitted"), images.removed ? `${n(images.removed)} ${L("张", "images")}` : row.forwarded_image_count == null ? L("未记录", "Unrecorded") : L("未省略", "None omitted")) + detailItem(L("图片超限处理", "Image overflow handling"), row.image_overflow_policy ? imageOverflowName(row.image_overflow_policy) : L("未记录", "Unrecorded")), images.removed ? L("仅本次转发省略旧图；文字和工具结果保留，ZCode 本地历史未修改。", "Old images were omitted only for this forwarding attempt; text, tool results and local history remain intact.") : "")}
+    <div class="inspection-actions">${row.account ? `<button class="button" data-action="request-account-logs" data-platform="${e(row.platform || "")}" data-label="${e(row.account)}">${icon("requests")}${e(L("此账号的调用", "Requests for this account"))}</button>` : ""}<button class="button" data-action="request-model-logs" data-platform="${e(row.platform || "")}" data-model="${e(row.model)}">${icon("models")}${e(L("此模型的调用", "Requests for this model"))}</button></div>`);
 }
 
 function modal(title, content) {
@@ -1322,7 +1359,7 @@ async function sendChat(event) {
     });
     if (!response.ok) {
       if (response.status === 401) s.authRequired = true;
-      throw new Error(await responseError(response));
+      throw new Error(await responseError(response, s.lang));
     }
     let completed = false;
     for await (const event of readEvents(response.body)) {
@@ -1484,6 +1521,25 @@ document.addEventListener("click", async (event) => {
         return openRequestFilters({ status: "failed" });
       case "reset-request-filters":
         return openRequestFilters({});
+      case "attention-accounts":
+        Object.assign(s.accounts, { platform: "all", query: "", status: "attention" });
+        location.hash = "accounts";
+        if (s.page === "accounts") draw();
+        return;
+      case "account-status":
+        s.accounts.status = s.accounts.status === value ? "all" : value;
+        return draw();
+      case "reset-account-filters":
+        Object.assign(s.accounts, { platform: "all", query: "", status: "all" });
+        return draw();
+      case "clear-filter": {
+        const keys = kind === "accounts" ? ["query", "platform", "status"] : kind === "requests" ? ["query", "platform", "status", "protocol", "model", "account", "range"] : [];
+        const key = target.dataset.key;
+        if (!keys.includes(key)) return;
+        s[kind][key] = key === "query" ? "" : "all";
+        if (kind === "requests") s.requests.page = 1;
+        return draw();
+      }
       case "account-view":
         s.accounts.view = value;
         save("agent2api_account_view", value);
@@ -1573,6 +1629,12 @@ document.addEventListener("click", async (event) => {
       case "account-detail":
         $("modal").close();
         return showAccountDetail(Number(index));
+      case "request-account-logs":
+        $("detailDialog").close();
+        return openRequestFilters({ platform: platform || "all", account: accountKey({ platform, account: label }) });
+      case "request-model-logs":
+        $("detailDialog").close();
+        return openRequestFilters({ platform: platform || "all", model });
       case "request-detail":
         return showRequestDetail(key);
       case "add-account":

@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readEvents, markdown } from "../internal/web/static/core.js";
+import { readEvents, markdown, responseError } from "../internal/web/static/core.js";
+
+test("HTML failure pages produce a readable status while JSON provider errors retain their message", async () => {
+  const html = new Response('<!DOCTYPE HTML><html><body>503 failed<script>unsafe</script></body></html>', { status: 503, headers: { "Content-Type": "text/html" } });
+  const message = await responseError(html, "zh");
+  assert.ok(message.includes("503") && message.includes("检查连接"));
+  assert.ok(!message.includes("<html") && !message.includes("script"));
+  assert.equal(await responseError(new Response('{"error":{"message":"Invalid request parameters"}}', { status: 400 })), "Invalid request parameters");
+  assert.equal(await responseError(new Response('plain provider error', { status: 400 })), "plain provider error");
+});
 
 test("SSE: split UTF-8 and CRLF, multiline data, usage-only frames and DONE", async () => {
   const source =

@@ -87,7 +87,7 @@ const paths = {
 export const icon = (name) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.info}</svg>`;
 
-export async function responseError(response) {
+export async function responseError(response, language = "en") {
   const text = await response.text();
   try {
     const data = JSON.parse(text);
@@ -97,6 +97,9 @@ export async function responseError(response) {
       (typeof data.error === "string" ? data.error : text)
     );
   } catch {
+    if (response.headers.get("content-type")?.includes("text/html") || /^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
+      return language === "zh" ? `网关或上游服务返回了错误页面（HTTP ${response.status}），请检查连接或稍后重试。` : `The gateway or upstream returned an error page (HTTP ${response.status}). Check the connection or retry later.`;
+    }
     return text || `HTTP ${response.status}`;
   }
 }

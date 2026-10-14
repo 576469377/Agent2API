@@ -17,7 +17,7 @@
     </script>
     <link rel="stylesheet" href="/static/style.css?v=operations-1" />
     <link rel="stylesheet" href="/static/dashboard.css?v=studio-1" />
-    <link rel="stylesheet" href="/static/workbench.css?v=studio-3" />
+    <link rel="stylesheet" href="/static/workbench.css?v=operations-4" />
   </head>
   <body>
     <div class="app-shell">
@@ -76,6 +76,7 @@
               <p id="pageDescription"></p>
             </div>
             <div class="page-actions">
+              <div id="pagePrimary"></div>
               <span class="updated-at" id="updatedAt"></span
               ><select id="autoRefresh" class="select" aria-label="自动刷新间隔"></select><button class="button" id="refreshButton"></button>
             </div>
@@ -103,6 +104,6 @@
     </dialog>
     <dialog id="modal" class="modal"><div id="modalContent"></div></dialog>
     <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
-    <script type="module" src="/static/app.js?v=studio-6"></script>
+    <script type="module" src="/static/app.js?v=operations-7"></script>
   </body>
 </html>
