@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergePricingSnapshot, modelPricing, compareModelRates } from "../internal/web/static/pricing.js";
+import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, RATE_MAX_AGE_MS } from "../internal/web/static/pricing.js";
 
 const now = Date.UTC(2026, 9, 12, 1, 0);
 const pricing = (rate, status = "credits") => ({ status, credit_multiplier: rate, source: "upstream_config", observed_at: new Date(now).toISOString() });
@@ -25,4 +25,37 @@ test("Missing, invalid and stale pricing cannot become free", () => {
 test("Rate ordering puts zero before charged rates and unknowns last", () => {
   const rows = [{ id: "unknown" }, { id: "costly", pricing: pricing(2) }, { id: "zero", pricing: pricing(0) }, { id: "low", pricing: pricing(.11) }];
   assert.deepEqual(rows.sort((a,b) => compareModelRates(a,b,now)).map((row) => row.id), ["zero", "low", "costly", "unknown"]);
+});
+
+test("rate freshness is five minutes; refreshes use an independent one-minute cadence", () => {
+  assert.equal(modelPricing({ pricing: pricing(0) }, now + RATE_MAX_AGE_MS).status, "free");
+  assert.equal(modelPricing({ pricing: pricing(0) }, now + RATE_MAX_AGE_MS + 1).status, "unknown");
+  assert.equal(rateRefreshDue(0, now), true);
+  assert.equal(rateRefreshDue(now, now + 59999), false);
+  assert.equal(rateRefreshDue(now, now + 60000), true);
+  assert.equal(rateRefreshDue(now, now + 100, true), true);
+});
+
+test("successful browser receipt cannot verify a stale hub cache or legacy snapshot", () => {
+  const rows = [{ platform: "cn", id: "same", pricing: pricing(0) }, { platform: "global", id: "same", pricing: { ...pricing(0), observed_at: new Date(now + 1000).toISOString() } }];
+  const verified = verifyRateObservations(rows, now + 1999);
+  assert.equal(modelPricing(verified[0], now + 1999).status, "unknown");
+  assert.equal(modelPricing(verified[1], now + 1999).status, "free");
+  assert.equal(modelPricing({ pricing: pricing(0), pricing_sync_failed: true }, now).status, "unknown");
+  assert.equal(rows[0].pricing_sync_failed, undefined);
+  const snapshot = mergePricingSnapshot([{ platform: "cn", id: "same" }], { version: 1, models: [rows[0]] });
+  assert.equal(modelPricing(verifyRateObservations(snapshot, now)[0], now).status, "unknown");
+});
+
+test("free-to-paid alerts preserve regional identity and do not recur for unchanged rates", () => {
+  const before = [{ platform: "cn", id: "same", pricing: pricing(0) }, { platform: "global", id: "same", pricing: pricing(0) }];
+  const after = [{ ...before[0], pricing: pricing(2) }, before[1]];
+  const changes = pricingChanges(before, after, now);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].routingId, "cn/same");
+  assert.equal(changes[0].from.status, "free");
+  assert.equal(changes[0].to.multiplier, 2);
+  assert.deepEqual(pricingChanges(after, after, now), []);
+  assert.deepEqual(pricingChanges(before, before.map(m => ({ ...m, pricing_sync_failed: true })), now), []);
+  assert.equal(pricingChanges(before, [{ ...before[0], pricing: pricing(undefined, "dynamic") }], now)[0].to.status, "dynamic");
 });

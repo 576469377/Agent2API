@@ -17,7 +17,7 @@
     </script>
     <link rel="stylesheet" href="/static/style.css?v=operations-1" />
     <link rel="stylesheet" href="/static/dashboard.css?v=studio-1" />
-    <link rel="stylesheet" href="/static/workbench.css?v=operations-4" />
+    <link rel="stylesheet" href="/static/workbench.css?v=rates-5" />
   </head>
   <body>
     <div class="app-shell">
@@ -87,6 +87,7 @@
             role="alert"
             hidden
           ></div>
+          <div id="pricingBanner" class="notice rate-banner" role="status" hidden></div>
           <div id="pageContent">
             <div class="loading-state">
               <span class="spinner"></span>正在连接网关…
@@ -104,6 +105,6 @@
     </dialog>
     <dialog id="modal" class="modal"><div id="modalContent"></div></dialog>
     <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
-    <script type="module" src="/static/app.js?v=operations-7"></script>
+    <script type="module" src="/static/app.js?v=rates-8"></script>
   </body>
 </html>

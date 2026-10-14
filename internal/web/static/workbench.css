@@ -481,6 +481,14 @@ body[data-density="compact"] .resource-table .requested-model { display: none; }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 
 /* Operations surfaces: attention, filter context, and grouped inspection. */
+.rate-banner { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--border); background: var(--amber-soft); margin-bottom: 18px; }
+.rate-banner[hidden] { display: none; }
+.rate-banner > .icon { flex: none; width: 18px; color: var(--amber); margin-top: 2px; }
+.rate-banner > div:not(.rate-notice-actions) { flex: 1; min-width: 0; }
+.rate-banner p { margin: 4px 0; overflow-wrap: anywhere; }
+.rate-banner small { display: block; font-size: 11px; color: var(--muted); }
+.rate-notice-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+@media (max-width: 720px) { .rate-banner { flex-wrap: wrap; } .rate-notice-actions { margin-left: 30px; } }
 #pagePrimary:empty { display: none; }
 .page-actions #pagePrimary { grid-column: 1; grid-row: 1; }
 .page-actions #autoRefresh { grid-column: 2; grid-row: 1; }

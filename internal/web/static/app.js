@@ -12,7 +12,7 @@ import {
 } from "./core.js";
 import { renderMath } from "./math.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "./monitor.js";
-import { mergePricingSnapshot, modelPricing, compareModelRates } from "./pricing.js";
+import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState } from "./operations.js";
@@ -39,6 +39,7 @@ const s = {
   page: "overview",
   cache: {},
   receivedAt: {},
+  rateSync: { lastAttempt: 0, error: "", changes: [], confirmed: new Map() },
   errors: {},
   busy: new Set(),
   authRequired: false,
@@ -268,6 +269,7 @@ async function api(path, body) {
   return response.json();
 }
 async function refresh(keys = currentResources(), manual = false) {
+  if (rateRefreshDue(s.rateSync.lastAttempt, Date.now(), manual)) keys = [...keys, "models"];
   const needed = [...new Set(["status", ...keys])].filter(
     (key) => !s.busy.has(key),
   );
@@ -278,6 +280,12 @@ async function refresh(keys = currentResources(), manual = false) {
   await Promise.allSettled(
     needed.map(async (key) => {
       try {
+        const checkRates = key === "models" && rateRefreshDue(s.rateSync.lastAttempt, Date.now(), manual);
+        if (checkRates) {
+          s.rateSync.lastAttempt = Date.now();
+          const result = await api("/api/config", { refresh_models: true });
+          if (!(result.applied?.refresh_models > 0)) throw new Error(L("当前网关不支持即时更新模型费率，请更新后端；旧费率不再标为免费。", "This gateway cannot refresh upstream rates. Upgrade it; old rates are no longer marked free."));
+        }
         const data = await api(endpoints[key]);
         if (data.error)
           throw new Error(
@@ -293,6 +301,18 @@ async function refresh(keys = currentResources(), manual = false) {
             if (snapshot.ok) { data.models = mergePricingSnapshot(data.models, await snapshot.json()); data.pricing_snapshot = true; }
           } catch {}
         }
+        if (key === "models" && Array.isArray(data.models)) {
+          data.models = verifyRateObservations(data.models, s.rateSync.lastAttempt);
+          const changes = pricingChanges([...s.rateSync.confirmed.values()], data.models);
+          data.models.filter(m => modelPricing(m).status !== "unknown").forEach(m => s.rateSync.confirmed.set(JSON.stringify([m.platform, m.id]), m));
+          if (changes.length) {
+            const pending = new Map(s.rateSync.changes.map(change => [change.routingId, change]));
+            changes.forEach(change => pending.set(change.routingId, change));
+            s.rateSync.changes = [...pending.values()];
+          }
+          const unverified = [...new Set(data.models.filter(m => m.pricing && m.pricing_sync_failed).map(m => platformName(m.platform)))];
+          if (checkRates) s.rateSync.error = data.pricing_snapshot ? L("当前后端只提供目录，费率来自旧快照，无法确认最新免费状态。", "Rates come from an old snapshot; current zero-credit status cannot be verified.") : unverified.length ? L(`${unverified.join("、")} 的费率未能重新确认，相关条目显示未知。`, `Rates for ${unverified.join(", ")} could not be verified; affected entries show unknown.`) : "";
+        }
         s.cache[key] = data;
         s.receivedAt[key] = Date.now();
         delete s.errors[key];
@@ -301,6 +321,10 @@ async function refresh(keys = currentResources(), manual = false) {
         }
       } catch (error) {
         s.errors[key] = error;
+        if (key === "models") {
+          s.rateSync.error = error.message;
+          if (s.cache.models) s.cache.models = { ...s.cache.models, models: models().map(model => ({ ...model, pricing_sync_failed: true })) };
+        }
       } finally {
         s.busy.delete(key);
       }
@@ -394,6 +418,16 @@ function chrome() {
   if (pageError)
     $("errorBanner").innerHTML =
       `<span>${e(s.authRequired ? L("网关需要有效的 API Key，请配置控制台连接。", "Enter a valid API key to connect to the gateway.") : s.errors[pageError].message)} ${s.cache[pageError] ? e(L("当前保留上次成功的数据。", "Showing the last successful snapshot.")) : ""}</span>${s.authRequired ? button(L("配置连接", "Configure connection"), "auth", "small") : button(L("重试", "Retry"), "retry", "small")}`;
+  renderPricingNotice();
+}
+
+function renderPricingNotice() {
+  const target = $("pricingBanner"), changes = s.rateSync.changes;
+  const signature = JSON.stringify([s.lang, s.rateSync.error, changes]);
+  if (target.dataset.signature === signature) return;
+  target.dataset.signature = signature;
+  target.hidden = !s.rateSync.error && !changes.length;
+  target.innerHTML = `${icon("info")}<div><strong>${e(s.rateSync.error ? L("费率更新需要检查", "Rate refresh needs attention") : L("上游模型费率已变化", "Upstream model rates changed"))}</strong><p>${e(s.rateSync.error || changes.slice(0, 3).map(c => `${c.routingId}: ${c.from.multiplier == null ? pricingName(c.from.status) : "×" + c.from.multiplier} → ${c.to.multiplier == null ? pricingName(c.to.status) : "×" + c.to.multiplier}`).join("；"))}${!s.rateSync.error && changes.length > 3 ? e(L(`；另有 ${changes.length - 3} 项`, `; ${changes.length - 3} more`)) : ""}</p><small>${e(L("仅更新显示与提醒，付费调用仍允许；调用前请确认当前倍率。", "Display and alerts only. Paid calls remain allowed; review the current rate before calling."))}</small></div><div class="rate-notice-actions">${button(L("查看费率", "Review rates"), "review-price-changes", "small")}${!s.rateSync.error ? button(L("已知晓", "Dismiss"), "dismiss-price-changes", "small ghost") : ""}</div>`;
 }
 function navigate() {
   const page = location.hash.slice(1);
@@ -633,7 +667,7 @@ function densityControl() {
 }
 function modelPage() {
   return `<section class="card resource-workspace model-workspace"><div class="workspace-controls">
-  <div class="toolbar catalog-platform-toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型清单", "Refresh catalogue"), "reload-models", "", "refresh")}</div></div>
+  <div class="toolbar catalog-platform-toolbar"><div class="toolbar-group">${platformTabs("models", s.models.platform)}</div><div class="toolbar-group">${button(L("更新模型与费率", "Refresh models & rates"), "reload-models", "", "refresh")}</div></div>
   <div class="toolbar catalog-filter-toolbar"><div class="toolbar-group">${search("modelSearch", s.models.query, L("搜索模型名称或 ID…", "Search model name or ID…"))}<select id="capabilityFilter" class="select" aria-label="${e(L("能力筛选", "Capability filter"))}">${options(
     [
       ["all", L("全部能力", "All capabilities")],
@@ -643,7 +677,7 @@ function modelPage() {
     ],
     s.models.capability,
   )}</select><select id="pricingFilter" class="select" aria-label="${e(L("费率筛选", "Rate filter"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["all", L("全部费率", "All rates")], ["free", L("零积分", "Zero credits")], ["credits", L("积分计费", "Uses credits")], ["dynamic", L("浮动倍率", "Variable rate")], ["unknown", L("费率未知", "Unknown rate")]], s.models.pricing)}</select><select id="modelSort" class="select" aria-label="${e(L("模型排序", "Model sort"))}" ${s.models.view === "matrix" ? "disabled" : ""}>${options([["name", L("名称排序", "By name")], ["rate", L("积分倍率从低到高", "Lowest credit rate")], ["context", L("上下文优先", "Largest context")], ["output", L("输出上限优先", "Largest output")]], s.models.sort)}</select></div><div class="segmented"><button data-action="model-view" data-value="list" class="${s.models.view === "list" ? "active" : ""}">${e(L("模型目录", "Catalog"))}</button><button data-action="model-view" data-value="matrix" class="${s.models.view === "matrix" ? "active" : ""}">${e(L("账号可用性", "Availability"))}</button></div></div>
-  </div><div id="modelInsights"></div><div class="resource-table" id="modelResults"></div></section><div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，超过 24 小时未更新的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; rates older than 24 hours are treated as unknown."))}</p>`;
+  </div><div id="modelInsights"></div><div class="resource-table" id="modelResults"></div></section><div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div><p class="scope-note">${e(L("费率直接读取上游模型配置，不发送生成请求。× 值为积分消耗倍率，不是金额单价；零积分仍受账号权限与用量限制。详情中可查看原始标注和读取时间，页面可见且自动刷新开启时，每分钟重新读取上游配置；超过 5 分钟或本次读取未确认的费率归为未知。", "Rates come from upstream configuration without generation requests. Multipliers are credit usage rates, not currency prices. Zero-credit models still have account and usage limits. Details show original labels and observation times; Visible pages with auto-refresh check upstream rates every minute. Rates older than five minutes or unverified in the latest check are unknown."))}</p>`;
 }
 function pricingName(status) {
   return ({ free: L("零积分", "Zero credits"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
@@ -658,12 +692,12 @@ function updateModelInsights() {
   const displayed = !matrix && s.models.pricing !== "all" ? counts[s.models.pricing] || 0 : matching.length;
   $("modelInsights").innerHTML = `<div class="catalog-summary">${Object.entries(counts).map(([key,count]) => `<button class="card catalog-summary-item ${!matrix && s.models.pricing === key ? "selected" : ""}" data-action="model-summary-filter" data-value="${key}" aria-pressed="${!matrix && s.models.pricing === key}" ${matrix ? "disabled" : ""}><span>${e(pricingName(key))}</span><strong>${n(count)}</strong><small>${e(key === "free" ? L("倍率为零，仍有用量限制", "Zero rate, usage limits apply") : key === "credits" ? L("显示上游积分倍率", "Upstream credit multipliers") : key === "dynamic" ? L("随自动选择的模型变化", "Depends on automatic selection") : L("缺失或已过期的信息", "Missing or stale metadata"))}</small></button>`).join("")}</div>
   <div class="catalog-context"><span><strong>${e(matrix ? L("账号可用性", "Account availability") : L("模型列表", "Model list"))}</strong><span class="result-count">${n(displayed)} / ${n(models().length)}${!matrix && s.models.pricing !== "all" ? ` · ${e(pricingName(s.models.pricing))}` : ""}</span></span><div class="toolbar-group">${filters ? `<button class="button ghost small" data-action="reset-model-filters">${icon("close")}${e(L("清除筛选", "Reset filters"))} (${filters})</button>` : ""}${densityControl()}</div></div>
-  <div class="catalog-source">${icon("clock")}<span>${times.length ? e(L("最早费率记录：", "Oldest rate observation: ") + timestamp(Math.min(...times), true)) : e(L("没有可核实的费率记录", "No verified rate metadata"))}${s.cache.models?.pricing_snapshot ? ` · ${e(L("费率为读取快照，更新模型清单不会更新费率", "Rates use an observed snapshot; catalogue refresh does not refresh rates"))}` : ""}</span></div>`;
+  <div class="catalog-source">${icon("clock")}<span>${times.length ? e(L("最早费率读取：", "Oldest rate observation: ") + timestamp(Math.min(...times), true)) : e(L("没有可核实的费率记录", "No verified rate metadata"))}${s.cache.models?.pricing_snapshot ? ` · ${e(L("旧费率快照不能确认实时状态", "An old snapshot cannot verify current rates"))}` : ""} · ${e(s.refreshEvery ? L("自动刷新开启 · 每分钟检查上游费率", "Auto-refresh enabled · rate checks every minute") : L("手动模式 · 点击刷新重新确认费率", "Manual mode · refresh to verify rates"))}</span></div>`;
 }
 function pricingCell(m) {
   const p = modelPricing(m), rate = p.multiplier;
-  const value = p.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : rate !== undefined ? `${p.stale ? L("上次 ", "Previously ") : ""}×${String(rate)}` : "—";
-  return `<div title="${e(p.observedAt ? L("费率读取：", "Rate observed: ") + timestamp(p.observedAt, true) : L("无已核实费率", "No verified rate"))}">${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${p.stale ? e(L("需更新费率", "Rate needs refresh")) : p.status === "unknown" ? e(L("无固定倍率", "No fixed rate")) : ""}</div></div>`;
+  const value = p.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : rate !== undefined ? `${(p.stale || p.refreshFailed) ? L("上次 ", "Previously ") : ""}×${String(rate)}` : "—";
+  return `<div title="${e(p.observedAt ? L("费率读取：", "Rate observed: ") + timestamp(p.observedAt, true) : L("无已核实费率", "No verified rate"))}">${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${(p.stale || p.refreshFailed) ? e(L("未确认当前费率", "Current rate unverified")) : p.status === "unknown" ? e(L("无固定倍率", "No fixed rate")) : ""}</div></div>`;
 }
 function updateModelTable() {
   if (!$("modelResults")) return;
@@ -960,6 +994,7 @@ function settingsPage() {
 }
 
 function showDrawer(title, content) {
+  delete $("detailContent").dataset.pricingId;
   $("detailContent").innerHTML =
     `<div class="dialog-header"><h2>${e(title)}</h2>${iconButton("close", L("关闭", "Close"), "close-detail")}</div>${content}`;
   if (!$("detailDialog").open) $("detailDialog").showModal();
@@ -969,8 +1004,9 @@ function showModelDetail(id) {
   if (!m) return;
   showDrawer(
     L("模型详情", "Model details"),
-    `<div class="detail-hero"><div class="platform-avatar ${m.platform === "workbuddy-global" ? "global" : ""}">${icon("models")}</div><div><h2>${e(m.display_name || m.id)}</h2><p>${e(platformName(m.platform))}</p></div></div><dl class="details-list">${detailItem(L("完整模型 ID", "Full model ID"), routeId(m), "mono")}${detailItem(L("原始模型名", "Original model name"), m.id, "mono")}${detailItem(L("费率类型", "Rate type"), pricingName(modelPricing(m).status))}${detailItem(L("积分倍率", "Credit multiplier"), modelPricing(m).multiplier !== undefined ? "×" + modelPricing(m).multiplier : modelPricing(m).status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : L("未知", "Unknown"))}${detailItem(L("上游费率标注", "Original rate label"), modelPricing(m).raw || L("未提供", "Not reported"))}${detailItem(L("费率来源与时间", "Rate source and time"), modelPricing(m).observedAt ? L("上游模型配置 · ", "Upstream configuration · ") + timestamp(modelPricing(m).observedAt, true) + (modelPricing(m).stale ? L(" · 已超过 24 小时，需更新", " · Older than 24 hours, refresh needed") : "") : L("无可核实信息", "No verified metadata"))}${detailItem(L("上下文窗口", "Context window"), m.context_tokens ? n(m.context_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("最大输出", "Maximum output"), m.max_output_tokens ? n(m.max_output_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("单请求图片护栏", "Images per request guard"), m.image_limit ? m.image_limit.enabled ? `${n(m.image_limit.max_images)} ${L("张（含历史与工具结果）", "images, including history and tool results")}` : L("已关闭（不代表上游无限制）", "Disabled; upstream limits may still apply") : L("未取得护栏信息，上游上限未知", "No guard metadata; upstream limit unknown"))}${m.image_limit ? detailItem(L("护栏来源", "Guard source"), m.image_limit.source === "config" ? L("本地配置覆盖", "Local configuration override") : L("内置实测 · ", "Built-in empirical · ") + m.image_limit.observed_on) : ""}${m.image_limit ? detailItem(L("图片超限处理", "Image overflow handling"), m.image_limit.enabled ? imageOverflowName(m.image_limit.overflow_policy) : L("护栏未启用", "Guard disabled")) : ""}${detailItem(L("模型能力", "Capabilities"), [m.supports_images ? L("视觉", "Vision") : "", m.supports_tools ? L("工具调用", "Tools") : "", m.supports_thinking ? L("思考", "Reasoning") : ""].filter(Boolean).join(" / ") || L("未提供", "Unreported"))}${detailItem(L("裸模型名默认路由", "Default route for bare ID"), m.default_route ? L("默认优先使用此平台", "This platform is preferred") : L("完整 ID 可固定到此平台", "Use the full ID to select this platform"))}${m.description ? detailItem(L("说明", "Description"), m.description) : ""}</dl><div class="detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}">${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`,
+    `<div class="detail-hero"><div class="platform-avatar ${m.platform === "workbuddy-global" ? "global" : ""}">${icon("models")}</div><div><h2>${e(m.display_name || m.id)}</h2><p>${e(platformName(m.platform))}</p></div></div><dl class="details-list">${detailItem(L("完整模型 ID", "Full model ID"), routeId(m), "mono")}${detailItem(L("原始模型名", "Original model name"), m.id, "mono")}${detailItem(L("费率类型", "Rate type"), pricingName(modelPricing(m).status))}${detailItem(L("积分倍率", "Credit multiplier"), modelPricing(m).multiplier !== undefined ? ((modelPricing(m).stale || modelPricing(m).refreshFailed) ? L("上次 ", "Previously ") : "") + "×" + modelPricing(m).multiplier : modelPricing(m).status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : L("未知", "Unknown"))}${detailItem(L("上游费率标注", "Original rate label"), modelPricing(m).raw || L("未提供", "Not reported"))}${detailItem(L("费率来源与时间", "Rate source and time"), modelPricing(m).observedAt ? L("上游模型配置 · ", "Upstream configuration · ") + timestamp(modelPricing(m).observedAt, true) + (modelPricing(m).refreshFailed ? L(" · 本次读取未确认", " · Unverified in the latest check") : modelPricing(m).stale ? L(" · 已超过 5 分钟，需更新", " · Older than five minutes, refresh needed") : "") : L("无可核实信息", "No verified metadata"))}${detailItem(L("上下文窗口", "Context window"), m.context_tokens ? n(m.context_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("最大输出", "Maximum output"), m.max_output_tokens ? n(m.max_output_tokens) + " tokens" : L("未提供", "Unreported"))}${detailItem(L("单请求图片护栏", "Images per request guard"), m.image_limit ? m.image_limit.enabled ? `${n(m.image_limit.max_images)} ${L("张（含历史与工具结果）", "images, including history and tool results")}` : L("已关闭（不代表上游无限制）", "Disabled; upstream limits may still apply") : L("未取得护栏信息，上游上限未知", "No guard metadata; upstream limit unknown"))}${m.image_limit ? detailItem(L("护栏来源", "Guard source"), m.image_limit.source === "config" ? L("本地配置覆盖", "Local configuration override") : L("内置实测 · ", "Built-in empirical · ") + m.image_limit.observed_on) : ""}${m.image_limit ? detailItem(L("图片超限处理", "Image overflow handling"), m.image_limit.enabled ? imageOverflowName(m.image_limit.overflow_policy) : L("护栏未启用", "Guard disabled")) : ""}${detailItem(L("模型能力", "Capabilities"), [m.supports_images ? L("视觉", "Vision") : "", m.supports_tools ? L("工具调用", "Tools") : "", m.supports_thinking ? L("思考", "Reasoning") : ""].filter(Boolean).join(" / ") || L("未提供", "Unreported"))}${detailItem(L("裸模型名默认路由", "Default route for bare ID"), m.default_route ? L("默认优先使用此平台", "This platform is preferred") : L("完整 ID 可固定到此平台", "Use the full ID to select this platform"))}${m.description ? detailItem(L("说明", "Description"), m.description) : ""}</dl><div class="detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}">${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`,
   );
+  $("detailContent").dataset.pricingId = id;
 }
 function showAccountDetail(index) {
   const a = accounts()[index];
@@ -1584,6 +1620,14 @@ document.addEventListener("click", async (event) => {
         location.hash = "chat";
         if (s.page === "chat") draw(true);
         return;
+      case "review-price-changes":
+        Object.assign(s.models, { platform: "all", query: "", capability: "all", pricing: "all", page: 1 });
+        location.hash = "models";
+        if (s.page === "models") draw();
+        return;
+      case "dismiss-price-changes":
+        s.rateSync.changes = [];
+        return renderPricingNotice();
       case "model-summary-filter":
         s.models.pricing = value;
         s.models.page = 1;
@@ -1621,10 +1665,9 @@ document.addEventListener("click", async (event) => {
         return;
       case "reload-models":
         target.disabled = true;
-        await api("/api/config", { refresh_models: true });
-        await refresh(currentResources());
+        await refresh([...currentResources(), "models"], true);
         if (s.errors.models || s.errors.matrix) throw (s.errors.models || s.errors.matrix);
-        toast(s.cache.models?.pricing_snapshot ? L("模型清单已更新；费率保留原读取时间", "Catalogue updated; rate observation times unchanged") : L("模型目录已更新", "Model catalog updated"));
+        toast(s.rateSync.error ? L("模型清单已更新，部分费率未能确认，请查看提示。", "Catalogue updated; some rates remain unverified. Review the notice.") : L("模型与费率已更新", "Models and rates updated"), !!s.rateSync.error);
         return;
       case "account-detail":
         $("modal").close();
@@ -1885,14 +1928,42 @@ $("refreshButton").addEventListener("click", () => refresh(currentResources(), t
 $("copyEndpoint").addEventListener("click", () => copy(`${gatewayURL()}/v1`));
 window.addEventListener("hashchange", navigate);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden)
+  if (!document.hidden) {
+    chrome();
+    draw();
     refresh(s.page === "chat" ? ["status"] : currentResources());
+  }
 });
 setInterval(() => {
   if (document.hidden || $("modal").open || $("detailDialog").open || !s.refreshEvery || Date.now() - s.lastPoll < s.refreshEvery * 1000) return;
   const keys = currentResources(true);
   refresh(keys);
 }, 1000);
+// Time still advances while auto-refresh is paused or a drawer is open.
+// Reclassify expired rates without making requests or replacing the inspector.
+let rateAgeSignature = "";
+setInterval(() => {
+  if (document.hidden) return;
+  const signature = models().map(m => `${routeId(m)}:${modelPricing(m).status}`).join("|");
+  if (signature !== rateAgeSignature) {
+    rateAgeSignature = signature;
+    if (s.page === "models") draw();
+  }
+  const id = $("detailContent").dataset.pricingId;
+  if (!$("detailDialog").open || !id) return;
+  const m = models().find(m => routeId(m) === id);
+  if (!m) return;
+  const pricing = modelPricing(m);
+  const values = new Map([
+    [L("费率类型", "Rate type"), pricingName(pricing.status)],
+    [L("积分倍率", "Credit multiplier"), pricing.multiplier == null ? pricing.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : L("未知", "Unknown") : `${pricing.stale || pricing.refreshFailed ? L("上次 ", "Previously ") : ""}×${pricing.multiplier}`],
+    [L("费率来源与时间", "Rate source and time"), pricing.observedAt ? `${L("上游模型配置 · ", "Upstream configuration · ")}${timestamp(pricing.observedAt, true)}${pricing.refreshFailed ? L(" · 本次读取未确认", " · Unverified in the latest check") : pricing.stale ? L(" · 已超过 5 分钟，需更新", " · Older than five minutes, refresh needed") : ""}` : L("无可核实信息", "No verified metadata")],
+  ]);
+  $("detailContent").querySelectorAll(".details-list > div").forEach(item => {
+    const value = values.get(item.querySelector("dt")?.textContent);
+    if (value != null) item.querySelector("dd").textContent = value;
+  });
+}, 15000);
 setInterval(() => {
   document.querySelectorAll("[data-until]").forEach((element) => {
     const remaining = Math.max(
