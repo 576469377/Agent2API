@@ -12,6 +12,7 @@
 | Responses HTTP | `POST http://127.0.0.1:8787/v1/responses` |
 | Anthropic Messages HTTP | `POST http://127.0.0.1:8787/v1/messages` |
 | Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` |
+| cc-switch | Anthropic，Base URL `http://127.0.0.1:8787`（不带 `/v1`） |
 | ZCode 自定义供应商 | Anthropic Messages，Base URL `http://127.0.0.1:8787/v1` |
 
 SDK 对 Base URL 是否自动追加 `/v1` 的行为可能不同；以最终请求打到上述端点为准，避免 `/v1/v1/messages` 或缺失 `/v1`。
@@ -90,6 +91,50 @@ $env:ANTHROPIC_API_KEY = 'agent2api-local'  # 启用鉴权时换成网关密钥
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 export ANTHROPIC_API_KEY=agent2api-local
 ```
+
+## cc-switch
+
+cc-switch 是 Claude Code / Codex 等本地客户端的供应商配置管理器，多个网关或账号可随时切换。为 Agent2API 添加一条 Claude 供应商即可在它的界面里切换使用。
+
+### UI 方式（推荐）
+
+「添加供应商」时：
+
+| 项 | 值 |
+|---|---|
+| 协议 / API 格式 | Anthropic（不是 OpenAI 兼容） |
+| Base URL | `http://127.0.0.1:8787` |
+| API Key | `agent2api-local`（启用网关鉴权后换成 `auth.api_key`） |
+| 模型 | 从网关目录取完整路由 ID（如 `workbuddy/hy3`、`workbuddy-global/deepseek-v4.1-flash`） |
+
+cc-switch 要求主模型必填，其余模型槽位（Subagent / Sonnet / Opus / Haiku / Fable）可全部填成同一个 ID——Agent2API 只按路由 ID 生效，不会因槽位不同而区别对待。只用一个模型时，填主模型即可。
+
+### 直接改配置文件（未安装 app 或想批量导入）
+
+cc-switch 把供应商存在本地 SQLite：`~/.cc-switch/cc-switch.db` 的 `providers` 表（`app_type='claude'` 为 Claude Code 可用条目）。**改前先退出 app**，否则内存状态会覆盖改动；改动后重启 app 生效。条目结构（`settings_config` 字段）：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
+    "ANTHROPIC_AUTH_TOKEN": "agent2api-local",
+    "ANTHROPIC_MODEL": "workbuddy-global/deepseek-v4.1-flash",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "workbuddy-global/deepseek-v4.1-flash",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "workbuddy-global/deepseek-v4.1-flash",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "workbuddy-global/deepseek-v4.1-flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "workbuddy-global/deepseek-v4.1-flash",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "workbuddy-global/deepseek-v4.1-flash"
+  }
+}
+```
+
+`meta` 字段填 `{"commonConfigEnabled": false, "apiFormat": "anthropic"}`。多条供应商只是模型 ID 不同，可按喜欢的顺序插入。
+
+### 注意事项
+
+- **Base URL 不带 `/v1`**：Claude Code / cc-switch 的 Anthropic 协议客户端会在后面自己拼 `/v1/messages`；带了会出现 `/v1/v1/messages`。
+- **模型 ID 用完整路由 ID**（含平台前缀）。不带前缀时按网关的平台顺序解析，同名模型可能落到非预期平台。
+- **国际版单请求图片上限**按模型不同，长会话可能触发 400，处理见[故障排查](troubleshooting.md)与[图片护栏配置](configuration.md#单请求图片数量护栏modelsimage_limits)。
 
 ## 先用 API 验证
 
