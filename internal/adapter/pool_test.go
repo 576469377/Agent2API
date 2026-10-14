@@ -1043,6 +1043,26 @@ func TestSessionAffinityFailsOverWhenBoundAccountFails(t *testing.T) {
 	}
 }
 
+// TestPoolUnlimitedConcurrency 保持 12 个流同时打开，验证 0 不会隐式限为 4。
+func TestPoolUnlimitedConcurrency(t *testing.T) {
+	p := NewPool("test", nil)
+	p.Add("a", &fakeAd{name: "test"})
+	p.SetMaxConcurrencyPerAccount(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	const total = 12
+	for i := 0; i < total; i++ {
+		stream, err := p.Stream(ctx, llm.RequestMessages{Model: "m"})
+		if err != nil {
+			t.Fatalf("unlimited request %d should not queue: %v", i+1, err)
+		}
+		t.Cleanup(func() { _ = closeStream(stream) })
+	}
+	if st := p.Statuses()[0]; st.InFlight != total || st.MaxConcurrency != 0 {
+		t.Fatalf("expected %d simultaneous streams and no limit, got %+v", total, st)
+	}
+}
+
 // TestPoolMaxConcurrencyIsEnforced 验证每账号并发上限（背压）的完整语义：
 // 槽位在**流的整个生命周期**内占用、超限的请求排队而不是失败、
 // 关流即归还、在途数可从 Statuses 读到（控制台据此显示负载）。

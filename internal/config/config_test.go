@@ -118,19 +118,18 @@ func TestAddrAndDurations(t *testing.T) {
 }
 
 // TestConcurrencyDefaultAndPlatformOverride 覆盖并发上限的默认值、
-// JSON 解析与平台级覆盖：这是「单账号被并发打爆」的那道闸门，
-// 默认值一旦静默变成 0（不限并发）就等于功能失效。
+// 平台级覆盖：默认不限并发，仍支持用户显式设置正数上限。
 func TestConcurrencyDefaultAndPlatformOverride(t *testing.T) {
 	cfg := Default()
-	if cfg.Upstream.MaxConcurrencyPerAccount != 4 {
-		t.Fatalf("默认每账号并发上限应为 4, got %d", cfg.Upstream.MaxConcurrencyPerAccount)
+	if cfg.Upstream.MaxConcurrencyPerAccount != 0 {
+		t.Fatalf("默认每账号应不限并发, got %d", cfg.Upstream.MaxConcurrencyPerAccount)
 	}
-	// 自动集成路径也要带上顶层值（否则 CloneForPlatform 后变成 0 = 不限）。
+	// 自动集成路径继承顶层值。
 	if pls := cfg.ResolvePlatforms(); pls[0].MaxConcurrencyPerAccount != 0 {
 		t.Fatalf("自动集成不应覆盖顶层值, got %+v", pls[0])
 	}
-	if got := cfg.CloneForPlatform(cfg.ResolvePlatforms()[0]); got.Upstream.MaxConcurrencyPerAccount != 4 {
-		t.Fatalf("未声明平台级上限时应回退顶层 4, got %d", got.Upstream.MaxConcurrencyPerAccount)
+	if got := cfg.CloneForPlatform(cfg.ResolvePlatforms()[0]); got.Upstream.MaxConcurrencyPerAccount != 0 {
+		t.Fatalf("未声明平台级上限时应默认不限并发, got %d", got.Upstream.MaxConcurrencyPerAccount)
 	}
 	// 平台级显式覆盖。
 	cfg.Upstream.Platforms = []PlatformConfig{{ID: "workbuddy", Sanitize: true, MaxConcurrencyPerAccount: 9}}
@@ -151,6 +150,35 @@ func TestConcurrencyDefaultAndPlatformOverride(t *testing.T) {
 	cfg3.Upstream.MaxConcurrencyPerAccount = 0
 	if got := cfg3.CloneForPlatform(cfg3.ResolvePlatforms()[0]); got.Upstream.MaxConcurrencyPerAccount != 0 {
 		t.Fatalf("0 应表示不限并发, got %d", got.Upstream.MaxConcurrencyPerAccount)
+	}
+}
+
+// TestConcurrencyFromJSON 验证缺省不限、显式 0 与已有正数配置。
+func TestConcurrencyFromJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{"omitted", `{"upstream":{}}`, 0},
+		{"unlimited", `{"upstream":{"max_concurrency_per_account":0}}`, 0},
+		{"explicit_limit", `{"upstream":{"max_concurrency_per_account":4}}`, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, platform := range cfg.ResolvePlatforms() {
+				if got := cfg.CloneForPlatform(platform).Upstream.MaxConcurrencyPerAccount; got != tc.want {
+					t.Fatalf("platform %s: max concurrency=%d, want %d", platform.ID, got, tc.want)
+				}
+			}
+		})
 	}
 }
 

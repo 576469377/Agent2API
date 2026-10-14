@@ -10,7 +10,7 @@
     "stream_total_timeout_sec": 1800,
     "request_timeout_sec": 60,
     "model_cache_ttl_sec": 1800,
-    "max_concurrency_per_account": 4
+    "max_concurrency_per_account": 0
   },
   "models": {
     "image_limits": {},

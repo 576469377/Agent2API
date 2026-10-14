@@ -93,13 +93,8 @@ type UpstreamConfig struct {
 	RequestTimeoutSec     int `json:"request_timeout_sec"`
 	ModelCacheTTLSec      int `json:"model_cache_ttl_sec"`
 
-	// MaxConcurrencyPerAccount 是每个上游账号的并发上限（0 = 不限，默认 4）。
-	//
-	// 存在的原因：客户端（Claude Code 等）会并发发请求，同一账号上同时压着
-	// 十几个请求时上游极易回 429，而 429 一旦发生就要换号重试，整体反而更慢。
-	// 并发上限把请求排在账号前面（本地排队，不是失败），让每个账号按自己能
-	// 承受的节奏被使用——与 sub2api 的 per-account concurrency limit 同思路。
-	// 号池选号时会优先挑「还有余量」的账号。
+	// MaxConcurrencyPerAccount 是每个上游账号的并发上限，默认 0（不限）。
+	// 显式设为正数时才启用本地排队；该设置在启动装配账号池时读取。
 	MaxConcurrencyPerAccount int `json:"max_concurrency_per_account"`
 }
 
@@ -227,16 +222,13 @@ func Default() Config {
 			// Platform 留空 = 自动集成：启动时逐个探测全部内置平台，
 			// 能登录哪个就集成哪个。显式 -platform 或配置文件里写 platform
 			// 则退回单平台模式。
-			Platform:              "",
-			Sanitize:              true,
-			StreamIdleTimeoutSec:  120,
-			StreamTotalTimeoutSec: 1800,
-			RequestTimeoutSec:     60,
-			ModelCacheTTLSec:      1800,
-			// 每账号 4 并发：单账号被并发打爆是 429 的主要来源，4 足以
-			// 让单个客户端（含其子代理）跑满，又不至于让上游开始限流。
-			// 设 0 关闭（不限并发）。
-			MaxConcurrencyPerAccount: 4,
+			Platform:                 "",
+			Sanitize:                 true,
+			StreamIdleTimeoutSec:     120,
+			StreamTotalTimeoutSec:    1800,
+			RequestTimeoutSec:        60,
+			ModelCacheTTLSec:         1800,
+			MaxConcurrencyPerAccount: 0, // 默认不限制每账号并发。
 		},
 		Log: LogConfig{Level: "info", Format: "text"},
 	}
