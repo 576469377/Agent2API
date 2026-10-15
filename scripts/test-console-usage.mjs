@@ -116,3 +116,21 @@ test("live samples distinguish calibrated token estimates from actual character 
  const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("生成速度 · 估算"));assert.ok(html.includes("≈ 25"));
  assert.ok(liveUsageView(data,"",points,{...ui,timestamp:()=>"time"}).includes("Token 待结算"));
 });
+
+
+test("live inspection keeps request details available without confusing estimates, errors or idle state",()=>{
+ const data={sampled_at:new Date(now).toISOString(),in_flight:1,active:[{platform:"global",model:'<img src=x onerror=alert(1)>',output_characters:17,characters_per_second:2}],last_completed:null};
+ const html=liveUsageView(data,"",[],{...ui,timestamp:()=>"time"});
+ assert.ok(html.includes('<details id="liveRequestDetails"'));
+ assert.ok(html.includes('id="liveRequestToggle"'));
+ assert.ok(!html.includes('<img src=x'));
+ assert.ok(html.includes('&lt;img'));
+ assert.ok(html.includes('Token 待结算'));
+ assert.ok(!html.includes('≈ 17'));
+ const idle=liveUsageView({...data,in_flight:0,active:[]},"",[],{...ui,timestamp:()=>"time"});
+ assert.ok(!idle.includes('id="liveRequestDetails"'));
+ assert.ok(idle.includes('暂无进行中的请求'));
+ const failed=liveUsageView(data,"Unavailable",[],{...ui,timestamp:()=>"time"});
+ assert.ok(failed.includes('data-action="refresh-live"'));
+ assert.ok(!failed.includes('live-request-details'));
+});
