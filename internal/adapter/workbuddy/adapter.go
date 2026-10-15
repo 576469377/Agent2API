@@ -377,29 +377,20 @@ func (a *Adapter) String() string {
 // 编译期断言。
 var _ adapter.Adapter = (*Adapter)(nil)
 
-// Describe 实现 adapter.Describer，向控制台暴露运行时信息。
+// Describe 只读取本地状态。上游目录由 ListModels 显式更新，不能让状态
+// 轮询触发联网、凭证刷新或等待上游超时。active 表示已配置该适配器。
 func (a *Adapter) Describe() adapter.Description {
 	desc := adapter.Description{
 		ID:      a.Name(),
 		Name:    a.Name(),
 		BaseURL: a.cfg.BaseURL,
 		Account: a.CredentialInfo(),
+		Status:  "active",
 	}
-	// 用一次模型探测判定健康状态：控制台需要知道上游是否真的可达。
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	models, err := a.ListModels(ctx)
-	switch {
-	case err != nil:
-		desc.Status = "error"
-		desc.Notes = "上游不可达: " + err.Error()
-	case len(models) == 0:
-		desc.Status = "degraded"
-		desc.Notes = "上游返回空模型清单"
-	default:
-		desc.Status = "active"
-		desc.Models = len(models)
-	}
+	// Count only, including a cached catalogue whose TTL has elapsed.
+	a.models.mu.RLock()
+	desc.Models = len(a.models.models)
+	a.models.mu.RUnlock()
 	return desc
 }
 

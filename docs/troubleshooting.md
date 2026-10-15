@@ -59,6 +59,14 @@ python scripts/diagnose-console.py --config config.json
 
 统计文件损坏时，新版保留原文件并写入独立的 `.recovery` 文件，状态可在「用量分析 → 统计口径」查看。跨目录部署、容器未挂载旧数据目录、关闭持久化或旧文件已被覆盖，需要根据诊断结果找回原数据 / 备份，不能仅凭账号登录态恢复。
 
+累计量仍在、但 `usage.dates` 与当前文件都只有最近一天时，可进一步查找旧存档：
+
+```powershell
+python scripts/diagnose-console.py --config config.json --scan-history
+```
+
+此选项只检查项目根目录及 `bin / logs / data / backups / archive` 直属目录中的指标快照与反代日志，不遍历凭证目录、不修改文件。输出 `tracking_since`、`legacy_requests` 和实际逐日调用数以区分旧累计量与新采集日期；日志只输出完成行数量及日期，不输出原始行、账号或错误。日志日期保留其原时区，导入时仍需明确配置日志时区。若找到旧文件，按[历史恢复配置](console.md#恢复本地旧统计存档)只读导入；没有旧日期数据的累计计数无法还原逐日 Token。
+
 ## 会话没有固定账号
 
 会话路由键按顺序使用请求头、body 的 `metadata.user_id` / `user`，再回退到「系统提示 + 首条用户消息」哈希。前置代理若丢弃会话头，可能影响亲和；例如 Nginx 默认丢弃带下划线的请求头，需按自己的代理配置处理 `session_id`。账号不可用时也可能换号，亲和不保证所有请求永久固定在同一账号。

@@ -39,6 +39,9 @@ def usage_summary(data):
     return {"requests": number(data.get("total")),
             "tokens": number(data.get("input_tokens")) + number(data.get("output_tokens")),
             "daily_history": "usage_history" in data, "dates": days,
+            "tracking_since": stamp(history.get("tracking_since")),
+            "legacy_requests": number(history.get("legacy_requests")),
+            "daily_recorded_requests": sum(number(row.get("total")) for day in history.get("days", []) for row in day.get("models", []) if isinstance(row, dict)),
             "recent_records": len(data.get("recent") or []), "recent_dates": recent_dates,
             "saved_at": number(data.get("saved_at"))}
 
@@ -93,6 +96,53 @@ def file_summary(path):
     return out
 
 
+def history_candidates(root):
+    """Bounded scan of known data directories; never traverse credential folders."""
+    candidates = set()
+    root = root.resolve()
+    for name in ("", "bin", "logs", "data", "backups", "archive"):
+        directory = root / name
+        if directory.is_symlink() or not directory.is_dir():
+            continue
+        try:
+            for index, path in enumerate(directory.iterdir()):
+                if index >= 2000:
+                    break
+                filename = path.name.lower()
+                if path.is_symlink() or not path.is_file() or any(word in filename for word in ("credential", "session", "config", "auth")):
+                    continue
+                if ("metrics" in filename and ".json" in filename) or re.fullmatch(r"(?:proxy|agent2api)[\w.-]*\.(?:log|out)", filename):
+                    candidates.add(path.resolve())
+        except OSError:
+            continue
+    return sorted(candidates)
+
+
+def log_summary(path):
+    out = {"file": str(path.resolve()), "kind": "completion_log"}
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(LIMIT + 1)
+        if len(raw) > LIMIT:
+            return dict(out, read_status="too_large")
+        dates = Counter()
+        for line in raw.splitlines():
+            # Older completion logs have ok/dur_ms but no status field.
+            if b"protocol=" not in line or b"model=" not in line:
+                continue
+            match = re.search(rb"\[agent2api\] (\d{4}/\d{2}/\d{2}) \d{2}:\d{2}:\d{2}", line)
+            if match:
+                try:
+                    date = datetime.strptime(match[1].decode("ascii"), "%Y/%m/%d").date().isoformat()
+                    dates[date] += 1
+                except ValueError:
+                    continue
+        out.update(read_status="ok", completion_lines=sum(dates.values()), dates_in_log_timezone=dict(sorted(dates.items())))
+    except OSError:
+        out["read_status"] = "unreadable"
+    return out
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -128,6 +178,7 @@ def main():
     parser.add_argument("--url", help="Gateway URL; default uses local config")
     parser.add_argument("--metrics-file", help="Actual -metrics-file override, if used")
     parser.add_argument("--timeout", type=float, default=25)
+    parser.add_argument("--scan-history", action="store_true", help="Read local metrics backups and completion logs in known project data directories")
     args = parser.parse_args()
     config_path = Path(args.config)
     try:
@@ -140,7 +191,7 @@ def main():
     except (OSError, ValueError, TypeError, AttributeError):
         parser.error("Invalid configuration or URL (details omitted)")
     key = (cfg.get("auth") or {}).get("api_key", "")
-    report = {"format": 1, "working_directory": str(Path.cwd()), "config_exists": config_path.is_file(), "endpoints": {}}
+    report = {"format": 2, "working_directory": str(Path.cwd()), "config_exists": config_path.is_file(), "endpoints": {}}
     metrics = {}
     for endpoint in ("/api/status", "/api/metrics", "/api/models", "/api/accounts/manage"):
         data, meta = get_json(base, endpoint, key, args.timeout)
@@ -162,7 +213,10 @@ def main():
             if name:
                 paths.add(Path(name))
     paths.update(Path(name) for name in cfg.get("metrics_history_imports", []) if str(name).lower().endswith(".json"))
-    report["local_statistics"] = [file_summary(path) for path in sorted(paths)]
+    report["local_statistics"] = [file_summary(path) for path in sorted({path.resolve() for path in paths})]
+    if args.scan_history:
+        candidates = history_candidates(Path.cwd())
+        report["history_scan"] = {"truncated": len(candidates) > 200, "files": [file_summary(path) if ".json" in path.name.lower() else log_summary(path) for path in candidates[:200]]}
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

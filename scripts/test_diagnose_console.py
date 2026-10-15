@@ -43,6 +43,29 @@ class ConsoleDiagnosticsTest(unittest.TestCase):
             path.write_bytes(b'{"broken":')
             self.assertEqual(diagnose.file_summary(path)["read_status"], "unreadable_or_invalid")
 
+    def test_legacy_coverage_is_separate_from_lifetime_and_recent(self):
+        summary = diagnose.usage_summary({"total": 22000, "usage_history": {"legacy_requests": 21000, "tracking_since": "2026-10-15T01:00:00Z", "days": [{"date": "2026-10-15", "models": [{"total": 1200}]}]}})
+        self.assertEqual(summary["requests"], 22000)
+        self.assertEqual(summary["legacy_requests"], 21000)
+        self.assertEqual(summary["daily_recorded_requests"], 1200)
+
+    def test_history_scan_stays_in_named_data_directories_and_omits_log_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "auths").mkdir()
+            archive = root / "bin" / "old-metrics.json.backup"
+            archive.write_text('{"total":123}', encoding="utf-8")
+            (root / "auths" / "metrics.json").write_text('{}', encoding="utf-8")
+            (root / "bin" / "metrics-credentials.json").write_text('{}', encoding="utf-8")
+            log = root / "bin" / "proxy.stdout.log"
+            log.write_text('[agent2api] 2026/10/13 12:00:00.123456 protocol=chat model=m status=200 account=private-account error=private-key\n[agent2api] 2026/10/12 12:00:00 protocol=chat model=m ok=true dur_ms=42\nnot a completion private-key\n', encoding="utf-8")
+            self.assertEqual(diagnose.history_candidates(root), sorted([archive.resolve(), log.resolve()]))
+            summary = diagnose.log_summary(log)
+            self.assertEqual(summary["dates_in_log_timezone"], {"2026-10-12": 1, "2026-10-13": 1})
+            self.assertEqual(summary["completion_lines"], 2)
+            self.assertNotIn("private-", json.dumps(summary))
+
 
 if __name__ == "__main__":
     unittest.main()
