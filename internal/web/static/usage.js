@@ -37,7 +37,7 @@ export function buildUsage(metrics, { range = "7", platform = "all", now = Date.
     const models = new Map();
     for (const row of day.models || []) {
       platforms.add(row.platform || "");
-      if (platform !== "all" && (row.platform || "") !== platform) continue;
+      if (platform !== "all" && (row.platform || "") !== (platform === "unknown" ? "" : platform)) continue;
       const key = modelKey(row.platform, row.model), c = models.get(key) || {
         key, platform: row.platform || "", model: row.model || "", total: 0, ok: 0, failed: 0,
         input_tokens: 0, output_tokens: 0, duration_sum: 0, unknown_token_requests: 0, tokens: 0, color: modelColor(key) };

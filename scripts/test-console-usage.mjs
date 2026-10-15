@@ -99,6 +99,8 @@ test("recovered activity is visible but missing token records never become a fal
  const usage=buildUsage(metrics,state);assert.equal(usage.activeDays,1);assert.equal(usage.unknown_token_requests,5);
  assert.equal(curveSeries(usage,"tokens")[0].values[2],null);assert.equal(curveSeries(usage,"total")[0].values[2],5);
  const html=usageView(metrics,state,ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 明细未留存"));
+ const unrecorded={usage_history:{...metrics.usage_history,days:[{date:"2026-10-11",models:[{...row("","m",0,5),unknown_token_requests:5}]}]}};
+ assert.equal(buildUsage(unrecorded,{...state,platform:"unknown"}).total,5);
 });
 test("live samples distinguish calibrated token estimates from actual character speed and reject duplicate snapshots",()=>{
  const data={sampled_at:new Date(now).toISOString(),in_flight:1,active:[{id:1,platform:"p",model:"m",output_characters:100,characters_per_second:20}],last_completed:{output_tokens:40,gen_ms:2000,time:new Date(now-DAY).toISOString()}};
