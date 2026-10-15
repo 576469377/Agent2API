@@ -101,3 +101,17 @@ export function curvePath(values, x, y) {
   values.forEach((value, i) => { if (value == null) flush(); else points.push([x(i), y(value)]); }); flush();
   return segments.join(" ");
 }
+
+// Lifetime counters never depend on a date filter or the bounded request log.
+export function lifetimeUsage(metrics) {
+  if (!metrics) return null;
+  const input = count(metrics.input_tokens), output = count(metrics.output_tokens);
+  return { total: count(metrics.total), input, output, tokens: input + output, failed: count(metrics.failed) };
+}
+export function usageComposition(rows, metric = "tokens", limit = 5) {
+  const value = row => metric === "total" ? count(row.total) : count(row.input_tokens) + count(row.output_tokens);
+  const ranked = (rows || []).map(row => ({ ...row, value: value(row) })).sort((a,b) => b.value - a.value || String(a.key).localeCompare(String(b.key)));
+  const total = ranked.reduce((sum,row) => sum + row.value, 0);
+  const top = ranked.filter(row => row.value > 0).slice(0,limit);
+  return { total, top, other: total - top.reduce((sum,row) => sum + row.value,0) };
+}

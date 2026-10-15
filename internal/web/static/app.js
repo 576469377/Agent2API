@@ -15,8 +15,8 @@ import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend,
 import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
-import { buildUsage, curveSeries } from "./usage.js";
-import { usageView, usageTooltip } from "./usage-view.js";
+import { buildUsage, curveSeries, usageComposition } from "./usage.js";
+import { usageView, usageTooltip, lifetimeUsageView } from "./usage-view.js";
 import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState } from "./operations.js";
 
 const $ = (id) => document.getElementById(id);
@@ -52,7 +52,7 @@ const s = {
   refreshEvery: [0, 10, 30, 60].includes(Number(saved("agent2api_refresh", "10"))) ? Number(saved("agent2api_refresh", "10")) : 10,
   lastPoll: Date.now(),
   usageInsights: { range: "7", platform: "all", metric: "tokens", heatMetric: "tokens", hidden: new Set() },
-  analytics: { dimension: "by_model", sort: "total", query: "" },
+  analytics: { dimension: "by_model", metric: "tokens", sort: "tokens", query: "" },
   connectionModel: "",
   connectionProtocol: "openai-chat",
   models: {
@@ -460,7 +460,7 @@ function draw(force = false) {
     scroll = { left: scrollContainer?.scrollLeft || 0, top: scrollContainer?.scrollTop || 0 },
     scrollFocused = active === scrollContainer,
     advancedOpen = samePage ? $("requestAdvanced")?.open : undefined;
-  const usageDetails = samePage && s.page === "analytics" ? [...document.querySelectorAll(".usage-model-details, .usage-lifetime")].filter(el => el.open).map(el => el.className) : [];
+  const usageDetails = samePage && s.page === "analytics" ? [...document.querySelectorAll(".usage-model-details")].filter(el => el.open).map(el => el.className) : [];
   const usageFocus = samePage && s.page === "analytics" ? active?.dataset : null;
   const usagePoint = usageFocus?.kind === "usage" ? { point: usageFocus.chartPoint, width: usageFocus.viewWidth } : null;
   const usageLegend = usageFocus?.action === "usage-curve" ? usageFocus.value : null;
@@ -636,10 +636,11 @@ function platformTabs(kind, selected) {
   return `<div class="segmented" aria-label="${e(L("平台筛选", "Platform filter"))}">${[["all", L("全部平台", "All platforms")], ...platforms().map((p) => [p.id, regionName(p.id)])].map(([id, label]) => `<button data-action="${kind}-platform" data-value="${e(id)}" class="${selected === id ? "active" : ""}" aria-pressed="${selected === id}">${e(label)}<span class="count">${id === "all" ? all.length : all.filter((item) => item.platform === id).length}</span></button>`).join("")}</div>`;
 }
 function analyticsPage() {
-  const m = s.cache.metrics || {};
-  return `${usageView(s.cache.metrics, s.usageInsights, { e, L, n, compact, icon })}<details class="usage-lifetime"><summary>${e(L("累计统计明细", "Lifetime aggregate details"))}<span>${n(m.total)} ${e(L("次调用", "requests"))} · ${compact((m.input_tokens || 0) + (m.output_tokens || 0))} tokens · ${e(L("独立于上方时间与平台筛选", "Independent of the range and platform above"))}</span></summary>
-  <section class="card analytics-card">${cardHead(L("用量分布", "Usage distribution"), L("累计统计，不受最近 200 条记录的限制", "Cumulative aggregates, beyond the 200-record sample"), `<div class="segmented">${[["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]].map(([key, name]) => `<button data-action="analytics-dimension" data-value="${key}" class="${s.analytics.dimension === key ? "active" : ""}" aria-pressed="${s.analytics.dimension === key}">${e(name)}</button>`).join("")}</div>`)}<div id="analyticsDistribution"></div></section>
-  <div class="toolbar"><div class="toolbar-group">${search("analyticsSearch", s.analytics.query, L("搜索统计项…", "Search usage groups…"))}<select class="select" id="analyticsSort" aria-label="${e(L("用量排序", "Usage sort"))}">${options([["total", L("调用量优先", "Most requests")], ["tokens", L("Token 用量优先", "Most tokens")], ["failed", L("失败量优先", "Most failures")], ["avg_latency_ms", L("耗时优先", "Longest duration")]], s.analytics.sort)}</select></div>${button(L("导出统计", "Export usage"), "export-usage", "", "requests")}</div><section class="card" id="analyticsResults"></section><p class="scope-note">${e(L("统计按网关原始模型名与账号标识聚合；同名跨平台项可能合并。点击查看记录可进一步按平台筛选，记录页只保留最近 200 条。", "Aggregates use original model names and account labels; identical names across platforms can be combined. Request drill-down retains the latest 200 records."))}</p></details>`;
+  return `${lifetimeUsageView(s.cache.metrics, { e, L, n, compact })}
+  <section class="card analytics-card lifetime-distribution">${cardHead(L("历史累计用量分布", "Lifetime usage breakdown"), L("全部已保存分组 · 与下方每日趋势独立", "All saved groups · independent of the daily trends below"), `<div class="analytics-chart-controls"><div class="segmented" aria-label="${e(L("累计图表指标", "Lifetime chart metric"))}">${[["tokens", "Token"], ["total", L("调用", "Requests")]].map(([key, name]) => `<button data-action="analytics-metric" data-value="${key}" class="${s.analytics.metric === key ? "active" : ""}" aria-pressed="${s.analytics.metric === key}">${e(name)}</button>`).join("")}</div><div class="segmented" aria-label="${e(L("累计分组维度", "Lifetime grouping"))}">${[["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]].map(([key, name]) => `<button data-action="analytics-dimension" data-value="${key}" class="${s.analytics.dimension === key ? "active" : ""}" aria-pressed="${s.analytics.dimension === key}">${e(name)}</button>`).join("")}</div></div>`)}<div id="analyticsDistribution"></div></section>
+  ${usageView(s.cache.metrics, s.usageInsights, { e, L, n, compact, icon })}
+  <section class="usage-lifetime-table"><div class="usage-controls"><div><span class="usage-section-eyebrow">LIFETIME DETAILS</span><h2>${e(L("历史累计明细", "Lifetime usage details"))}</h2><p>${e(L("全部已保存分组，不受上方日期与平台筛选影响", "All saved groups, independent of date and platform filters above"))}</p></div></div>
+  <div class="toolbar"><div class="toolbar-group">${search("analyticsSearch", s.analytics.query, L("搜索统计项…", "Search usage groups…"))}<select class="select" id="analyticsSort" aria-label="${e(L("用量排序", "Usage sort"))}">${options([["total", L("调用量优先", "Most requests")], ["tokens", L("Token 用量优先", "Most tokens")], ["failed", L("失败量优先", "Most failures")], ["avg_latency_ms", L("耗时优先", "Longest duration")]], s.analytics.sort)}</select></div>${button(L("导出统计", "Export usage"), "export-usage", "", "requests")}</div><section class="card" id="analyticsResults"></section><p class="scope-note">${e(L("统计按网关原始模型名与账号标识聚合；同名跨平台项可能合并。点击查看记录可进一步按平台筛选，记录页只保留最近 200 条。", "Aggregates use original model names and account labels; identical names across platforms can be combined. Request drill-down retains the latest 200 records."))}</p></section>`;
 }
 function usageRows() {
   const q = s.analytics.query.trim().toLowerCase();
@@ -648,15 +649,18 @@ function usageRows() {
 function updateAnalyticsTable() {
   if (!$("analyticsResults")) return;
   const all = s.cache.metrics?.[s.analytics.dimension] || [], rows = usageRows();
-  const total = all.reduce((sum, row) => sum + row.total, 0);
+  const composition = usageComposition(all, s.analytics.metric);
+  const { total, top, other } = composition;
+  const value = row => s.analytics.metric === "tokens" ? (row.input_tokens || 0) + (row.output_tokens || 0) : row.total;
   const colors = ["#6384f4", "#37b7a5", "#a087ee", "#e5ae56", "#dc798e", "#7387a3"];
-  const top = sortUsage(all).slice(0, 5), other = total - top.reduce((sum, row) => sum + row.total, 0);
-  const parts = [...top.map((row) => row.total), ...(other > 0 ? [other] : [])];
+  const parts = [...top.map((row) => row.value), ...(other > 0 ? [other] : [])];
   let offset = 0;
   const gradient = parts.map((count, index) => { const start = offset; offset += count / total * 100; return `${colors[index]} ${start}% ${offset}%`; }).join(",");
+  const shareLabel = amount => amount > 0 && amount / total * 100 < 0.1 ? "&lt;0.1%" : ((amount / total) * 100).toFixed(1) + "%";
+  const metricLabel = s.analytics.metric === "tokens" ? L("累计 Token", "Lifetime tokens") : L("累计调用", "Lifetime requests");
   const name = (row) => s.analytics.dimension === "by_protocol" ? protocolName(row.key) : row.key || L("未记录", "Unrecorded");
-  $("analyticsDistribution").innerHTML = total ? `<div class="distribution-layout"><div class="usage-donut" style="--distribution:conic-gradient(${gradient})" role="img" aria-label="${e(L("累计调用占比分布", "Cumulative request distribution"))}"><div><span>${e(L("累计调用", "Requests"))}</span><strong>${compact(total)}</strong></div></div><div class="distribution-legend">${top.map((row, i) => `<button data-action="usage-requests" data-value="${e(row.key)}" data-kind="${s.analytics.dimension}"><i style="background:${colors[i]}"></i><span class="truncate mono" title="${e(name(row))}">${e(name(row))}</span><strong>${n(row.total)}</strong><span>${((row.total / total) * 100).toFixed(1)}%</span>${icon("chevron")}</button>`).join("")}${other ? `<div class="legend-other"><i style="background:${colors[5]}"></i><span>${e(L("其他", "Other"))}</span><strong>${n(other)}</strong><span>${((other / total) * 100).toFixed(1)}%</span></div>` : ""}</div></div>` : empty(L("尚无统计数据", "No usage data"), L("请求完成后显示真实用量。", "Completed requests populate usage."), "activity");
-  $("analyticsResults").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${e(L("统计项", "Group"))}</th><th class="num">${e(L("调用次数", "Requests"))}</th><th class="num">${e(L("成功率", "Success rate"))}</th><th class="num">${e(L("平均耗时", "Avg duration"))}</th><th class="num">${e(L("输入 Token", "Input tokens"))}</th><th class="num">${e(L("输出 Token", "Output tokens"))}</th><th class="num">${e(L("失败", "Failed"))}</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td class="usage-label mono" title="${e(name(row))}">${e(name(row))}<div class="usage-bar"><i style="width:${total ? row.total / total * 100 : 0}%"></i></div></td><td class="num numeric">${n(row.total)}</td><td class="num"><span class="${row.failed ? "negative" : "positive"}">${row.total ? (row.success_rate * 100).toFixed(1) + "%" : "—"}</span></td><td class="num mono">${e(duration(row.total ? row.avg_latency_ms : null))}</td><td class="num numeric">${n(row.input_tokens)}</td><td class="num numeric">${n(row.output_tokens)}</td><td class="num numeric ${row.failed ? "negative" : "muted"}">${n(row.failed)}</td><td><button class="button small" data-action="usage-requests" data-kind="${s.analytics.dimension}" data-value="${e(row.key)}">${e(L("记录", "Logs"))}${icon("arrow")}</button></td></tr>`).join("")}</tbody></table></div><div class="table-footer">${rows.length} ${e(L("个统计项", "groups"))} · ${e(L("累计统计", "Cumulative aggregates"))}</div>` : empty(L("没有匹配的统计项", "No matching groups"));
+  $("analyticsDistribution").innerHTML = total ? `<div class="distribution-layout"><div class="usage-donut" style="--distribution:conic-gradient(${gradient})" role="img" aria-label="${e(L("历史累计用量占比分布", "Lifetime usage share"))}"><div><span>${e(metricLabel)}</span><strong>${compact(total)}</strong></div></div><div class="distribution-legend">${top.map((row, i) => `<button data-action="usage-requests" data-value="${e(row.key)}" data-kind="${s.analytics.dimension}"><i style="background:${colors[i]}"></i><span class="truncate mono" title="${e(name(row))}">${e(name(row))}</span><strong>${n(row.value)}</strong><span>${shareLabel(row.value)}</span>${icon("chevron")}</button>`).join("")}${other ? `<div class="legend-other"><i style="background:${colors[5]}"></i><span>${e(L("其他", "Other"))}</span><strong>${n(other)}</strong><span>${shareLabel(other)}</span></div>` : ""}</div></div>` : empty(L("尚无统计数据", "No usage data"), L("请求完成后显示真实用量。", "Completed requests populate usage."), "activity");
+  $("analyticsResults").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${e(L("统计项", "Group"))}</th><th class="num">${e(L("调用次数", "Requests"))}</th><th class="num">${e(L("成功率", "Success rate"))}</th><th class="num">${e(L("平均耗时", "Avg duration"))}</th><th class="num">${e(L("输入 Token", "Input tokens"))}</th><th class="num">${e(L("输出 Token", "Output tokens"))}</th><th class="num">${e(L("失败", "Failed"))}</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td class="usage-label mono" title="${e(name(row))}">${e(name(row))}<div class="usage-bar"><i style="width:${total ? value(row) / total * 100 : 0}%"></i></div></td><td class="num numeric">${n(row.total)}</td><td class="num"><span class="${row.failed ? "negative" : "positive"}">${row.total ? (row.success_rate * 100).toFixed(1) + "%" : "—"}</span></td><td class="num mono">${e(duration(row.total ? row.avg_latency_ms : null))}</td><td class="num numeric">${n(row.input_tokens)}</td><td class="num numeric">${n(row.output_tokens)}</td><td class="num numeric ${row.failed ? "negative" : "muted"}">${n(row.failed)}</td><td><button class="button small" data-action="usage-requests" data-kind="${s.analytics.dimension}" data-value="${e(row.key)}">${e(L("记录", "Logs"))}${icon("arrow")}</button></td></tr>`).join("")}</tbody></table></div><div class="table-footer">${rows.length} ${e(L("个统计项", "groups"))} · ${e(L("累计统计", "Cumulative aggregates"))}</div>` : empty(L("没有匹配的统计项", "No matching groups"));
 }
 function connectionPage() {
   const selected = models().find((m) => routeId(m) === s.connectionModel) || models().find((m) => m.routing_id) || models()[0];
@@ -1597,6 +1601,12 @@ document.addEventListener("click", async (event) => {
         modal(`${day.date} · UTC`, `<p class="scope-note">${e(note)}</p><div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(`${m.platform || L("未记录平台", "Unrecorded")}/${m.model}`)}</strong><small>${n(m.total)} ${e(L("次调用", "requests"))} · ${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}</small></div><b>${compact(m.tokens)} tokens</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
         return;
       }
+      case "lifetime-details":
+        $("analyticsResults")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      case "analytics-metric":
+        s.analytics.metric = value === "total" ? "total" : "tokens";
+        return draw();
       case "analytics-dimension":
         s.analytics.dimension = value;
         return draw();

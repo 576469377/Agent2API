@@ -111,3 +111,16 @@ button.usage-heat-cell:hover { outline:1px solid var(--text); outline-offset:1px
   .usage-chart-shell { padding:0 10px 0 0; }
   .usage-lifetime > summary { flex-direction:column; align-items:flex-start; gap:4px; }
 }
+
+/* Lifetime counters remain visible regardless of daily-history availability. */
+.analytics-chart-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.usage-lifetime-overview { margin-bottom:22px; }
+.usage-lifetime-overview .usage-kpi small { overflow-wrap:anywhere; }
+.lifetime-distribution { margin-bottom:32px; }
+.usage-workspace + .usage-lifetime-table { border-top:1px solid var(--border); padding-top:23px; }
+.usage-coverage-banner { display:flex; align-items:flex-start; gap:10px; padding:14px 17px; border:1px solid var(--border); background:var(--surface); border-radius:9px; margin-bottom:18px; color:var(--muted); }
+.usage-coverage-banner.partial { border-color:color-mix(in srgb,var(--amber) 28%,var(--border)); background:var(--amber-soft); }
+.usage-coverage-banner > .icon { flex:none; width:15px; height:15px; margin-top:2px; }
+.usage-coverage-banner strong { font-size:11px; font-weight:500; color:var(--text); }
+.usage-coverage-banner p { margin:4px 0 0; font-size:10px; }
+@media (max-width:640px) { .lifetime-distribution .card-head { align-items:flex-start; flex-direction:column; } }

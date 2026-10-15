@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey } from "../internal/web/static/usage.js";
-import { usageView, usageTooltip } from "../internal/web/static/usage-view.js";
+import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition } from "../internal/web/static/usage.js";
+import { usageView, usageTooltip, lifetimeUsageView } from "../internal/web/static/usage-view.js";
 import { escapeHTML, number, compact, icon } from "../internal/web/static/core.js";
 const now=Date.parse("2026-10-15T10:00:00Z");
 const row=(platform,model,tokens,total=1)=>({platform,model,total,ok:total,failed:0,input_tokens:tokens,output_tokens:0});
@@ -53,4 +53,29 @@ test("charts expose token denominator, partial coverage and escaped model text; 
  assert.ok(!html.includes("<img src=x"));assert.ok(html.includes("&lt;img"));
  assert.ok(usageTooltip(fixture,state,1,ui).includes("150"));
  assert.ok(usageTooltip(fixture,{...state,range:"30"},0,ui).includes("历史未保留"));
+});
+
+test("lifetime usage survives daily filters and the 200-request buffer without adding reasoning twice",()=>{
+ const metrics={total:47249,input_tokens:325755877,output_tokens:6203673,reasoning_tokens:1000000,recent:Array.from({length:200},()=>({time:new Date(now).toISOString(),model:"recent",input_tokens:1,ok:true}))};
+ const totals=lifetimeUsage(metrics);
+ assert.equal(totals.tokens,331959550);assert.equal(totals.total,47249);
+ assert.equal(buildUsage(metrics,state).tokens,200);
+ assert.equal(buildUsage(metrics,{...state,range:"30",platform:"missing"}).tokens,0);
+ assert.deepEqual(lifetimeUsage(metrics),totals);
+ const html=lifetimeUsageView(metrics,ui);
+ assert.ok(html.includes("331,959,550"));assert.ok(html.includes('data-lifetime="total"'));
+ assert.ok(!html.includes("<details"));assert.ok(html.includes("不受最近 200 条日志限制"));
+ assert.equal(lifetimeUsage(undefined),null);
+ const daily=usageView(metrics,state,ui);
+ assert.ok(daily.includes("样本 Token"));assert.ok(daily.includes("留存样本"));
+ assert.ok(daily.includes("完整历史累计请看页面上方"));
+});
+test("lifetime token composition uses all persisted groups and remains distinct from request shares",()=>{
+ const groups=Array.from({length:8},(_,i)=>({key:"m"+i,total:8-i,input_tokens:i*10,output_tokens:10}));
+ const before=JSON.stringify(groups),tokens=usageComposition(groups,"tokens"),calls=usageComposition(groups,"total");
+ assert.equal(tokens.total,360);assert.equal(tokens.top[0].key,"m7");
+ assert.equal(calls.total,36);assert.equal(calls.top[0].key,"m0");
+ assert.equal(tokens.top.reduce((s,r)=>s+r.value,0)+tokens.other,tokens.total);
+ assert.equal(JSON.stringify(groups),before);
+ assert.deepEqual(usageComposition([{key:"empty",total:10}],"tokens"),{total:0,top:[],other:0});
 });
