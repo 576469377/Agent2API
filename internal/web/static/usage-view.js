@@ -15,8 +15,7 @@ export function usageMethodologyView(metrics, state, ui) {
   const { e, L, n } = ui, usage = buildUsage(metrics, state);
   if (!usage) return "";
   const item = (title, body) => `<div><dt>${e(title)}</dt><dd>${e(body)}</dd></div>`;
-  const sources = usage.sources || [];
-  const recovered = sources.reduce((sum, source) => sum + source.imported_requests, 0);
+  const snapshots = usage.sources.filter(source => source.kind === "snapshot" && source.snapshot_requests > 0);
   const started = new Date(usage.trackingSince).toISOString().replace("T", " ").slice(0, 19);
   return `<dl class="usage-methodology">
     ${item(L("统计范围", "Scope"), L("总览与累计明细采用网关保存的累计指标。时间与平台筛选应用于每日用量、趋势和模型占比。", "Overview and lifetime details use saved gateway counters. Date and platform filters apply to daily usage, trends and model shares."))}
@@ -25,7 +24,7 @@ export function usageMethodologyView(metrics, state, ui) {
     ${item(L("数据覆盖", "Coverage"), L("“部分记录”表示该时段的记录覆盖不完整；“无数据”表示该日期缺少记录。缺少 Token 的调用保留调用次数，曲线在缺失日期处断开。", "Partial records indicate incomplete coverage for that period. No data indicates missing date records. Calls without tokens retain their request counts; token curves have gaps on those dates."))}
     ${item(L("生成速度", "Generation speed"), L("实时输出按最近 3 秒的字符数计算，自动刷新时每秒采样。同平台、同模型有已完成样本时，按字符 / Token 比例估算并标记 ≈；最终 Token 采用上游用量。", "Live output uses characters in the last 3 seconds, sampled every second during auto-refresh. Completed samples for the same platform/model calibrate token estimates marked ≈. Final tokens use upstream usage."))}
     ${item(L("累计分组", "Lifetime grouping"), L("累计明细按原始模型名、协议或账号标识分组。同名项合并展示；每日用量按平台与模型分别统计。调用记录保留最近 200 条。", "Lifetime details group by original model name, protocol or account label. Identical names are combined; daily usage separates platforms and models. Request logs retain the latest 200 entries."))}
-  </dl>${sources.length ? `<section class="usage-source-details"><h3>${e(L("数据来源", "Data sources"))}</h3><p>${e(L(`已导入 ${n(recovered)} 条历史记录。归档累计按来源独立列示；逐日记录经去重后纳入图表。`, `${n(recovered)} historical records imported. Lifetime archives are listed separately; deduplicated daily records appear in charts.`))}</p>${sources.map(source => `<div class="usage-source-row"><strong>${e(source.name)}</strong><span>${n(source.imported_requests)} ${e(L("条已导入", "imported records"))}</span>${source.kind === "snapshot" && source.snapshot_requests > 0 ? `<small>${e(L("归档累计", "Archived lifetime"))} · ${n(source.snapshot_requests)} ${e(L("次调用", "requests"))} · ${n(source.snapshot_input + source.snapshot_output)} tokens</small>` : ""}</div>`).join("")}</section>` : ""}`;
+  </dl>${snapshots.length ? `<section class="usage-source-details"><h3>${e(L("历史快照", "Historical snapshots"))}</h3>${snapshots.map(source => `<div class="usage-source-row"><strong>${e(source.name)}</strong><span>${n(source.snapshot_requests)} ${e(L("次调用", "requests"))}</span><small>${n(source.snapshot_input + source.snapshot_output)} tokens</small></div>`).join("")}</section>` : ""}`;
 }
 
 export function usageView(metrics, state, ui) {
