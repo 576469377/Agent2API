@@ -568,3 +568,8 @@ body[data-density="compact"] .resource-table .requested-model { display: none; }
   .drawer { width: 100%; padding: 0 18px 20px; }
   .filter-chip > span { max-width: 210px; }
 }
+
+.catalog-coverage { display:flex;gap:12px;flex-wrap:wrap;padding:12px 20px 0;font-size:12px; }
+.catalog-platform-state { display:inline-flex;align-items:center;gap:6px; }
+.cell-scheduling { min-width:160px; }
+.cell-scheduling .cell-sub { white-space:nowrap;font-size:10px;margin-top:4px; }

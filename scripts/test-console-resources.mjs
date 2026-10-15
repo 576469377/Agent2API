@@ -1,11 +1,46 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "../internal/web/static/resources.js";
+import { refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, modelAvailability, loadResources, pageSnapshotTime } from "../internal/web/static/resources.js";
 
 test("Matrix refresh and retry include account states; background polling refreshes the displayed matrix", () => {
   assert.deepEqual(refreshResources("models", true), ["models", "accounts", "matrix"]);
   assert.deepEqual(refreshResources("models", true, true), ["accounts", "matrix"]);
-  assert.deepEqual(refreshResources("models", false, true), ["status"]);
+  assert.deepEqual(refreshResources("models", false, true), ["accounts"]);
+});
+test("Local statistics render before a slow catalogue, including when the catalogue fails", async () => {
+  let release;
+  const slow = new Promise((_, reject) => { release = reject; });
+  const shown = [], failed = [], done = [];
+  const pending = loadResources(["models", "metrics"], {
+    request: key => key === "models" ? slow : Promise.resolve({ total: 123 }),
+    success: (key, data) => shown.push([key, data.total]),
+    failure: key => failed.push(key), settled: key => done.push(key),
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(shown, [["metrics", 123]]);
+  assert.deepEqual(done, ["metrics"]);
+  release(new Error("upstream unavailable"));
+  await pending;
+  assert.deepEqual(failed, ["models"]);
+  assert.deepEqual(done, ["metrics", "models"]);
+});
+test("Model scheduling separates regions, partial cooldowns, account cooldowns and credentials", () => {
+  const received = 100000, now = 110000, model = { platform: "global", id: "same" };
+  const cooling = { platform: "global", healthy: true, model_cooldowns: { same: 60 } };
+  const domestic = { platform: "cn", healthy: true };
+  const state = modelAvailability(model, [cooling, domestic], received, now);
+  assert.equal(state.kind, "limited");
+  assert.equal(state.ready, 0);
+  assert.equal(state.nextReset, 160000);
+  assert.equal(state.limited[0].remaining, 50);
+  const ready = { platform: "global", healthy: true };
+  assert.equal(modelAvailability(model, [cooling, ready], received, now).kind, "partial");
+  assert.equal(modelAvailability(model, [cooling], received, 170000).kind, "awaiting_update");
+  assert.equal(modelAvailability(model, [cooling, ready], received, 170000).kind, "ready");
+  assert.equal(modelAvailability(model, [{ ...cooling, state: "blocked" }], received, now).kind, "unavailable");
+  assert.equal(modelAvailability(model, [{ ...cooling, state: "disabled" }], received, now).kind, "unknown");
+  assert.equal(modelAvailability(model, [{ ...ready, healthy: false, cooldown_secs: 80 }], received, now).kind, "limited");
+  assert.equal(modelAvailability(model, [ready], undefined, now).kind, "unknown");
 });
 test("A redraw of old data cannot restart cooldown or assume the account recovered", () => {
   const received = 100000, now = received + 20000;

@@ -4,12 +4,38 @@ export const pageResources = {
   overview: ["status", "metrics", "accounts", "models"], requests: ["metrics"],
   analytics: ["metrics"], connection: ["config", "models"],
   accounts: ["accounts", "metrics"], platforms: ["platforms", "accounts", "models"],
-  models: ["models"], chat: ["models"], settings: ["config"],
+  models: ["models", "accounts"], chat: ["models"], settings: ["config"],
 };
 export function refreshResources(page, matrix = false, background = false) {
   if (page === "models" && matrix) return background ? ["accounts", "matrix"] : ["models", "accounts", "matrix"];
   if (!background) return pageResources[page] || ["status"];
-  return page === "overview" ? ["status", "metrics", "accounts"] : ["requests", "analytics"].includes(page) ? ["metrics"] : page === "accounts" ? ["accounts", "metrics"] : ["status"];
+  return page === "overview" ? ["status", "metrics", "accounts"] : ["requests", "analytics"].includes(page) ? ["metrics"] : page === "accounts" ? ["accounts", "metrics"] : page === "models" ? ["accounts"] : ["status"];
+}
+
+// Publish each resource when it settles; a slow upstream must not hold local data.
+export async function loadResources(keys, { request, success, failure, settled }) {
+  await Promise.allSettled(keys.map(async key => {
+    try { await success(key, await request(key)); }
+    catch (error) { failure(key, error); }
+    finally { settled(key); }
+  }));
+}
+
+// Model cooldowns belong to a platform/account pair, independent of credit rate.
+export function modelAvailability(model, accounts, receivedAt, now = Date.now()) {
+  const matching = (accounts || []).filter(a => a.platform === model.platform && a.state !== "disabled");
+  const limited = [], ready = [], waiting = [];
+  for (const account of matching) {
+    if (account.state === "blocked" || ["unauthorized", "auth"].includes(account.reason)) continue;
+    const seconds = Math.max(account.cooldown_secs || 0, account.model_cooldowns?.[model.id] || 0);
+    if (seconds > 0) {
+      if (!Number.isFinite(receivedAt)) continue;
+      const remaining = remainingCooldown(seconds, receivedAt, now);
+      (remaining ? limited : waiting).push({ account, remaining, until: receivedAt + seconds * 1000 });
+    } else if (account.healthy) ready.push(account);
+  }
+  const kind = !Number.isFinite(receivedAt) ? "unknown" : limited.length ? ready.length ? "partial" : "limited" : ready.length ? "ready" : waiting.length ? "awaiting_update" : matching.length ? "unavailable" : "unknown";
+  return { kind, ready: ready.length, total: matching.length, limited, waiting, nextReset: limited.length ? Math.min(...limited.map(row => row.until)) : null };
 }
 export function filterModelCatalog(models, filters = {}) {
   const q = (filters.query || "").trim().toLowerCase();

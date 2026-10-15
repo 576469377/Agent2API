@@ -81,3 +81,24 @@ func TestLogImportRequiresTimezoneAndDoesNotInventTokens(t *testing.T) {
 		t.Fatal("same source imported twice")
 	}
 }
+
+func TestModernArchiveFillsMissingDaysAfterTrackingStartWithoutOverlappingLiveDay(t *testing.T) {
+	m := New()
+	m.trackingSince = time.Now().UTC().AddDate(0, 0, -10)
+	today := time.Now().UTC().Format(time.DateOnly)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	m.Record(Record{Time: time.Now(), Platform: "p", Model: "m", OK: true})
+	row := UsageModel{Platform: "p", Model: "m", Total: 500, OK: 500, InputTokens: 900}
+	raw, _ := json.Marshal(persisted{Total: 9999, UsageHistory: &UsageHistory{Timezone: "UTC", Days: []UsageDay{{Date: yesterday, Models: []UsageModel{row}}, {Date: today, Models: []UsageModel{row}}}}})
+	file := filepath.Join(t.TempDir(), "archive.json")
+	if err := os.WriteFile(file, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ImportHistory(file, nil); err != nil {
+		t.Fatal(err)
+	}
+	s := m.Snapshot()
+	if s.Total != 1 || len(s.UsageHistory.Days) != 2 || s.UsageHistory.Days[0].Models[0].Total != 500 || s.UsageHistory.Days[1].Models[0].Total != 1 {
+		t.Fatalf("missing history after tracking start, or live day overwritten: %+v", s.UsageHistory)
+	}
+}

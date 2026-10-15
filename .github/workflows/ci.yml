@@ -24,7 +24,7 @@ jobs:
           node --check internal/web/static/monitor.js
           node --test scripts/test-console-*.mjs
       - name: 请求诊断隐私、单次转发与流式测试
-        run: python3 -m unittest discover -s scripts -p test_diagnose_proxy.py
+        run: python3 -m unittest discover -s scripts -p 'test_diagnose_*.py'
 
   secret-check:
     name: credential guard

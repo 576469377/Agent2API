@@ -52,7 +52,8 @@ type App struct {
 	// metrics 采集请求量、成功率、延迟、token 等运行指标，供控制台展示。
 	metrics *obs.Metrics
 	// metricsFile 是指标落盘路径；空字符串表示不持久化。
-	metricsFile string
+	metricsFile    string
+	metricsStorage *metricsStorage
 	// createdAt 用于 /v1/models 的 created 字段稳定输出。
 	createdAt int64
 	startedAt time.Time
@@ -68,13 +69,7 @@ func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 	}
 	now := time.Now()
 	metrics := obs.New()
-	if cfg.MetricsFile != "" {
-		// 恢复历史累积指标：重启后控制台仍能看到之前的统计。
-		// 失败不致命——宁可本次从零开始，也不阻断启动。
-		if err := metrics.Load(cfg.MetricsFile); err != nil {
-			logger.Printf("加载历史指标失败（已忽略，本次以空统计运行）: %v", err)
-		}
-	}
+	metricsFile, storage := loadMetricsStorage(metrics, cfg.MetricsFile, logger)
 	var historyLocation *time.Location
 	if cfg.MetricsHistoryLogTimezone != "" {
 		if stamp, err := time.Parse("-07:00", cfg.MetricsHistoryLogTimezone); err == nil {
@@ -92,7 +87,7 @@ func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 	}
 	return &App{
 		cfg: cfg, hub: hub, logger: logger,
-		metrics: metrics, metricsFile: cfg.MetricsFile,
+		metrics: metrics, metricsFile: metricsFile, metricsStorage: storage,
 		createdAt: now.Unix(), startedAt: now,
 		logins: newLoginManager(func(f string, a ...any) { logger.Printf(f, a...) }),
 	}
@@ -111,21 +106,14 @@ func (a *App) StartMetricsPersistence(interval time.Duration) {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for range t.C {
-			if err := a.metrics.Save(a.metricsFile); err != nil {
-				a.logger.Printf("指标落盘失败: %v", err)
-			}
+			a.saveMetrics()
 		}
 	}()
 }
 
 // PersistMetricsNow 立即把指标落盘，供关闭流程在退出前调用。
 func (a *App) PersistMetricsNow() {
-	if a.metricsFile == "" {
-		return
-	}
-	if err := a.metrics.Save(a.metricsFile); err != nil {
-		a.logger.Printf("指标落盘失败: %v", err)
-	}
+	a.saveMetrics()
 }
 
 // Handler 返回路由。

@@ -106,7 +106,10 @@ func (a *App) apiAuthHint(w http.ResponseWriter, r *http.Request) {
 // ───────────────────────── 指标 ─────────────────────────
 
 func (a *App) apiMetrics(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, a.metrics.Snapshot())
+	writeJSON(w, struct {
+		obs.Snapshot
+		Storage MetricsStorage `json:"storage"`
+	}{a.metrics.Snapshot(), a.metricsStorageSnapshot()})
 }
 
 // ───────────────────────── 平台 ─────────────────────────
@@ -729,11 +732,13 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	all, perr := a.hub.ListModels(ctx)
-	if perr != nil {
-		writeJSON(w, map[string]any{"models": []any{}, "error": llm.Wrap(perr).Error()})
-		return
+	if r.URL.Query().Get("refresh") == "1" {
+		_, _ = a.hub.ListModels(ctx)
+	} else {
+		a.hub.RefreshCatalogIfDue()
 	}
+	all := a.hub.CachedModels()
+	catalogStatus, refreshing := a.hub.CatalogStatuses()
 
 	type platformModels struct {
 		ID     string                `json:"id"`
@@ -742,13 +747,11 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	}
 	var platforms []platformModels
 	for _, rt := range a.hub.Platforms() {
-		ms, err := rt.Adapter.ListModels(ctx)
-		if err != nil {
-			continue
-		}
-		group := platformModels{ID: rt.ID, Name: rt.ID, Models: make([]modelWithImageLimit, 0, len(ms))}
-		for _, model := range ms {
-			group.Models = append(group.Models, a.modelWithLimit(ModelInfo{ModelInfo: model, Platform: rt.ID, RoutingID: rt.ID + "/" + model.ID, DefaultRoute: a.hub.OwnerOf(model.ID) == rt.ID}))
+		group := platformModels{ID: rt.ID, Name: rt.ID, Models: []modelWithImageLimit{}}
+		for _, model := range all {
+			if model.Platform == rt.ID {
+				group.Models = append(group.Models, a.modelWithLimit(model))
+			}
 		}
 		platforms = append(platforms, group)
 	}
@@ -763,10 +766,12 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 		defID = def.ID
 	}
 	writeJSON(w, map[string]any{
-		"platform":  defID,
-		"platforms": platforms,
-		"models":    catalog,
-		"routing":   map[string]any{"priority": "platform_configuration_order", "fallback_on_unavailable": a.cfg.Models.FallbackOnUnavailable, "qualified_ids_pin_platform": true},
+		"platform":       defID,
+		"catalog_status": catalogStatus,
+		"refreshing":     refreshing,
+		"platforms":      platforms,
+		"models":         catalog,
+		"routing":        map[string]any{"priority": "platform_configuration_order", "fallback_on_unavailable": a.cfg.Models.FallbackOnUnavailable, "qualified_ids_pin_platform": true},
 	})
 }
 

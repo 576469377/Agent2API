@@ -12,7 +12,7 @@ export function lifetimeUsageView(metrics, ui) {
 
 // Detailed provenance belongs to a deliberate inspection, separate from charts.
 export function usageMethodologyView(metrics, state, ui) {
-  const { e, L, n } = ui, usage = buildUsage(metrics, state);
+  const { e, L, n } = ui, usage = buildUsage(metrics, state), storage = metrics?.storage;
   if (!usage) return "";
   const item = (title, body) => `<div><dt>${e(title)}</dt><dd>${e(body)}</dd></div>`;
   const snapshots = usage.sources.filter(source => source.kind === "snapshot" && source.snapshot_requests > 0);
@@ -24,6 +24,7 @@ export function usageMethodologyView(metrics, state, ui) {
     ${item(L("数据覆盖", "Coverage"), L("“部分记录”表示该时段的记录覆盖不完整；“无数据”表示该日期缺少记录。缺少 Token 的调用保留调用次数，曲线在缺失日期处断开。", "Partial records indicate incomplete coverage for that period. No data indicates missing date records. Calls without tokens retain their request counts; token curves have gaps on those dates."))}
     ${item(L("生成速度", "Generation speed"), L("实时输出按最近 3 秒的字符数计算，自动刷新时每秒采样。同平台、同模型有已完成样本时，按字符 / Token 比例估算并标记 ≈；最终 Token 采用上游用量。", "Live output uses characters in the last 3 seconds, sampled every second during auto-refresh. Completed samples for the same platform/model calibrate token estimates marked ≈. Final tokens use upstream usage."))}
     ${item(L("累计分组", "Lifetime grouping"), L("累计明细按原始模型名、协议或账号标识分组。同名项合并展示；每日用量按平台与模型分别统计。调用记录保留最近 200 条。", "Lifetime details group by original model name, protocol or account label. Identical names are combined; daily usage separates platforms and models. Request logs retain the latest 200 entries."))}
+    ${storage ? item(L("统计存储", "Statistics storage"), ({ ready: L("已启用", "Enabled"), new: L("等待首次写入", "Awaiting first save"), disabled: L("未启用", "Disabled"), recovery: L("独立恢复文件", "Recovery file") })[storage.status] || "—") + (storage.file ? item(L("当前文件", "Current file"), storage.file) : "") + (storage.loaded_from ? item(L("读取来源", "Loaded from"), storage.loaded_from) : "") + (storage.last_saved_at ? item(L("最近写入", "Last saved"), new Date(storage.last_saved_at).toLocaleString()) : "") + (storage.load_error ? item(L("读取异常", "Load error"), storage.load_error) : "") + (storage.save_error ? item(L("写入异常", "Save error"), storage.save_error) : "") : ""}
   </dl>${snapshots.length ? `<section class="usage-source-details"><h3>${e(L("历史快照", "Historical snapshots"))}</h3>${snapshots.map(source => `<div class="usage-source-row"><strong>${e(source.name)}</strong><span>${n(source.snapshot_requests)} ${e(L("次调用", "requests"))}</span><small>${n(source.snapshot_input + source.snapshot_output)} tokens</small></div>`).join("")}</section>` : ""}`;
 }
 

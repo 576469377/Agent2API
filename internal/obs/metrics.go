@@ -119,6 +119,7 @@ type Metrics struct {
 	genCount  atomic.Int64
 
 	liveSequence   atomic.Uint64
+	savedAt        atomic.Int64
 	live           map[uint64]*liveRequest
 	calibrations   map[string]TokenCalibration
 	mu             sync.Mutex
@@ -420,7 +421,7 @@ func fillSeriesBuckets(raw []minuteBucket, window int) []minuteBucket {
 //
 // 指标默认仅存于内存，进程重启即清零。为让控制台在重启后仍能看到历史统计，
 // 这里提供 Save/Load：把累积计数、分组聚合、最近请求与分钟桶序列化到磁盘，
-// 启动时被 Load 重建。落盘失败（权限、损坏）不应阻断服务，调用方须忽略错误。
+// 启动时被 Load 重建。调用方应记录读写错误并保留读取失败的原文件。
 
 type persistCounter struct {
 	Total        int64 `json:"total"`
@@ -501,7 +502,18 @@ func (m *Metrics) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(path, b)
+	if err := atomicWrite(path, b); err != nil {
+		return err
+	}
+	m.savedAt.Store(p.SavedAt)
+	return nil
+}
+
+func (m *Metrics) SavedAt() time.Time {
+	if stamp := m.savedAt.Load(); stamp > 0 {
+		return time.Unix(stamp, 0).UTC()
+	}
+	return time.Time{}
 }
 
 // Load 从 path 重建累积指标；文件不存在时视为首次运行，直接返回。
@@ -532,6 +544,7 @@ func (m *Metrics) Load(path string) error {
 	m.genMsSum.Store(p.GenMsSum)
 	m.genTokSum.Store(p.GenTokSum)
 	m.genCount.Store(p.GenCount)
+	m.savedAt.Store(p.SavedAt)
 	m.mu.Lock()
 	m.byModel = rebuildCounters(p.ByModel)
 	m.byProto = rebuildCounters(p.ByProto)

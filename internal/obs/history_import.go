@@ -128,11 +128,42 @@ func (m *Metrics) ImportHistory(path string, location *time.Location) error {
 		source.SnapshotRequests = snapshot.Total
 		source.SnapshotInput = snapshot.InputTok
 		source.SnapshotOutput = snapshot.OutputTok
+		// Modern archives carry full daily aggregates, independently of recent.
+		// Fill absent historical rows only; never sum potentially overlapping
+		// aggregates or replace the live day's data with an older snapshot.
+		covered := map[string]map[usageKey]bool{}
+		if history := snapshot.UsageHistory; history != nil && history.Timezone == "UTC" {
+			for _, day := range history.Days {
+				when, err := time.Parse(time.DateOnly, day.Date)
+				if err != nil || !m.historyDateAllowed(when) || day.Date >= time.Now().UTC().Format(time.DateOnly) {
+					continue
+				}
+				if covered[day.Date] == nil {
+					covered[day.Date] = map[usageKey]bool{}
+				}
+				if m.daily[day.Date] == nil {
+					m.daily[day.Date] = map[usageKey]*UsageModel{}
+				}
+				for _, row := range day.Models {
+					key := usageKey{row.Platform, row.Model}
+					covered[day.Date][key] = true
+					if m.daily[day.Date][key] == nil {
+						copy := row
+						m.daily[day.Date][key] = &copy
+						source.ImportedRequests += row.Total
+					}
+				}
+			}
+		}
 		for _, record := range snapshot.Recent {
 			if !record.Time.Before(m.trackingSince) || !m.historyDateAllowed(record.Time) {
 				continue
 			}
 			key := recordIdentity(record)
+			if covered[record.Time.UTC().Format(time.DateOnly)][usageKey{record.Platform, record.Model}] {
+				m.historyIDs[key] = true
+				continue
+			}
 			if m.historyIDs[key] {
 				continue
 			}
