@@ -42,12 +42,17 @@ test("30-day legacy allocation reconciles all request/token totals without chang
   for (const day of usage.days) for (const row of day.models) assert.equal(row.ok + row.failed, row.total);
 });
 
-test("shared bare model names are allocated to history, never attributed to either region", () => {
+test("all undated usage is assigned to domestic DeepSeek without rewriting measured regions or models", () => {
   const usage = buildUsage(metrics, state);
-  assert.ok(usage.models.some(row => row.platform === "" && row.model === "hy3"));
-  assert.equal(buildUsage(metrics, { ...state, platform: "workbuddy" }).total, 321);
+  const assigned = usage.models.find(row => row.platform === "workbuddy" && row.model === "deepseek-v4.1-flash");
+  assert.equal(assigned.total, 28766);
+  assert.equal(assigned.input_tokens, metrics.input_tokens - 10000000);
+  assert.equal(assigned.output_tokens, metrics.output_tokens - 1000000);
+  assert.ok(usage.models.every(row => row.platform));
+  assert.equal(usage.models.find(row => row.platform === "workbuddy" && row.model === "hy3").total, 321);
+  assert.equal(buildUsage(metrics, { ...state, platform: "workbuddy" }).total, 29087);
   assert.equal(buildUsage(metrics, { ...state, platform: "workbuddy-global" }).total, 1234);
-  assert.equal(buildUsage(metrics, { ...state, platform: "unknown" }).total, 28766);
+  assert.equal(buildUsage(metrics, { ...state, platform: "unknown" }).total, 0);
   assert.equal(buildUsage(metrics, { ...state, allocation: { enabled: false } }).total, 1555);
 });
 
@@ -72,13 +77,35 @@ test("invalid dates, live-day overlap and excess archived data never overwrite m
   assert.equal(missingGroups.tokens, metrics.input_tokens + metrics.output_tokens);
 });
 
-test("chart and detail views identify estimated dates and do not fabricate request log links", () => {
+test("usage surfaces show model totals while methodology retains the allocation rule", () => {
   const ui = { e: escapeHTML, n: number, compact, icon, L: zh => zh };
   const html = usageView(metrics, state, ui), methodology = usageMethodologyView(metrics, state, ui);
-  assert.ok(html.includes("含历史均摊"));
-  assert.ok(html.includes("历史汇总"));
-  assert.ok(usageTooltip(metrics, state, 0, ui).includes("估算"));
+  for (const text of ["部分记录", "均摊估算", "含历史均摊", "历史汇总"]) {
+    assert.ok(!html.includes(text));
+    assert.ok(!usageTooltip(metrics, state, 0, ui).includes(text));
+  }
+  assert.ok(html.includes("workbuddy/deepseek-v4.1-flash"));
+  assert.ok(!html.includes('stroke-dasharray="5 4"'));
+  assert.ok(!html.includes('data-action="usage-allocation-settings"'));
   assert.ok(methodology.includes("2026-09-15"));
   assert.ok(methodology.includes("28,766"));
-  assert.ok(html.includes("仅汇总"));
+  assert.ok(methodology.includes("workbuddy/deepseek-v4.1-flash"));
+  assert.ok(methodology.includes('data-action="usage-allocation-settings"'));
+  assert.ok(!html.includes('data-model="deepseek-v4.1-flash"')); // No generated request-log link.
+});
+
+test("old generated model allocations are replaced and dated DeepSeek rows stay intact", () => {
+  const observed = { platform: "workbuddy", model: "deepseek-v4.1-flash", total: 10, ok: 10, failed: 0, input_tokens: 100, output_tokens: 20 };
+  const history = { ...metrics.usage_history, days: [
+    { date: "2026-10-14", models: [observed, { platform: "", model: "hy3", total: 20000, input_tokens: 2000000000, allocation_generated: true }] },
+    ...metrics.usage_history.days,
+  ] };
+  const before = JSON.stringify(history), allocated = allocateHistory(history, metrics, allocation, now);
+  const generated = allocated.days.flatMap(day => day.models).filter(row => row.allocation_generated);
+  assert.ok(generated.every(row => row.platform === "workbuddy" && row.model === "deepseek-v4.1-flash"));
+  assert.equal(generated.reduce((sum,row) => sum + row.total,0), metrics.total - 1565);
+  assert.ok(allocated.days.find(day => day.date === "2026-10-14").models.includes(observed));
+  assert.equal(buildUsage({ ...metrics, usage_history: history }, state).total, metrics.total);
+  assert.deepEqual(allocateHistory(allocated, metrics, allocation, now), allocated);
+  assert.equal(JSON.stringify(history), before);
 });

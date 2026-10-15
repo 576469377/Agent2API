@@ -49,7 +49,7 @@ test("charts expose token denominator, partial coverage and escaped model text; 
  const evil={...fixture,usage_history:{...fixture.usage_history,sources:[{kind:"snapshot",name:'<img src=x onerror=alert(1)>',imported_requests:1,snapshot_requests:2,snapshot_input:3,snapshot_output:4}],days:[{date:"2026-10-15",models:[row("p",'<img src=x onerror=alert(1)>',10)]}]}};
  const html=usageView(evil,state,ui);
  assert.ok(html.includes("每日用量"));assert.ok(html.includes("模型用量"));
- assert.ok(html.includes("部分记录"));assert.ok(!html.includes("usage-coverage-banner"));
+ assert.ok(!html.includes("部分记录"));assert.ok(!html.includes("usage-coverage-banner"));
  const methodology=usageMethodologyView(evil,state,ui);
  assert.ok(methodology.includes("输入 Token + 输出 Token"));assert.ok(methodology.includes("数据覆盖"));
  assert.ok(!methodology.includes("<img src=x"));assert.ok(methodology.includes("&lt;img"));
@@ -72,7 +72,7 @@ test("lifetime usage survives daily filters and the 200-request buffer without a
  assert.ok(!html.includes("<details"));assert.ok(html.includes('data-action="usage-methodology"'));
  assert.equal(lifetimeUsage(undefined),null);
  const daily=usageView(metrics,state,ui);
- assert.ok(daily.includes("Token 用量"));assert.ok(daily.includes("最近 200 条样本"));
+ assert.ok(daily.includes("Token 用量"));assert.ok(!daily.includes("最近 200 条样本"));
  assert.ok(usageMethodologyView(metrics,state,ui).includes("最近 200 条请求样本"));
 });
 test("lifetime token composition uses all persisted groups and remains distinct from request shares",()=>{

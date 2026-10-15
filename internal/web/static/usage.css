@@ -35,7 +35,6 @@ button.usage-heat-cell:hover { outline:1px solid var(--text); outline-offset:1px
 .usage-heat-cell.level-4 { background:var(--heat-4); }
 .usage-heat-blank { visibility:hidden; }
 .usage-heat-cell.unknown { background: transparent; border-color: var(--border); border-style: solid; opacity: .6; }
-.usage-heat-cell.partial { border-color:var(--chart-color); border-style:dashed; }
 .usage-calendar-foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 20px 16px; font-size: var(--font-small); color: var(--muted); }
 .usage-heat-key { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .usage-heat-key .usage-heat-cell { width:10px; height:10px; }
@@ -168,7 +167,6 @@ button.usage-heat-cell:hover { outline:1px solid var(--text); outline-offset:1px
 .usage-help-button { border:0;background:none;color:var(--muted);padding:5px 3px;font-size:12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer; }
 .usage-help-button:hover { color:var(--text); }
 .usage-help-button .icon { width:15px;height:15px; }
-.usage-data-status { border:1px solid var(--border);background:var(--surface-alt);border-radius:5px;padding:1px 7px;font-size:var(--font-small);color:var(--muted);cursor:pointer; }
 .usage-period-controls { padding-top: 8px; margin-bottom: 20px; }
 .usage-period-controls p { margin-top:5px; }
 .analytics-workspace .segmented { border-radius: 6px; padding: 2px; box-shadow: none; }
@@ -199,7 +197,6 @@ button.usage-heat-cell:hover { outline:1px solid var(--text); outline-offset:1px
 .console-explanation { margin-top:16px;font-size:12px;color:var(--muted); }
 .console-explanation>summary { cursor:pointer;width:fit-content; }
 .console-explanation>p { max-width:850px;line-height:1.8;margin:10px 0; }
-.usage-heat-cell.estimated { border:1px dashed color-mix(in srgb,var(--chart-color) 65%,transparent); }
 @media(max-width:640px) {
   .usage-lifetime-overview .usage-controls { flex-direction:column;align-items:stretch;gap:10px; }
   .usage-header-actions { gap:6px;justify-content:space-between; }
