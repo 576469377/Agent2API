@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition } from "../internal/web/static/usage.js";
-import { usageView, usageTooltip, lifetimeUsageView } from "../internal/web/static/usage-view.js";
+import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition, heatmapColumns, liveGeneration, sampleLive } from "../internal/web/static/usage.js";
+import { usageView, usageTooltip, lifetimeUsageView, liveUsageView } from "../internal/web/static/usage-view.js";
 import { escapeHTML, number, compact, icon } from "../internal/web/static/core.js";
 const now=Date.parse("2026-10-15T10:00:00Z");
 const row=(platform,model,tokens,total=1)=>({platform,model,total,ok:total,failed:0,input_tokens:tokens,output_tokens:0});
@@ -78,4 +78,34 @@ test("lifetime token composition uses all persisted groups and remains distinct 
  assert.equal(tokens.top.reduce((s,r)=>s+r.value,0)+tokens.other,tokens.total);
  assert.equal(JSON.stringify(groups),before);
  assert.deepEqual(usageComposition([{key:"empty",total:10}],"tokens"),{total:0,top:[],other:0});
+});
+
+test("heatmap daily, weekly and cumulative keep natural-week alignment and actual totals",()=>{
+ const calendar=Array.from({length:14},(_,i)=>({date:new Date(now-(13-i)*DAY).toISOString().slice(0,10),ms:Math.floor((now-(13-i)*DAY)/DAY)*DAY,tokens:i+1,total:1,coverage:i<2?"unknown":"complete"}));
+ const weekly=heatmapColumns(calendar,"weekly"),cumulative=heatmapColumns(calendar,"cumulative");
+ const sum=calendar.slice(2).reduce((s,d)=>s+d.tokens,0);
+ assert.equal(weekly.reduce((s,c)=>s+c.value,0),sum);assert.equal(cumulative.at(-1).value,sum);
+ assert.equal(cumulative[0].coverage,"unknown");assert.equal(cumulative[1].coverage,"partial");
+ assert.equal(heatmapColumns(calendar,"daily")[0].cells[0].coverage,"blank");
+ assert.equal(weekly[0].start,"2026-10-02");
+ const currentWeek=heatmapColumns(calendar.slice(-2),"weekly").at(-1);
+ assert.equal(currentWeek.cells.filter(c=>c.level>0&&c.coverage!=="blank").length,7);
+ assert.equal(currentWeek.cells.at(-1).day,null); // Bar rows are not future dates.
+ const html=usageView(fixture,{...state,heatMode:"weekly"},ui);
+ assert.ok(html.includes("每日"));assert.ok(html.includes("每周"));assert.ok(html.includes("累计"));assert.ok(html.includes('data-action="usage-week"'));
+});
+test("recovered activity is visible but missing token records never become a false zero curve",()=>{
+ const metrics={usage_history:{timezone:"UTC",tracking_since:"2026-10-15",days:[{date:"2026-10-11",models:[{...row("p","m",0,5),unknown_token_requests:5}]}]}};
+ const usage=buildUsage(metrics,state);assert.equal(usage.activeDays,1);assert.equal(usage.unknown_token_requests,5);
+ assert.equal(curveSeries(usage,"tokens")[0].values[2],null);assert.equal(curveSeries(usage,"total")[0].values[2],5);
+ const html=usageView(metrics,state,ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 明细未留存"));
+});
+test("live samples distinguish calibrated token estimates from actual character speed and reject duplicate snapshots",()=>{
+ const data={sampled_at:new Date(now).toISOString(),in_flight:1,active:[{id:1,platform:"p",model:"m",output_characters:100,characters_per_second:20}],last_completed:{output_tokens:40,gen_ms:2000,time:new Date(now-DAY).toISOString()}};
+ assert.equal(liveGeneration(data).tokensPerSecond,null);assert.equal(liveGeneration(data).lastSpeed,20);
+ const points=sampleLive([],data);assert.equal(sampleLive(points,data).length,1);
+ const calibrated={...data,active:[{...data.active[0],estimated_tokens_per_second:5,estimated_output_tokens:25}]};
+ assert.equal(liveGeneration(calibrated).tokensPerSecond,5);
+ const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("校准估算"));assert.ok(html.includes("≈ 25"));
+ assert.ok(liveUsageView(data,"",points,{...ui,timestamp:()=>"time"}).includes("Token 待结算"));
 });

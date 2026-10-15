@@ -10,14 +10,15 @@ import (
 const historyDays = 366
 
 type UsageModel struct {
-	Platform     string `json:"platform"`
-	Model        string `json:"model"`
-	Total        int64  `json:"total"`
-	OK           int64  `json:"ok"`
-	Failed       int64  `json:"failed"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	DurationSum  int64  `json:"duration_sum"`
+	UnknownTokenRequests int64  `json:"unknown_token_requests,omitempty"`
+	Platform             string `json:"platform"`
+	Model                string `json:"model"`
+	Total                int64  `json:"total"`
+	OK                   int64  `json:"ok"`
+	Failed               int64  `json:"failed"`
+	InputTokens          int64  `json:"input_tokens"`
+	OutputTokens         int64  `json:"output_tokens"`
+	DurationSum          int64  `json:"duration_sum"`
 }
 
 type UsageDay struct {
@@ -26,11 +27,13 @@ type UsageDay struct {
 }
 
 type UsageHistory struct {
-	Timezone       string     `json:"timezone"`
-	TrackingSince  time.Time  `json:"tracking_since"`
-	LegacyRequests int64      `json:"legacy_requests"`
-	RetentionDays  int        `json:"retention_days"`
-	Days           []UsageDay `json:"days"`
+	Sources        []HistorySource `json:"sources,omitempty"`
+	RecordIDs      []string        `json:"-"`
+	Timezone       string          `json:"timezone"`
+	TrackingSince  time.Time       `json:"tracking_since"`
+	LegacyRequests int64           `json:"legacy_requests"`
+	RetentionDays  int             `json:"retention_days"`
+	Days           []UsageDay      `json:"days"`
 }
 
 type usageKey struct{ platform, model string }
@@ -69,7 +72,7 @@ func (m *Metrics) recordHistory(r Record) {
 
 // Caller holds m.mu. All values are copied, including each day's model rows.
 func (m *Metrics) historySnapshot() UsageHistory {
-	out := UsageHistory{Timezone: "UTC", TrackingSince: m.trackingSince,
+	out := UsageHistory{Sources: append([]HistorySource(nil), m.historySources...), Timezone: "UTC", TrackingSince: m.trackingSince,
 		LegacyRequests: m.legacyRequests, RetentionDays: historyDays, Days: []UsageDay{}}
 	cutoff := time.Now().UTC().AddDate(0, 0, 1-historyDays).Format(time.DateOnly)
 	for date, models := range m.daily {
@@ -98,13 +101,20 @@ func (m *Metrics) historySnapshot() UsageHistory {
 // observations once, but never invent dates for undated lifetime aggregates.
 func (m *Metrics) loadHistory(history *UsageHistory, recent []Record, total int64) {
 	m.daily = make(map[string]map[usageKey]*UsageModel)
+	m.historyIDs = make(map[string]bool)
+	m.historySources = nil
 	if history == nil {
 		m.trackingSince = time.Now().UTC()
 		m.legacyRequests = total
 		for _, r := range recent {
 			m.recordHistory(r)
+			m.historyIDs[recordIdentity(r)] = true
 		}
 		return
+	}
+	m.historySources = append([]HistorySource(nil), history.Sources...)
+	for _, key := range history.RecordIDs {
+		m.historyIDs[key] = true
 	}
 	m.trackingSince = history.TrackingSince
 	if m.trackingSince.IsZero() {

@@ -75,6 +75,21 @@ func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 			logger.Printf("加载历史指标失败（已忽略，本次以空统计运行）: %v", err)
 		}
 	}
+	var historyLocation *time.Location
+	if cfg.MetricsHistoryLogTimezone != "" {
+		if stamp, err := time.Parse("-07:00", cfg.MetricsHistoryLogTimezone); err == nil {
+			_, offset := stamp.Zone()
+			historyLocation = time.FixedZone("history", offset)
+		}
+	}
+	for _, path := range cfg.MetricsHistoryImports {
+		if path == cfg.MetricsFile {
+			continue
+		}
+		if err := metrics.ImportHistory(path, historyLocation); err != nil {
+			logger.Printf("导入历史指标失败（保留既有统计）: %v", err)
+		}
+	}
 	return &App{
 		cfg: cfg, hub: hub, logger: logger,
 		metrics: metrics, metricsFile: cfg.MetricsFile,
@@ -128,6 +143,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/auth-hint", a.apiAuthHint)
 	mux.HandleFunc("/api/status", a.withAuth(a.apiStatus))
 	mux.HandleFunc("/api/metrics", a.withAuth(a.apiMetrics))
+	mux.HandleFunc("/api/live", a.withAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.metrics.LiveSnapshot()) }))
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
 	mux.HandleFunc("/api/accounts", a.withAuth(a.apiAccounts))
 	mux.HandleFunc("/api/accounts/manage", a.withAuth(a.apiAccountsManage))
@@ -272,8 +288,8 @@ func (a *App) anthropicMessages(w http.ResponseWriter, r *http.Request) {
 // serve 是三协议共用的唯一编排函数。
 func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	start := time.Now()
-	a.metrics.Begin()
-	rec := &obs.Record{Time: start, Protocol: proto.Name(), Status: 200, OK: true}
+	liveID := a.metrics.BeginLive(proto.Name(), start)
+	rec := &obs.Record{LiveID: liveID, Time: start, Protocol: proto.Name(), Status: 200, OK: true}
 	defer func() {
 		rec.DurationMs = time.Since(start).Milliseconds()
 		a.metrics.Record(*rec)
@@ -333,6 +349,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	}
 	rec.Model = req.Model
 	rec.Stream = req.Stream
+	a.metrics.RouteLive(rec.LiveID, platformHint, rec.Model)
 
 	if req.Stream {
 		a.writeStream(w, r, proto, req, rec, platformHint)
@@ -356,6 +373,7 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	}
 	// 账号归因：控制台的「每账号用量」完全依赖这一行。
 	rec.Account = adapter.AccountOf(stream)
+	stream = &observedStream{inner: stream, metrics: a.metrics, record: rec}
 	defer func() {
 		if c, ok := stream.(io.Closer); ok {
 			_ = c.Close()
@@ -418,6 +436,7 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 	}
 	// 账号归因：控制台的「每账号用量」完全依赖这一行。
 	rec.Account = adapter.AccountOf(stream)
+	stream = &observedStream{inner: stream, metrics: a.metrics, record: rec}
 	defer func() {
 		if c, ok := stream.(io.Closer); ok {
 			_ = c.Close()

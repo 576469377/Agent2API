@@ -133,6 +133,7 @@ func writeImageCleanupHeaders(w http.ResponseWriter, rec *obs.Record) {
 
 func (a *App) setRouteRecord(rec *obs.Record, rt *PlatformRuntime) {
 	rec.Platform = rt.ID
+	a.metrics.RouteLive(rec.LiveID, rec.Platform, rec.Model)
 	if limit := a.cfg.Models.ImageLimitFor(rt.ID, rec.Model); limit != nil {
 		value := limit.MaxImages
 		rec.MaxImages = &value

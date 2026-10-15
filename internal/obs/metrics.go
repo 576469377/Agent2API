@@ -29,17 +29,19 @@ const seriesWindow = 30
 
 // Record 是一次请求的观测记录。
 type Record struct {
-	Time            time.Time `json:"time"`
-	Protocol        string    `json:"protocol"`
-	Model           string    `json:"model"`
-	Stream          bool      `json:"stream"`
-	OK              bool      `json:"ok"`
-	Status          int       `json:"status"`
-	DurationMs      int64     `json:"duration_ms"`
-	InputTokens     int64     `json:"input_tokens,omitempty"`
-	OutputTokens    int64     `json:"output_tokens,omitempty"`
-	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
-	Error           string    `json:"error,omitempty"`
+	LiveID           uint64    `json:"-"`
+	OutputCharacters int64     `json:"output_characters,omitempty"`
+	Time             time.Time `json:"time"`
+	Protocol         string    `json:"protocol"`
+	Model            string    `json:"model"`
+	Stream           bool      `json:"stream"`
+	OK               bool      `json:"ok"`
+	Status           int       `json:"status"`
+	DurationMs       int64     `json:"duration_ms"`
+	InputTokens      int64     `json:"input_tokens,omitempty"`
+	OutputTokens     int64     `json:"output_tokens,omitempty"`
+	ReasoningTokens  int64     `json:"reasoning_tokens,omitempty"`
+	Error            string    `json:"error,omitempty"`
 	// Pointers distinguish newly measured zero from legacy records with no count.
 	ImageCount          *int   `json:"image_count,omitempty"`
 	MaxImages           *int   `json:"max_images,omitempty"` // Effective guard; 0 means explicitly disabled.
@@ -116,6 +118,9 @@ type Metrics struct {
 	genTokSum atomic.Int64
 	genCount  atomic.Int64
 
+	liveSequence   atomic.Uint64
+	live           map[uint64]*liveRequest
+	calibrations   map[string]TokenCalibration
 	mu             sync.Mutex
 	byModel        map[string]*groupCounter
 	byProto        map[string]*groupCounter
@@ -123,6 +128,8 @@ type Metrics struct {
 	recent         []Record
 	series         []minuteBucket
 	daily          map[string]map[usageKey]*UsageModel
+	historyIDs     map[string]bool
+	historySources []HistorySource
 	trackingSince  time.Time
 	legacyRequests int64
 }
@@ -131,12 +138,15 @@ type Metrics struct {
 func New() *Metrics {
 	return &Metrics{
 		started:       time.Now(),
+		live:          make(map[uint64]*liveRequest),
+		calibrations:  make(map[string]TokenCalibration),
 		byModel:       map[string]*groupCounter{},
 		byProto:       map[string]*groupCounter{},
 		byAccount:     map[string]*groupCounter{},
 		recent:        make([]Record, 0, recentCap),
 		series:        make([]minuteBucket, 0, seriesCap),
 		daily:         make(map[string]map[usageKey]*UsageModel),
+		historyIDs:    make(map[string]bool),
 		trackingSince: time.Now().UTC(),
 	}
 }
@@ -182,6 +192,15 @@ func (m *Metrics) Record(r Record) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	delete(m.live, r.LiveID)
+	if r.OK && r.OutputCharacters > 0 && r.OutputTokens > 0 {
+		key := calibrationKey(r.Platform, r.Model)
+		cal := m.calibrations[key]
+		cal.Characters += r.OutputCharacters
+		cal.Tokens += r.OutputTokens
+		cal.Samples++
+		m.calibrations[key] = cal
+	}
 	m.bump(m.byModel, r.Model, r)
 	m.bump(m.byProto, r.Protocol, r)
 	m.bump(m.byAccount, r.Account, r)
@@ -419,23 +438,25 @@ type persistCounter struct {
 // TPS 三元组只做顶层持久化，不进 persistCounter —— 分组维度的 TPS 当前无人消费，
 // 而 groupCounter/persistCounter 是逐字段手写拷贝，每加一个字段就多一处漏改风险。
 type persisted struct {
-	Total        int64                     `json:"total"`
-	OK           int64                     `json:"ok"`
-	Failed       int64                     `json:"failed"`
-	InputTok     int64                     `json:"input_tokens"`
-	OutputTok    int64                     `json:"output_tokens"`
-	ReasonTok    int64                     `json:"reasoning_tokens"`
-	DurSum       int64                     `json:"duration_sum"`
-	GenMsSum     int64                     `json:"gen_ms_sum,omitempty"`
-	GenTokSum    int64                     `json:"gen_tok_sum,omitempty"`
-	GenCount     int64                     `json:"gen_count,omitempty"`
-	ByModel      map[string]persistCounter `json:"by_model"`
-	ByProto      map[string]persistCounter `json:"by_proto"`
-	ByAccount    map[string]persistCounter `json:"by_account,omitempty"`
-	Recent       []Record                  `json:"recent"`
-	Series       []minuteBucket            `json:"series"`
-	SavedAt      int64                     `json:"saved_at"`
-	UsageHistory *UsageHistory             `json:"usage_history,omitempty"`
+	HistoryRecordIDs []string                    `json:"history_record_ids,omitempty"`
+	Calibrations     map[string]TokenCalibration `json:"token_calibrations,omitempty"`
+	Total            int64                       `json:"total"`
+	OK               int64                       `json:"ok"`
+	Failed           int64                       `json:"failed"`
+	InputTok         int64                       `json:"input_tokens"`
+	OutputTok        int64                       `json:"output_tokens"`
+	ReasonTok        int64                       `json:"reasoning_tokens"`
+	DurSum           int64                       `json:"duration_sum"`
+	GenMsSum         int64                       `json:"gen_ms_sum,omitempty"`
+	GenTokSum        int64                       `json:"gen_tok_sum,omitempty"`
+	GenCount         int64                       `json:"gen_count,omitempty"`
+	ByModel          map[string]persistCounter   `json:"by_model"`
+	ByProto          map[string]persistCounter   `json:"by_proto"`
+	ByAccount        map[string]persistCounter   `json:"by_account,omitempty"`
+	Recent           []Record                    `json:"recent"`
+	Series           []minuteBucket              `json:"series"`
+	SavedAt          int64                       `json:"saved_at"`
+	UsageHistory     *UsageHistory               `json:"usage_history,omitempty"`
 }
 
 // Save 把当前指标写入 path；path 为空时直接跳过。
@@ -466,6 +487,13 @@ func (m *Metrics) Save(path string) error {
 		Series:       append([]minuteBucket(nil), m.series...),
 		SavedAt:      time.Now().Unix(),
 		UsageHistory: &history,
+		Calibrations: make(map[string]TokenCalibration, len(m.calibrations)),
+	}
+	for key, value := range m.calibrations {
+		p.Calibrations[key] = value
+	}
+	for key := range m.historyIDs {
+		p.HistoryRecordIDs = append(p.HistoryRecordIDs, key)
 	}
 	m.mu.Unlock()
 
@@ -510,7 +538,14 @@ func (m *Metrics) Load(path string) error {
 	m.byAccount = rebuildCounters(p.ByAccount)
 	m.recent = append([]Record(nil), p.Recent...)
 	m.series = append([]minuteBucket(nil), p.Series...)
+	if p.UsageHistory != nil {
+		p.UsageHistory.RecordIDs = p.HistoryRecordIDs
+	}
 	m.loadHistory(p.UsageHistory, p.Recent, p.Total)
+	m.calibrations = make(map[string]TokenCalibration)
+	for key, value := range p.Calibrations {
+		m.calibrations[key] = value
+	}
 	m.mu.Unlock()
 	return nil
 }

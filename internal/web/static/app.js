@@ -15,8 +15,8 @@ import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend,
 import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
-import { buildUsage, curveSeries, usageComposition } from "./usage.js";
-import { usageView, usageTooltip, lifetimeUsageView } from "./usage-view.js";
+import { buildUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
+import { usageView, usageTooltip, lifetimeUsageView, liveUsageView } from "./usage-view.js";
 import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState } from "./operations.js";
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +41,7 @@ const s = {
   page: "overview",
   cache: {},
   receivedAt: {},
+  live: {data:null,error:"",points:[],busy:false,lastAttempt:0},
   rateSync: { lastAttempt: 0, error: "", changes: [], confirmed: new Map() },
   errors: {},
   busy: new Set(),
@@ -51,7 +52,7 @@ const s = {
   dashboardScope: "all",
   refreshEvery: [0, 10, 30, 60].includes(Number(saved("agent2api_refresh", "10"))) ? Number(saved("agent2api_refresh", "10")) : 10,
   lastPoll: Date.now(),
-  usageInsights: { range: "7", platform: "all", metric: "tokens", heatMetric: "tokens", hidden: new Set() },
+  usageInsights: { range: "7", platform: "all", metric: "tokens", heatMetric: "tokens", heatMode: "daily", hidden: new Set() },
   analytics: { dimension: "by_model", metric: "tokens", sort: "tokens", query: "" },
   connectionModel: "",
   connectionProtocol: "openai-chat",
@@ -337,6 +338,7 @@ async function refresh(keys = currentResources(), manual = false) {
   $("refreshButton").classList.toggle("refreshing", s.busy.size > 0);
   chrome();
   draw();
+  if (s.page === "analytics") refreshLive(!s.live.data);
 }
 function chrome() {
   document.documentElement.lang = s.lang === "en" ? "en" : "zh-CN";
@@ -637,6 +639,7 @@ function platformTabs(kind, selected) {
 }
 function analyticsPage() {
   return `${lifetimeUsageView(s.cache.metrics, { e, L, n, compact })}
+  <section class="card usage-live-card">${cardHead(L("实时生成", "Live generation"), L("实际输出进度与生成速度 · 不读取对话正文", "Output progress and generation speed · no conversation content"))}<div id="liveUsageBody">${liveUsageView(s.live.data,s.live.error,s.live.points,{e,L,n,compact,timestamp})}</div></section>
   <section class="card analytics-card lifetime-distribution">${cardHead(L("历史累计用量分布", "Lifetime usage breakdown"), L("全部已保存分组 · 与下方每日趋势独立", "All saved groups · independent of the daily trends below"), `<div class="analytics-chart-controls"><div class="segmented" aria-label="${e(L("累计图表指标", "Lifetime chart metric"))}">${[["tokens", "Token"], ["total", L("调用", "Requests")]].map(([key, name]) => `<button data-action="analytics-metric" data-value="${key}" class="${s.analytics.metric === key ? "active" : ""}" aria-pressed="${s.analytics.metric === key}">${e(name)}</button>`).join("")}</div><div class="segmented" aria-label="${e(L("累计分组维度", "Lifetime grouping"))}">${[["by_model", L("模型", "Model")], ["by_protocol", L("协议", "Protocol")], ["by_account", L("账号", "Account")]].map(([key, name]) => `<button data-action="analytics-dimension" data-value="${key}" class="${s.analytics.dimension === key ? "active" : ""}" aria-pressed="${s.analytics.dimension === key}">${e(name)}</button>`).join("")}</div></div>`)}<div id="analyticsDistribution"></div></section>
   ${usageView(s.cache.metrics, s.usageInsights, { e, L, n, compact, icon })}
   <section class="usage-lifetime-table"><div class="usage-controls"><div><span class="usage-section-eyebrow">LIFETIME DETAILS</span><h2>${e(L("历史累计明细", "Lifetime usage details"))}</h2><p>${e(L("全部已保存分组，不受上方日期与平台筛选影响", "All saved groups, independent of date and platform filters above"))}</p></div></div>
@@ -1577,6 +1580,18 @@ document.addEventListener("click", async (event) => {
         s.usageInsights.metric = value === "total" ? "total" : "tokens";
         s.usageInsights.hidden.clear();
         return draw();
+      case "usage-heat-mode":
+        s.usageInsights.heatMode = ["daily", "weekly", "cumulative"].includes(value) ? value : "daily";
+        return draw();
+      case "usage-week": {
+        const usage=buildUsage(s.cache.metrics,s.usageInsights), columns=heatmapColumns(usage.calendar,s.usageInsights.heatMode,s.usageInsights.heatMetric);
+        const column=columns[Number(value)];
+        if (!column) return;
+        const cumulative=s.usageInsights.heatMode==="cumulative";
+        const days=cumulative?usage.calendar.filter(d=>d.date<=column.end):column.days.filter(Boolean);
+        modal(`${cumulative?L("累计至","Through"):column.start+" —"} ${column.end} · UTC`, `<p class="scope-note">${e(cumulative?L("仅汇总保留窗口内已有记录；未知历史无法还原。","Retained records only; unknown history cannot be reconstructed."):L("按周日到周六汇总，边缘周可能不足七天。","Sunday to Saturday; edge weeks may be incomplete."))}</p><div class="usage-day-rows">${days.filter(d=>d.total>0).map(d=>`<div class="usage-token-row"><div><strong>${e(d.date)}</strong><small>${e(d.coverage==="complete"?L("已记录","Recorded"):L("部分记录","Partial records"))}</small></div><b>${n(d.total)} ${e(L("次调用","requests"))} · ${d.unknown_token_requests ? e(L("Token 明细不完整", "Incomplete token details")) : n(d.tokens)+" tokens"}</b></div>`).join("")||`<p class="muted">${e(L("没有留存明细，不代表从未使用","No retained details; this does not mean no past use"))}</p>`}</div>`);
+        return;
+      }
       case "usage-heat-metric":
         s.usageInsights.heatMetric = value === "total" ? "total" : "tokens";
         return draw();
@@ -1598,7 +1613,7 @@ document.addEventListener("click", async (event) => {
         const usage = buildUsage(s.cache.metrics, s.usageInsights), day = usage.calendar.find((d) => d.date === value);
         if (!day) return;
         const note = day.coverage === "unknown" ? L("该日历史未保留，不能视为零用量。", "History for this date is unavailable; it is not zero usage.") : day.coverage === "partial" ? L("仅包含已保留的记录，该日统计不完整。", "Retained records only; this date is incomplete.") : L("该日按天聚合记录；仅统计经过此网关的请求。", "Daily aggregate of requests through this gateway.");
-        modal(`${day.date} · UTC`, `<p class="scope-note">${e(note)}</p><div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(`${m.platform || L("未记录平台", "Unrecorded")}/${m.model}`)}</strong><small>${n(m.total)} ${e(L("次调用", "requests"))} · ${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}</small></div><b>${compact(m.tokens)} tokens</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
+        modal(`${day.date} · UTC`, `<p class="scope-note">${e(note)}</p><div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(`${m.platform || L("未记录平台", "Unrecorded")}/${m.model}`)}</strong><small>${n(m.total)} ${e(L("次调用", "requests"))} · ${m.unknown_token_requests ? e(L("Token 明细未留存", "Token details unavailable")) : `${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}`}</small></div><b>${m.unknown_token_requests ? "—" : compact(m.tokens)+" tokens"}</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
         return;
       }
       case "lifetime-details":
@@ -1988,7 +2003,7 @@ document.addEventListener("click", (event) => {
     $("menuButton").setAttribute("aria-expanded", "false");
   }
 });
-$("refreshButton").addEventListener("click", () => refresh(currentResources(), true));
+$("refreshButton").addEventListener("click", () => {refresh(currentResources(), true);refreshLive(true);});
 $("copyEndpoint").addEventListener("click", () => copy(`${gatewayURL()}/v1`));
 window.addEventListener("hashchange", navigate);
 document.addEventListener("visibilitychange", () => {
@@ -1998,6 +2013,16 @@ document.addEventListener("visibilitychange", () => {
     refresh(s.page === "chat" ? ["status"] : currentResources());
   }
 });
+async function refreshLive(force=false) {
+  if(s.page!=="analytics"||s.live.busy||document.hidden||$("modal").open||$("detailDialog").open||(!force&&!s.refreshEvery))return;
+  if(!force&&Date.now()-s.live.lastAttempt<(s.live.error?5000:900))return;
+  s.live.busy=true;s.live.lastAttempt=Date.now();
+  try {
+    const data=await api("/api/live");s.live.data=data;s.live.points=sampleLive(s.live.points,data);s.live.error="";
+  }catch(error){s.live.error=error.status===404?L("当前后端尚未支持实时生成监控，需要运行新版后端。", "Upgrade the running backend to enable live generation monitoring."):L("实时监控暂时无法更新：", "Live monitoring unavailable: ")+error.message;}
+  finally{s.live.busy=false;const body=$("liveUsageBody");if(body)body.innerHTML=liveUsageView(s.live.data,s.live.error,s.live.points,{e,L,n,compact,timestamp});}
+}
+setInterval(()=>refreshLive(),1000);
 setInterval(() => {
   if (document.hidden || $("modal").open || $("detailDialog").open || !s.refreshEvery || Date.now() - s.lastPoll < s.refreshEvery * 1000) return;
   const keys = currentResources(true);

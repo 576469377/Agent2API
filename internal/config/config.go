@@ -17,7 +17,9 @@ type Config struct {
 	Models   ModelsConfig   `json:"models"`
 	// MetricsFile 是指标落盘路径；空字符串表示不持久化（重启即清零）。
 	// 配置为绝对或相对路径均可；相对路径相对进程工作目录解析。
-	MetricsFile string `json:"metrics_file,omitempty"`
+	MetricsFile               string   `json:"metrics_file,omitempty"`
+	MetricsHistoryImports     []string `json:"metrics_history_imports,omitempty"`
+	MetricsHistoryLogTimezone string   `json:"metrics_history_log_timezone,omitempty"`
 }
 
 // ModelsConfig 是模型层的配置（别名与路由）。
