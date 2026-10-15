@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -285,7 +286,7 @@ func httpError(status int, raw []byte, retryAfter string) error {
 	if f.RateLimited && f.RetryAfterSeconds <= 0 {
 		if secs := resetEpochFromMsg(msg); secs > 0 {
 			if d := time.Until(time.Unix(int64(secs), 0)); d > 0 {
-				f.RetryAfterSeconds = int(d.Seconds())
+				f.RetryAfterSeconds = int((d + time.Second - 1) / time.Second)
 			}
 		}
 	}
@@ -293,31 +294,56 @@ func httpError(status int, raw []byte, retryAfter string) error {
 	return f
 }
 
-// resetEpochFromMsg 从上游限流文案里解析重置时刻的 Unix 秒。
-// 已知形态：「... 将在 2026-09-16 23:21:31 UTC+8 重置 ...」。
-// 解析不出返回 0——文案变了就退化为固定冷却，不影响功能。
+// Both regions provide model reset deadlines in the error body. A recognized
+// reset phrase is required: unrelated timestamps carry no scheduling advice.
+var resetStampPattern = regexp.MustCompile(`(?i)(将在|will\s+reset\s+at)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(?:(UTC|GMT)([+-])(\d{1,2})(?::?(\d{2}))?|(UTC|GMT))?`)
+
+// resetEpochFromMsg returns the upstream's explicit reset timestamp, or zero
+// when it cannot be interpreted. Legacy Chinese messages without a timezone
+// retain the domestic UTC+8 convention; English messages require a timezone.
 func resetEpochFromMsg(msg string) int {
-	idx := strings.Index(msg, "将在")
-	if idx < 0 {
+	match := resetStampPattern.FindStringSubmatchIndex(msg)
+	if match == nil {
 		return 0
 	}
-	rest := msg[idx+len("将在"):]
-	end := strings.Index(rest, "重置")
-	if end < 0 {
+	parts := resetStampPattern.FindStringSubmatch(msg)
+	chinese := parts[1] == "将在"
+	rest := msg[match[1]:]
+	if chinese && !strings.HasPrefix(strings.TrimSpace(rest), "重置") {
 		return 0
 	}
-	stamp := strings.TrimSpace(rest[:end])
-	// 戳里带时区后缀（" 2099-01-01 00:00:00 UTC+8"），Go 的时间布局不认识
-	// "UTC+8" 字面量；按已知形态剥掉尾部时区再解析，时区偏移固定 +8。
-	if i := strings.LastIndex(stamp, "UTC"); i >= 0 {
-		stamp = strings.TrimSpace(stamp[:i])
+	// Do not accept a valid prefix of a malformed timezone, e.g. UTC+8:xx.
+	if !chinese && rest != "" {
+		c := rest[0]
+		if c == '+' || c == '-' || c == ':' || c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' {
+			return 0
+		}
 	}
-	const tzOffset = 8 * 3600
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", stamp, time.FixedZone("UTC+8", tzOffset))
+	offset := 0
+	if parts[3] != "" {
+		hour, _ := strconv.Atoi(parts[5])
+		minute := 0
+		if parts[6] != "" {
+			minute, _ = strconv.Atoi(parts[6])
+		}
+		if hour > 23 || minute > 59 {
+			return 0
+		}
+		offset = (hour*60 + minute) * 60
+		if parts[4] == "-" {
+			offset = -offset
+		}
+	} else if parts[7] == "" {
+		if !chinese {
+			return 0
+		}
+		offset = 8 * 3600
+	}
+	stamp, err := time.ParseInLocation("2006-01-02 15:04:05", parts[2], time.FixedZone("upstream", offset))
 	if err != nil {
 		return 0
 	}
-	return int(t.Unix())
+	return int(stamp.Unix())
 }
 
 // nestedBusinessCode 从响应体里提取嵌套的业务错误码（error.data.code）。

@@ -236,7 +236,7 @@ func TestConvertToolsSanitizesDescription(t *testing.T) {
 }
 
 // TestResetEpochFromMsg 验证从上游限流文案解析重置时刻。
-// 号池的「到点解冻」冷却依赖这个解析；文案格式变化时退化为 0（固定冷却）。
+// 号池的「到点解冻」冷却依赖这个解析；无法识别时不推测冷却时间。
 func TestResetEpochFromMsg(t *testing.T) {
 	msg := "您的使用量已超出频率限制，将在 2026-09-16 23:21:31 UTC+8 重置，您也可以切换其他模型继续使用。"
 	secs := resetEpochFromMsg(msg)
