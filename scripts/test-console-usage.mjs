@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition, heatmapColumns, liveGeneration, sampleLive } from "../internal/web/static/usage.js";
-import { usageView, usageTooltip, lifetimeUsageView, liveUsageView } from "../internal/web/static/usage-view.js";
+import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView } from "../internal/web/static/usage-view.js";
 import { escapeHTML, number, compact, icon } from "../internal/web/static/core.js";
 const now=Date.parse("2026-10-15T10:00:00Z");
 const row=(platform,model,tokens,total=1)=>({platform,model,total,ok:total,failed:0,input_tokens:tokens,output_tokens:0});
@@ -46,13 +46,17 @@ test("unknown gaps never become interpolated lines and the midnight boundary use
  assert.equal(buildUsage(undefined,state),null);
 });
 test("charts expose token denominator, partial coverage and escaped model text; tooltip is readable",()=>{
- const evil={...fixture,usage_history:{...fixture.usage_history,days:[{date:"2026-10-15",models:[row("p",'<img src=x onerror=alert(1)>',10)]}]}};
+ const evil={...fixture,usage_history:{...fixture.usage_history,sources:[{kind:"snapshot",name:'<img src=x onerror=alert(1)>',imported_requests:1,snapshot_requests:2,snapshot_input:3,snapshot_output:4}],days:[{date:"2026-10-15",models:[row("p",'<img src=x onerror=alert(1)>',10)]}]}};
  const html=usageView(evil,state,ui);
- assert.ok(html.includes("每日模型趋势"));assert.ok(html.includes("模型 Token 占比"));
- assert.ok(html.includes("斜纹格表示未知历史"));assert.ok(html.includes("Token 不等于积分"));
+ assert.ok(html.includes("每日用量"));assert.ok(html.includes("模型用量"));
+ assert.ok(html.includes("部分记录"));assert.ok(!html.includes("usage-coverage-banner"));
+ const methodology=usageMethodologyView(evil,state,ui);
+ assert.ok(methodology.includes("输入 Token + 输出 Token"));assert.ok(methodology.includes("数据覆盖"));
+ assert.ok(!methodology.includes("<img src=x"));assert.ok(methodology.includes("&lt;img"));
+ assert.ok(methodology.includes("7 tokens"));assert.ok(methodology.includes("归档累计"));
  assert.ok(!html.includes("<img src=x"));assert.ok(html.includes("&lt;img"));
  assert.ok(usageTooltip(fixture,state,1,ui).includes("150"));
- assert.ok(usageTooltip(fixture,{...state,range:"30"},0,ui).includes("历史未保留"));
+ assert.ok(usageTooltip(fixture,{...state,range:"30"},0,ui).includes("暂无记录"));
 });
 
 test("lifetime usage survives daily filters and the 200-request buffer without adding reasoning twice",()=>{
@@ -64,11 +68,11 @@ test("lifetime usage survives daily filters and the 200-request buffer without a
  assert.deepEqual(lifetimeUsage(metrics),totals);
  const html=lifetimeUsageView(metrics,ui);
  assert.ok(html.includes("331,959,550"));assert.ok(html.includes('data-lifetime="total"'));
- assert.ok(!html.includes("<details"));assert.ok(html.includes("不受最近 200 条日志限制"));
+ assert.ok(!html.includes("<details"));assert.ok(html.includes('data-action="usage-methodology"'));
  assert.equal(lifetimeUsage(undefined),null);
  const daily=usageView(metrics,state,ui);
- assert.ok(daily.includes("样本 Token"));assert.ok(daily.includes("留存样本"));
- assert.ok(daily.includes("完整历史累计请看页面上方"));
+ assert.ok(daily.includes("Token 用量"));assert.ok(daily.includes("最近 200 条样本"));
+ assert.ok(usageMethodologyView(metrics,state,ui).includes("最近 200 条请求样本"));
 });
 test("lifetime token composition uses all persisted groups and remains distinct from request shares",()=>{
  const groups=Array.from({length:8},(_,i)=>({key:"m"+i,total:8-i,input_tokens:i*10,output_tokens:10}));
@@ -108,6 +112,6 @@ test("live samples distinguish calibrated token estimates from actual character 
  const points=sampleLive([],data);assert.equal(sampleLive(points,data).length,1);
  const calibrated={...data,active:[{...data.active[0],estimated_tokens_per_second:5,estimated_output_tokens:25}]};
  assert.equal(liveGeneration(calibrated).tokensPerSecond,5);
- const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("校准估算"));assert.ok(html.includes("≈ 25"));
+ const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("生成速度 · 估算"));assert.ok(html.includes("≈ 25"));
  assert.ok(liveUsageView(data,"",points,{...ui,timestamp:()=>"time"}).includes("Token 待结算"));
 });

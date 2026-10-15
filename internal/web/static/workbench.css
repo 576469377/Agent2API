@@ -1,20 +1,20 @@
 /* Shared visual system. Original CSS provides component structure; this file
    owns theme, typography, controls and resource-page presentation. */
 :root {
-  --bg: #f6f8fb;
+  --bg: #f7f7f8;
   --surface: #ffffff;
-  --surface-alt: #f3f5f9;
+  --surface-alt: #f4f4f5;
   --sidebar-bg: #ffffff;
-  --hover: #edf1f7;
-  --text: #192338;
-  --muted: #56647a;
-  --faint: #65748a;
-  --border: #e2e7ef;
-  --border-strong: #cbd3e1;
-  --accent: #4355b6;
-  --accent-soft: #eef1ff;
-  --action: #4355b6;
-  --action-hover: #35449a;
+  --hover: #f0f0f3;
+  --text: #202024;
+  --muted: #62626e;
+  --faint: #767681;
+  --border: #e7e7eb;
+  --border-strong: #d4d4db;
+  --accent: #3d6cd7;
+  --accent-soft: #eef3fd;
+  --action: #3d6cd7;
+  --action-hover: #315bbc;
   --green: #357657;
   --green-soft: #eef6f0;
   --amber: #966122;
@@ -23,27 +23,27 @@
   --red-soft: #fcf0ef;
   --violet: #8a70b5;
   --chart-color: #4c72cd;
-  --shadow: 0 12px 40px #11172216;
+  --shadow: 0 12px 40px #15151616;
   --sidebar-width: 224px;
-  --panel-shadow: 0 2px 4px #11172205, 0 1px 2px #11172204;
+  --panel-shadow: 0 2px 4px #15151605, 0 1px 2px #15151604;
   font-family: "Inter", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 14px;
 }
 :root[data-theme="dark"] {
-  --bg: #111722;
-  --surface: #192230;
-  --surface-alt: #202b3b;
-  --sidebar-bg: #141c28;
-  --hover: #263248;
-  --text: #e8edf6;
-  --muted: #a9b6cb;
-  --faint: #96a5bd;
-  --border: #2c394d;
-  --border-strong: #465775;
-  --accent: #a4b4ff;
-  --accent-soft: #263354;
-  --action: #4355b6;
-  --action-hover: #35449a;
+  --bg: #151516;
+  --surface: #202022;
+  --surface-alt: #27272a;
+  --sidebar-bg: #18181a;
+  --hover: #2c2c31;
+  --text: #ededf0;
+  --muted: #adadb7;
+  --faint: #92929e;
+  --border: #333337;
+  --border-strong: #4b4b53;
+  --accent: #a2bfff;
+  --accent-soft: #27354d;
+  --action: #3d6cd7;
+  --action-hover: #315bbc;
   --green: #8bc4a1;
   --green-soft: #253129;
   --amber: #d3b07b;
@@ -51,25 +51,25 @@
   --red: #e2a1a1;
   --red-soft: #362729;
   --violet: #b09bcf;
-  --chart-color: #8ca9ec;
+  --chart-color: #83adf6;
   --panel-shadow: 0 1px 2px #00000016;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
-    --bg: #111722;
-    --surface: #192230;
-    --surface-alt: #202b3b;
-    --sidebar-bg: #141c28;
-    --hover: #263248;
-    --text: #e8edf6;
-    --muted: #a9b6cb;
-    --faint: #96a5bd;
-    --border: #2c394d;
-    --border-strong: #465775;
-    --accent: #a4b4ff;
-    --accent-soft: #263354;
-    --action: #4355b6;
-    --action-hover: #35449a;
+    --bg: #151516;
+    --surface: #202022;
+    --surface-alt: #27272a;
+    --sidebar-bg: #18181a;
+    --hover: #2c2c31;
+    --text: #ededf0;
+    --muted: #adadb7;
+    --faint: #92929e;
+    --border: #333337;
+    --border-strong: #4b4b53;
+    --accent: #a2bfff;
+    --accent-soft: #27354d;
+    --action: #3d6cd7;
+    --action-hover: #315bbc;
     --green: #8bc4a1;
     --green-soft: #253129;
     --amber: #d3b07b;
@@ -77,7 +77,7 @@
     --red: #e2a1a1;
     --red-soft: #362729;
     --violet: #b09bcf;
-    --chart-color: #8ca9ec;
+    --chart-color: #83adf6;
     --panel-shadow: 0 1px 2px #00000016;
   }
 }
@@ -123,9 +123,9 @@ button { transition: background-color .15s, border-color .15s, color .15s; }
 .page-header p { color: var(--muted); margin-top: 5px; font-size: 12px; line-height: 1.7; max-width: 640px; }
 .page-actions { display: grid; grid-template-columns: auto auto auto; align-items: center; max-width: none; flex-shrink: 0; gap: 8px; }
 .page-actions .updated-at { display: block; font-size: 10px; color: var(--faint); flex-basis: 100%; text-align: right; }
-.button { padding: 8px 13px; min-height: 35px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; font-weight: 500; box-shadow: 0 1px 2px #11172204; }
+.button { padding: 8px 13px; min-height: 35px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; font-weight: 500; box-shadow: 0 1px 2px #15151604; }
 .button:hover { color: var(--text); background: var(--hover); border-color: var(--border-strong); }
-.button.primary { color: #fff; background: var(--action); border-color: var(--action); box-shadow: 0 1px 2px #11172210; }
+.button.primary { color: #fff; background: var(--action); border-color: var(--action); box-shadow: 0 1px 2px #15151610; }
 .button.primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
 .button.small { font-size: 11px; min-height: 30px; padding: 5px 10px; }
 .button.ghost { box-shadow: none; background: transparent; border-color: transparent; }
