@@ -163,6 +163,8 @@ func (f *Failure) HTTPStatus() int {
 		return 401
 	case f.ContextLength:
 		return 413
+	case f.Code == "body_too_large":
+		return 413
 	case f.RateLimited:
 		return 429
 	case f.Code == "no_account" || f.Code == "no_available_accounts":

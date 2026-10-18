@@ -24,9 +24,6 @@ import (
 	"github.com/576469377/Agent2API/internal/web"
 )
 
-// maxBodyBytes 限制请求体大小，防止恶意大 body 打爆内存。
-const maxBodyBytes = 32 << 20
-
 // StreamEncoder 把 IR 事件编码为下游 SSE 帧。
 type StreamEncoder interface {
 	Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error)
@@ -297,12 +294,17 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		_, _ = w.Write(body)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	bodyLimit := a.cfg.Server.MaxBodyBytes()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
 	if err != nil {
-		rec.OK, rec.Status, rec.Error = false, 413, "请求体过大或读取失败"
-		common.WriteError(w, &llm.Failure{
-			Code: "body_too_large", Message: "请求体过大或读取失败", Cause: err, ClientFixable: true,
-		})
+		var sizeError *http.MaxBytesError
+		failure := &llm.Failure{Code: "body_read_failed", Message: "读取请求体失败", Cause: err, ClientFixable: true}
+		if errors.As(err, &sizeError) {
+			failure.Code = "body_too_large"
+			failure.Message = fmt.Sprintf("请求体过大（传输上限 %d MiB）", bodyLimit>>20)
+		}
+		rec.OK, rec.Status, rec.Error = false, failure.HTTPStatus(), failure.Message
+		common.WriteError(w, failure)
 		return
 	}
 

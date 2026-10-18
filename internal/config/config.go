@@ -55,6 +55,18 @@ type ServerConfig struct {
 	Port            int    `json:"port"`
 	ReadTimeoutSec  int    `json:"read_timeout_sec"`
 	WriteTimeoutSec int    `json:"write_timeout_sec"`
+	// MaxBodyMiB bounds HTTP transport bytes, independently of model token context.
+	MaxBodyMiB int64 `json:"max_body_mib,omitempty"`
+}
+
+const defaultMaxBodyMiB int64 = 256
+
+// MaxBodyBytes also supports callers constructing a zero-value ServerConfig.
+func (s ServerConfig) MaxBodyBytes() int64 {
+	if s.MaxBodyMiB <= 0 {
+		return defaultMaxBodyMiB << 20
+	}
+	return s.MaxBodyMiB << 20
 }
 
 // UpstreamConfig 是上游配置。
@@ -219,6 +231,7 @@ func Default() Config {
 			Port:            8787,
 			ReadTimeoutSec:  60,
 			WriteTimeoutSec: 0, // 流式响应不能有写超时
+			MaxBodyMiB:      defaultMaxBodyMiB,
 		},
 		Upstream: UpstreamConfig{
 			// Platform 留空 = 自动集成：启动时逐个探测全部内置平台，
@@ -253,6 +266,9 @@ func Load(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return cfg, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if cfg.Server.MaxBodyMiB < 0 || cfg.Server.MaxBodyMiB > (1<<43)-1 {
+		return cfg, fmt.Errorf("server.max_body_mib 必须为非负整数且不能溢出字节计数")
 	}
 	if err := cfg.Models.validateImageLimits(); err != nil {
 		return cfg, err

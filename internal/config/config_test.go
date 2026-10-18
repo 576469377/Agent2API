@@ -28,6 +28,40 @@ func TestDefaultValues(t *testing.T) {
 	}
 }
 
+func TestTransportBodyLimitConfiguration(t *testing.T) {
+	if got := (ServerConfig{}).MaxBodyBytes(); got != 256<<20 {
+		t.Fatalf("zero-value transport limit=%d", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	for _, tc := range []struct {
+		body string
+		want int64
+		bad  bool
+	}{
+		{`{"server":{"max_body_mib":64}}`, 64 << 20, false},
+		{`{"server":{"max_body_mib":0}}`, 256 << 20, false},
+		{`{"server":{"max_body_mib":-1}}`, 0, true},
+		{`{"server":{"max_body_mib":8796093022208}}`, 0, true},
+	} {
+		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if tc.bad {
+			if err == nil {
+				t.Fatalf("invalid limit accepted: %s", tc.body)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Server.MaxBodyBytes(); got != tc.want {
+			t.Fatalf("limit=%d want=%d", got, tc.want)
+		}
+	}
+}
+
 func TestExplicitPlatformStaysSingle(t *testing.T) {
 	cfg := Default()
 	cfg.Upstream.Platform = "workbuddy"

@@ -55,6 +55,8 @@
 
 ### 单请求图片数量护栏（models.image_limits）
 
+HTTP 请求体默认上限为 **256 MiB**，可通过 `server.max_body_mib` 调整；填 `0` 使用默认值。它限制包含 Base64 图片的传输字节，与模型的 token 上下文窗口独立，不会压缩图片或删除历史。超过上限返回 HTTP **413**、错误码 `body_too_large`；请求体读取失败则返回 HTTP 400、`body_read_failed`。修改后需要重启网关。
+
 网关在每次实际平台调用之前统计请求中的图片内容块，包括历史消息及 `tool_result.content` 里的图片。图片数据不会被解析、裁剪或替换；超限时返回 HTTP 400，错误码为 `image_count_exceeded`，提示目标平台 / 模型、当前张数、护栏值以及开新对话、换模型或减少历史图片。
 
 内置表来自用户提供的 2026-10-13/14 真实请求实测，维护位置为 [`internal/config/image_limits.go`](../internal/config/image_limits.go)，并非上游长期承诺：

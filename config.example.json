@@ -2,7 +2,8 @@
   "server": {
     "host": "127.0.0.1",
     "port": 8787,
-    "read_timeout_sec": 60
+    "read_timeout_sec": 60,
+    "max_body_mib": 256
   },
   "upstream": {
     "sanitize": true,

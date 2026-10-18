@@ -164,6 +164,7 @@ func TestHTTPStatusTable(t *testing.T) {
 		{"timeout", func(f *Failure) { f.Timeout = true }, 504},
 		{"unauthorized", func(f *Failure) { f.Unauthorized = true }, 401},
 		{"context_length", func(f *Failure) { f.ContextLength = true }, 413},
+		{"body_too_large", func(f *Failure) { f.Code = "body_too_large"; f.ClientFixable = true }, 413},
 		{"rate_limited", func(f *Failure) { f.RateLimited = true }, 429},
 		{"client_fixable", func(f *Failure) { f.ClientFixable = true }, 400},
 		{"upstream_fault", func(f *Failure) { f.UpstreamFault = true }, 502},
