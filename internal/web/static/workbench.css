@@ -302,6 +302,7 @@ body[data-density="compact"] .resource-table .requested-model { display: none; }
 .provider-row { padding: 20px 20px 0; min-width: 0; }
 .provider-row:hover { border-color: var(--border-strong); }
 .provider-heading { display: flex; align-items: center; gap: 13px; }
+.provider-setup-note { margin-top: 14px; color: var(--muted); font-size: var(--font-small); line-height: 1.65; }
 .provider-emblem { width: 39px; height: 39px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-alt); border: 1px solid var(--border); color: var(--muted); flex: none; }
 .provider-emblem .icon { width: 20px; height: 20px; stroke-width: 1.4; }
 .provider-identity { flex: 1; min-width: 0; }

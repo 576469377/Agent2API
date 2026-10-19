@@ -50,6 +50,8 @@ type ToolResult struct {
 // Content 是一个内容块。用标签联合而非接口，避免为每种组合写一套方法。
 type Content struct {
 	Type ContentType
+	// CacheControl preserves an explicit provider cache breakpoint on this block.
+	CacheControl *CacheControl
 
 	// ContentText / ContentThinking 的载荷
 	Text     string
@@ -76,9 +78,16 @@ type Message struct {
 
 // ToolDefinition 是工具定义。Parameters 是 JSON Schema。
 type ToolDefinition struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
+	Name         string
+	Description  string
+	Parameters   map[string]any
+	CacheControl *CacheControl
+}
+
+// CacheControl is an opt-in cache hint, not a guarantee of an upstream cache hit.
+type CacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 // ToolChoiceMode 是工具选择模式。
@@ -97,20 +106,27 @@ type ToolChoice struct {
 	FunctionName string // Mode == ToolChoiceFunction 时有效
 }
 
-// Usage 是 token 用量。
+// Usage 是 token 用量。InputTokens includes cache reads and writes;
+// CachedTokens and CacheWriteTokens are subsets, never additional input.
 type Usage struct {
-	InputTokens     int
-	OutputTokens    int
-	ReasoningTokens int
-	CachedTokens    int
-	TotalTokens     int
+	InputTokens      int
+	OutputTokens     int
+	ReasoningTokens  int
+	CachedTokens     int
+	CacheWriteTokens int
+	TotalTokens      int
 }
 
 // RequestMessages 是发送给任意上游适配器的完整请求上下文。
 type RequestMessages struct {
 	Model        string
 	SystemPrompt string // 独立于消息历史
-	Messages     []Message
+	// SystemBlocks retains explicit cache boundaries; SystemPrompt remains the
+	// text fallback for providers that do not expose per-block caching.
+	SystemBlocks   []Content
+	CacheControl   *CacheControl
+	PromptCacheKey string
+	Messages       []Message
 
 	Tools       []ToolDefinition
 	ToolChoice  *ToolChoice

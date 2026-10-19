@@ -1,13 +1,13 @@
 # Agent2API
 
-**An extensible local gateway that translates AI agent platforms' private protocols into standard LLM APIs.**
+**One local gateway for multiple AI platforms, with standard LLM APIs.**
 
-Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, account scheduling, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China and WorkBuddy International.** Future adapters can reuse these common layers.
+Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China, WorkBuddy International, free OpenRouter models and Cursor Free allowance.**
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
-[简体中文](README.md) · **English** · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/576469377/Agent2API/issues)
+[简体中文](README.md) · **English** · [Quick start](docs/quickstart.md) · [Platforms](docs/platforms.md) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/576469377/Agent2API/issues)
 
 ![Extensible platform adapters, one gateway and standard API protocols](docs/assets/gateway.svg)
 
@@ -20,17 +20,27 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 
 | Capability | Available today |
 |---|---|
-| Implemented platforms | WorkBuddy / CodeBuddy China and WorkBuddy International |
-| Extension | Implement a platform adapter and register it with the Hub; other platforms are not implemented yet |
 | APIs | Chat Completions, Responses, Anthropic Messages; streaming and non-streaming |
 | Routing | Platform prefixes, aliases, optional same-name fallback before stream acceptance |
-| Accounts | Region isolation, credential discovery and refresh, pools, affinity, concurrency limits |
+| Accounts | WorkBuddy region isolation, credential discovery and refresh, pools, affinity, optional concurrency limits |
 | Conversations | Text, image input, reasoning and native tool calls; model capabilities vary |
 | Management | Nine-page console, interactive trends, usage analytics, combined log filters, account tables, client setup, English / Chinese and themes |
+| Extension | Platform adapters reuse shared routing, protocol layers and the console |
+
+## Choose an upstream
+
+| Platform ID | Authentication | Scope and limits |
+|---|---|---|
+| `workbuddy` | China desktop login or console device authorization | Account pools; model availability and credit rates follow the catalogue, paid requests remain possible |
+| `workbuddy-global` | International desktop login or console device authorization | Independent region and pool; encrypted desktop credentials verified on Windows |
+| `openrouter` | Your own `OPENROUTER_API_KEY` | Live free catalogue; paid and unknown-price models rejected; no WorkBuddy pool |
+| `cursor` | Personal Free desktop login under the same OS user | Only `cursor/composer-2.5`; entitlement checks before each generation; no images or sampling parameters |
+
+**Starting without a config enables only the two WorkBuddy regions. [config.example.json](config.example.json) enables all four platforms.** Keep the platforms you need and load it explicitly with `-config config.json`. API compatibility does not imply identical upstream capabilities. See [platform support and limits](docs/platforms.md) (Chinese).
 
 ## Quick start
 
-Install **Go 1.23+**. The examples use WorkBuddy, the currently supported integration. Reuse an authorized desktop login or start the gateway and sign in through its console. These commands build the current default branch.
+Install **Go 1.23+**. These commands build the current default branch and start WorkBuddy without a config file. Reuse an authorized desktop login or sign in through the console. Other platforms have their own setup steps in the [quick-start guide](docs/quickstart.md).
 
 ```powershell
 # Windows PowerShell
@@ -48,7 +58,7 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 ./bin/agent2api
 ```
 
-Open **[http://127.0.0.1:8787](http://127.0.0.1:8787)**. Confirm the region on Platforms, copy a complete model ID from Models, then verify a reply in the playground.
+Open **[http://127.0.0.1:8787](http://127.0.0.1:8787)**. Confirm the platform and its authentication method on Platforms, complete sign-in or key setup, copy a complete model ID from Models, then verify a reply in the playground.
 
 - Default startup keeps both regions available. Platforms without usable credentials show “Sign in needed” and accept a first account through the console.
 - Select China with `-platform workbuddy`, or International with `-platform workbuddy-global`.
@@ -70,7 +80,7 @@ Clients use gateway port **8787**. The separate console's default port **8788** 
 
 Without a gateway key, authentication is disabled; use `agent2api-local` if a client requires a value. With a gateway key configured, every client must use that same key. Keep default content sanitization enabled for client integration.
 
-Sync both regions into one ZCode provider without replacing existing model preferences, ordering, disabled states or default selection. Start the gateway and prepare a local config first:
+Sync confirmed free models from connected platforms into one ZCode provider. Paid, dynamic, unknown and unavailable entries are removed; retained free models keep their preferences and ordering. A removed default is replaced with an enabled free model. Start the gateway and prepare a local config first:
 
 ```powershell
 Copy-Item config.example.json config.json  # First setup only; preserve an existing config
@@ -86,6 +96,8 @@ See the [client guide](docs/clients.md) for authentication, requests, backups an
 |---|---|
 | `workbuddy/model` | Pins China |
 | `workbuddy-global/model` | Pins International |
+| `cursor/composer-2.5` | Personal Cursor Free allowance; signed-in desktop installation required |
+| `openrouter/author/model:free` | Pins a free OpenRouter model; copy the exact catalogue ID |
 | Bare model name | First matching platform in configuration order |
 | Configured alias | Maps to a real model, optionally pinning a platform |
 
@@ -95,7 +107,7 @@ The catalog is account-dependent. **Catalog support, scheduling readiness and re
 
 ## Web console
 
-Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share the same gateway data. Interactive trends, diagnostics and cumulative rankings link to filtered logs. Switch between account tables and cards, or copy real gateway endpoints and request examples for all three protocols.
+Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share data from configured platforms. Interactive trends, diagnostics and cumulative rankings link to filtered logs. WorkBuddy supports account sign-in and pool management; OpenRouter and Cursor use their own setup methods. Copy real gateway endpoints and request examples for all three protocols.
 
 The UI is embedded in the gateway; no frontend build is required. A standalone console can load updated assets **without restarting a gateway in use or changing client endpoints**. See the [console guide](docs/console.md). Ordinary pages use local resources; math loads KaTeX on demand and falls back to source text offline.
 
@@ -106,6 +118,7 @@ Detailed guides are currently in Chinese, with copyable commands, field names an
 | Task | Guide |
 |---|---|
 | Install, log in, start and verify | [Quick start](docs/quickstart.md) |
+| Compare platform authentication, capabilities and limits | [Platforms](docs/platforms.md) |
 | Connect ZCode or other clients | [Clients](docs/clients.md) |
 | Configure regions, prefixes, aliases and fallback | [Configuration](docs/configuration.md) |
 | Manage accounts, cooldowns and concurrency | [Accounts](docs/accounts.md) |
@@ -118,11 +131,11 @@ The [documentation index](docs/README.md) separates historical designs from prot
 
 ## Configuration
 
-See the [configuration guide](docs/configuration.md) for CLI flags, environment variables, JSON, dual-region examples, aliases, concurrency and Prometheus. Start with [config.example.json](config.example.json).
+See the [configuration guide](docs/configuration.md) for CLI flags, environment variables, JSON, multi-platform examples, aliases, concurrency and Prometheus. Start with [config.example.json](config.example.json), remove platforms you do not need and load it explicitly.
 
 ## Multi-account pools
 
-Pools schedule your authorized accounts by health, with affinity, concurrency limits and model cooldowns. Keep the regions in separate credential directories. See [Accounts](docs/accounts.md).
+WorkBuddy pools schedule your authorized accounts by health, with affinity, optional concurrency limits and model cooldowns. Concurrency is unlimited by default. Keep the regions in separate credential directories. OpenRouter and Cursor do not use this pool. See [Accounts](docs/accounts.md).
 
 ## Supported APIs
 
@@ -134,7 +147,7 @@ Credentials grant account access. Do not publish local config, account files, ZC
 
 ## Architecture
 
-Protocol codecs communicate with upstream adapters through a dependency-free IR. The Hub routes between independent regional pools. See the [current architecture](docs/architecture.md); original design proposals remain in the documentation index.
+Protocol codecs communicate with upstream adapters through a dependency-free IR. The Hub routes between WorkBuddy's regional pools and independently authenticated OpenRouter / Cursor adapters. See the [current architecture](docs/architecture.md); original design proposals remain in the documentation index.
 
 ## Known Limitations
 
@@ -144,17 +157,18 @@ Protocol codecs communicate with upstream adapters through a dependency-free IR.
 - Cooldowns, affinity and concurrency slots are process-local; instances do not share state.
 - Reasoning has no upstream signature. Text-mode DSML tool-call fallback is not implemented.
 - International encrypted desktop credentials have only been verified end to end on Windows.
+- Cursor retains native Agent rules and receives client system instructions as context. Images, sampling, effort, JSON output mode and stop parameters are unsupported. Output budgets are enforced by the gateway; see [platform limits](docs/platforms.md).
 
 ## Testing
 
 ```bash
 go test ./...
 go vet ./...
-node --test scripts/test-console-core.mjs scripts/test-console-monitor.mjs
-python -m unittest discover -s scripts -p test_sync_zcode.py
+node --test scripts/test-console-*.mjs
+python -m unittest discover -s scripts -p 'test_*.py'
 ```
 
-Tests use offline fixtures and mock services rather than consuming real model quota. Frontend tests need Node.js; ZCode tooling needs Python 3.9+. Neither runtime is required by the gateway. See [Contributing](CONTRIBUTING.md) for race detection and development workflows.
+Tests use offline fixtures and mock services rather than consuming real model quota. Frontend tests need Node.js; ZCode and diagnostic tooling need Python 3.9+. Ordinary gateway builds need neither runtime; Cursor credential reading on macOS / Linux requires Python 3. See [Contributing](CONTRIBUTING.md) for race detection and development workflows.
 
 ## FAQ
 
@@ -166,6 +180,7 @@ See [Troubleshooting](docs/troubleshooting.md) for keys, model collisions, quota
 - [x] Redesigned console and standalone UI without gateway restarts
 - [x] Incremental ZCode model sync preserving preferences
 - [x] Account pools, concurrency limits, model aliases and Prometheus metrics
+- [x] Free-only OpenRouter models and Cursor Composer 2.5 Free allowance
 - [ ] macOS / Linux verification of international encrypted credentials
 - [ ] Additional upstream platforms and protocol drift detection
 - [ ] Quota queries, per-key usage and shared scheduling state

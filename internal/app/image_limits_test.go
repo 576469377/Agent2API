@@ -38,6 +38,8 @@ func imageGuardApp(t *testing.T, cfg config.Config) (*App, *imageGuardAdapter, *
 	t.Helper()
 	models := []adapter.ModelInfo{{ID: "hy3"}, {ID: "step-5-preview"}, {ID: "deepseek-v4.1-flash"}}
 	cn, global := &imageGuardAdapter{models: models}, &imageGuardAdapter{models: models}
+	cn.events = []llm.ResponseEvent{{Type: llm.EventDone}}
+	global.events = []llm.ResponseEvent{{Type: llm.EventDone}}
 	var logs bytes.Buffer
 	logger := log.New(&logs, "", 0)
 	hub, err := NewHub([]*PlatformRuntime{{ID: "workbuddy", Adapter: cn}, {ID: "workbuddy-global", Adapter: global}}, logger)

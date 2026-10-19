@@ -34,6 +34,10 @@ func TestConfiguredBodyLimitReturns413BeforeCallingUpstream(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge || cn.calls+upstream.calls != 0 || !strings.Contains(w.Body.String(), "body_too_large") {
 		t.Fatalf("oversized body: status=%d upstream calls=%d body=%s", w.Code, cn.calls+upstream.calls, w.Body.String())
 	}
+	snapshot := a.metrics.Snapshot()
+	if snapshot.Total != 1 || snapshot.OK != 0 || snapshot.Failed != 1 || snapshot.InFlight != 0 || snapshot.Recent[0].Status != w.Code || !strings.Contains(w.Body.String(), "1 MiB") {
+		t.Fatalf("configured limit or recorded outcome lost during merge: status=%d metrics=%+v body=%s", w.Code, snapshot, w.Body.String())
+	}
 }
 
 type brokenBody struct{}

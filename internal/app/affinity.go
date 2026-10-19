@@ -16,34 +16,28 @@ import (
 //     每轮耗时稳定在 6.6~7s。
 //  2. 同一会话固定在同一账号，模型行为与限流状态更可预测。
 //
-// 注意：实测 WorkBuddy 上游**没有可观测的 prompt cache**（同前缀三次请求
-// 延迟无递减、usage 无 cached_tokens），所以这里不做「保缓存」的承诺；
-// 亲和的价值在重复处理成本与一致性。上游若未来加入缓存，此机制自动受益。
+// 亲和避免无故切换账号；缓存是否命中仍以该次上游 usage 为准，
+// 不能仅凭响应耗时或没有上报缓存字段就断定上游不支持缓存。
 
 // sessionKeyOf 提取会话路由键。
 //
 // 优先级：
-//  1. 显式会话请求头：session_id / X-Session-Id / X-Session-ID / Session-Id
+//  1. body.session_id，然后显式会话请求头：session_id / X-Session-Id / Session-Id
 //     ——客户端明说「这是同一个会话」时最可信（sub2api 也是用 session_id 头
 //     做粘性会话）。注意 Nginx 默认**丢弃带下划线的请求头**，自建反代要
 //     `underscores_in_headers on;` 才能透传 session_id。
-//  2. Anthropic: metadata.user_id（Claude Code 每轮都发）
-//  3. OpenAI: user 字段
+//  2. prompt_cache_key（显式缓存路由标识）
+//  3. Anthropic metadata.user_id，然后 OpenAI user 字段
 //  4. 兜底：系统提示 + 首条 user 消息的哈希——它们在会话内稳定。
 //     （完整消息列表逐轮增长，直接哈希会每轮变化，绝不能用。）
 //
 // body 是原始请求体（避免依赖具体协议结构）；都提取不到返回空串，
 // 该请求退化为普通调度。
 func sessionKeyOf(body []byte, h http.Header) string {
-	// 1. 显式会话头。header 的 Get 大小写不敏感，但下划线是原样保留的，
-	//    因此这里要写出实际的键名（与 sub2api 的 session_id 兼容）。
-	for _, name := range []string{"session_id", "X-Session-Id", "Session-Id"} {
-		if v := strings.TrimSpace(h.Get(name)); v != "" {
-			return "s:" + v
-		}
-	}
 	var probe struct {
-		Metadata struct {
+		SessionID      string `json:"session_id"`
+		PromptCacheKey string `json:"prompt_cache_key"`
+		Metadata       struct {
 			UserID string `json:"user_id"`
 		} `json:"metadata"`
 		User         string            `json:"user"`
@@ -52,8 +46,20 @@ func sessionKeyOf(body []byte, h http.Header) string {
 		Input        json.RawMessage   `json:"input"`
 		Messages     []affinityMessage `json:"messages"`
 	}
-	if err := json.Unmarshal(body, &probe); err != nil {
+	err := json.Unmarshal(body, &probe)
+	if strings.TrimSpace(probe.SessionID) != "" {
+		return "s:" + probe.SessionID
+	}
+	for _, name := range []string{"session_id", "X-Session-Id", "Session-Id"} {
+		if v := strings.TrimSpace(h.Get(name)); v != "" {
+			return "s:" + v
+		}
+	}
+	if err != nil {
 		return ""
+	}
+	if probe.PromptCacheKey != "" {
+		return "p:" + probe.PromptCacheKey
 	}
 	if probe.Metadata.UserID != "" {
 		return "u:" + probe.Metadata.UserID

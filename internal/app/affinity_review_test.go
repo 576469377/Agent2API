@@ -38,3 +38,17 @@ func TestSessionKeyIncludesChatSystemAndHonorsExplicitSession(t *testing.T) {
 		t.Fatal("explicit session must win")
 	}
 }
+
+func TestExplicitCacheRoutingSurvivesChangingConversationPrefix(t *testing.T) {
+	for _, tc := range []struct{ field, expected string }{{"session_id", "s:fixed"}, {"prompt_cache_key", "p:fixed"}} {
+		a := []byte(`{"` + tc.field + `":"fixed","metadata":{"user_id":"user"},"messages":[{"role":"user","content":"one"}]}`)
+		b := []byte(`{"` + tc.field + `":"fixed","metadata":{"user_id":"user"},"messages":[{"role":"user","content":"different opening"}]}`)
+		if sessionKeyOf(a, nil) != tc.expected || sessionKeyOf(b, nil) != tc.expected {
+			t.Fatal("explicit cache routing was discarded")
+		}
+	}
+	h := http.Header{"X-Session-Id": []string{"header"}}
+	if sessionKeyOf([]byte(`{"session_id":"body"}`), h) != "s:body" {
+		t.Fatal("body session_id must have OpenRouter's documented precedence")
+	}
+}

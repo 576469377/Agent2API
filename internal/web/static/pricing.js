@@ -25,8 +25,12 @@ export function mergePricingSnapshot(models, snapshot) {
 export function modelPricing(model, now = Date.now()) {
   const p = model?.pricing;
   const time = Date.parse(p?.observed_at || "");
-  if (!p || p.source !== "upstream_config" || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
+  if (!p || !["upstream_config", "openrouter_models", "cursor_free_plan"].includes(p.source) || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
   const result = { status: "unknown", observedAt: p.observed_at, raw: typeof p.upstream_label === "string" ? p.upstream_label.slice(0, 128) : "", stale: now - time > RATE_MAX_AGE_MS, refreshFailed: model.pricing_sync_failed === true };
+  if (p.source === "openrouter_models" || p.source === "cursor_free_plan") {
+    if (p.status === "free" && !result.stale && !result.refreshFailed) result.status = "free";
+    return result;
+  }
   const rate = p.credit_multiplier;
   if (typeof rate === "number" && Number.isFinite(rate) && rate >= 0) {
     result.multiplier = rate;
@@ -59,7 +63,7 @@ export function pricingChanges(before = [], after = [], now = Date.now()) {
 
 // Unknown/dynamic rates always follow fixed rates; ties keep explicit routes.
 export function compareModelRates(a, b, now = Date.now()) {
-  const value = (model) => { const p = modelPricing(model, now); return ["free", "credits"].includes(p.status) ? p.multiplier : Infinity; };
+  const value = (model) => { const p = modelPricing(model, now); return p.status === "free" ? 0 : p.status === "credits" ? p.multiplier : Infinity; };
   const left = value(a), right = value(b);
   return left === right ? 0 : left < right ? -1 : 1;
 }

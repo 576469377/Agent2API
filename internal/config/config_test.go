@@ -71,6 +71,40 @@ func TestExplicitPlatformStaysSingle(t *testing.T) {
 	}
 }
 
+func TestOpenRouterCredentialsStayWithinPlatform(t *testing.T) {
+	cfg := Default()
+	cfg.Upstream.Platform = "openrouter"
+	cfg.Upstream.APIKey = "test-upstream"
+	cfg.Upstream.APIKeyEnv = "TEST_ROUTER_KEY"
+	cfg.Auth.APIKey = "test-gateway"
+	pc := cfg.ResolvePlatforms()[0]
+	clone := cfg.CloneForPlatform(pc)
+	if clone.Upstream.APIKey != "test-upstream" || clone.Upstream.APIKeyEnv != "TEST_ROUTER_KEY" || clone.Auth.APIKey != "test-gateway" {
+		t.Fatal("single platform lost upstream credentials or gateway authentication")
+	}
+	cn := cfg.CloneForPlatform(PlatformConfig{ID: "workbuddy"})
+	if cn.Upstream.APIKey != "" || cn.Upstream.APIKeyEnv != "" {
+		t.Fatal("OpenRouter key leaked into another platform")
+	}
+	other := cfg.CloneForPlatform(PlatformConfig{ID: "openrouter", APIKeyEnv: "SECOND_ROUTER_KEY"})
+	if other.Upstream.APIKey != "" || other.Upstream.APIKeyEnv != "SECOND_ROUTER_KEY" {
+		t.Fatal("platform key override failed")
+	}
+}
+
+func TestDirectProvidersDoNotInheritOtherPlatformEndpoints(t *testing.T) {
+	cfg := Default()
+	cfg.Upstream.BaseURL = "https://workbuddy.example.invalid"
+	cfg.Upstream.CredentialPath = "other-platform.json"
+	cfg.Upstream.AccountsDir = "other-accounts"
+	for _, id := range []string{"cursor", "openrouter"} {
+		clone := cfg.CloneForPlatform(PlatformConfig{ID: id})
+		if clone.Upstream.BaseURL != "" || clone.Upstream.CredentialPath != "" || clone.Upstream.AccountsDir != "" {
+			t.Fatalf("%s inherited another provider's settings", id)
+		}
+	}
+}
+
 func TestLoadMissingFileUsesDefaultAndEnv(t *testing.T) {
 	t.Setenv("AGENT2API_PORT", "9001")
 	t.Setenv("AGENT2API_API_KEY", "k-test")

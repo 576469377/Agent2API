@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/cursor"
+	"github.com/576469377/Agent2API/internal/adapter/openrouter"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/config"
 )
@@ -17,7 +19,7 @@ func platformDefaultPaths(platform string) []string {
 	return workbuddy.DefaultCredentialPathsForPlatform(platform)
 }
 
-// buildAdapter 按配置装配上游：**恒返回号池**（哪怕只有一个账号）。
+// buildAdapter 为 WorkBuddy 装配号池；OpenRouter 使用单个 API Key 直连。
 //
 // 单账号也走池的原因：控制台「添加账号」/ 手动放凭证进号池目录后，
 // 监视器（poolwatch.go）要能在运行期把新账号 Add 进来 —— 若单账号时
@@ -28,6 +30,10 @@ func platformDefaultPaths(platform string) []string {
 // 任一账号加载失败只记日志不阻断启动——多账号场景下坏一个文件不该拖死网关；
 // 没有可用凭证时保留空池，供控制台首次登录和目录监视器后续入池。
 func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) }) (adapter.Adapter, *adapter.Pool, error) {
+	if cfg.Upstream.Platform == openrouter.Platform || cfg.Upstream.Platform == cursor.Platform {
+		a, err := newPlatformAdapter(cfg, "", nil)
+		return a, nil, err
+	}
 	paths := collectCredentialPaths(cfg)
 
 	logf := func(format string, args ...any) { logger.Printf(format, args...) }
@@ -102,6 +108,17 @@ func accountLabel(path string, adp adapter.Adapter) string {
 // 平台差异全部收在这个工厂里：号池与下游协议都只依赖 adapter.Adapter 接口，
 // 新增平台时只需在这里加一个分支。
 func newPlatformAdapter(cfg config.Config, credPath string, logf func(string, ...any)) (adapter.Adapter, error) {
+	if cfg.Upstream.Platform == cursor.Platform {
+		return cursor.New(cursor.Config{BaseURL: cfg.Upstream.BaseURL, CredentialPath: cfg.Upstream.CredentialPath,
+			RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout()})
+	}
+	if cfg.Upstream.Platform == openrouter.Platform {
+		return openrouter.New(openrouter.Config{
+			BaseURL: cfg.Upstream.BaseURL, APIKey: cfg.Upstream.APIKey, APIKeyEnv: cfg.Upstream.APIKeyEnv,
+			RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(),
+			StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL(),
+		})
+	}
 	adp, err := workbuddy.New(workbuddy.Config{
 		Platform:           cfg.Upstream.Platform,
 		BaseURL:            cfg.Upstream.BaseURL,

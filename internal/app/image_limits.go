@@ -98,6 +98,7 @@ func (a *App) openPlatformStream(ctx context.Context, rt *PlatformRuntime, req l
 	var rec *obs.Record
 	if len(records) > 0 && records[0] != nil {
 		rec = records[0]
+		a.setRouteRecord(rec, rt)
 		rec.ForwardedImageCount = nil
 		rec.RemovedImageCount = 0
 		rec.ImageOverflowPolicy = policy

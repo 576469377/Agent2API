@@ -6,6 +6,10 @@ export const requestKey = (row) => JSON.stringify([
 
 export const accountKey = (row) => JSON.stringify([row.platform || "", row.account || ""]);
 
+// A missing final usage report is not a measured zero. Retain numeric legacy
+// observations while allowing explicitly reported all-zero usage in new rows.
+export const hasTokenUsage = row => row?.usage_reported === true || Number.isFinite(row?.input_tokens) || Number.isFinite(row?.output_tokens);
+
 export function filterRequests(rows, filters = {}, now = Date.now()) {
   const query = (filters.query || "").trim().toLowerCase();
   const since = filters.range && filters.range !== "all" ? now - Number(filters.range) * 60000 : -Infinity;

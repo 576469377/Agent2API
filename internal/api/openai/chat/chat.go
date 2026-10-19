@@ -20,10 +20,12 @@ func (Protocol) Name() string { return "openai-chat" }
 // ───────────────────────── 请求解码 ─────────────────────────
 
 type request struct {
-	Model         string       `json:"model"`
-	Messages      []rawMessage `json:"messages"`
-	Stream        bool         `json:"stream"`
-	StreamOptions *struct {
+	CacheControl   *llm.CacheControl `json:"cache_control"`
+	PromptCacheKey string            `json:"prompt_cache_key"`
+	Model          string            `json:"model"`
+	Messages       []rawMessage      `json:"messages"`
+	Stream         bool              `json:"stream"`
+	StreamOptions  *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options"`
 	Tools           []rawTool `json:"tools"`
@@ -57,8 +59,9 @@ type rawToolCall struct {
 }
 
 type rawTool struct {
-	Type     string `json:"type"`
-	Function struct {
+	Type         string            `json:"type"`
+	CacheControl *llm.CacheControl `json:"cache_control"`
+	Function     struct {
 		Name        string         `json:"name"`
 		Description string         `json:"description"`
 		Parameters  map[string]any `json:"parameters"`
@@ -80,6 +83,8 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 	}
 
 	out := llm.RequestMessages{
+		CacheControl:    r.CacheControl,
+		PromptCacheKey:  r.PromptCacheKey,
 		Model:           r.Model,
 		Messages:        make([]llm.Message, 0, len(r.Messages)),
 		MaxTokens:       r.MaxTokens,
@@ -99,7 +104,12 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 		}
 		// system 单独提取：上游要求它置顶，且脱敏只作用于它。
 		if msg.Role == llm.RoleUser && m.Role == "system" {
-			out.SystemPrompt = joinContent(msg)
+			if out.SystemPrompt != "" && len(msg.Content) > 0 {
+				out.SystemPrompt += "\n\n"
+				out.SystemBlocks = append(out.SystemBlocks, llm.Content{Type: llm.ContentText, Text: "\n\n"})
+			}
+			out.SystemPrompt += joinContent(msg)
+			out.SystemBlocks = append(out.SystemBlocks, msg.Content...)
 			continue
 		}
 		out.Messages = append(out.Messages, msg)
@@ -118,9 +128,10 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 				continue
 			}
 			out.Tools = append(out.Tools, llm.ToolDefinition{
-				Name:        t.Function.Name,
-				Description: t.Function.Description,
-				Parameters:  t.Function.Parameters,
+				Name:         t.Function.Name,
+				Description:  t.Function.Description,
+				Parameters:   t.Function.Parameters,
+				CacheControl: t.CacheControl,
 			})
 		}
 	}
@@ -158,14 +169,19 @@ func convertMessage(m rawMessage) (llm.Message, error) {
 			if part == nil {
 				continue
 			}
+			var cache *llm.CacheControl
+			if raw, ok := part["cache_control"]; ok {
+				encoded, _ := json.Marshal(raw)
+				_ = json.Unmarshal(encoded, &cache)
+			}
 			switch part["type"] {
 			case "text":
 				if t, ok := part["text"].(string); ok && t != "" {
-					msg.Content = append(msg.Content, llm.Content{Type: llm.ContentText, Text: t})
+					msg.Content = append(msg.Content, llm.Content{Type: llm.ContentText, Text: t, CacheControl: cache})
 				}
 			case "image_url":
 				if u := extractImageURL(part["image_url"]); u != "" {
-					msg.Content = append(msg.Content, llm.Content{Type: llm.ContentImage, ImageURL: u})
+					msg.Content = append(msg.Content, llm.Content{Type: llm.ContentImage, ImageURL: u, CacheControl: cache})
 				}
 			}
 		}
@@ -180,7 +196,7 @@ func convertMessage(m rawMessage) (llm.Message, error) {
 	if role == llm.RoleTool && len(msg.Content) > 0 {
 		// 归一化为 ToolResult，便于上游还原；若含图片则一并保留在 Blocks 里。
 		tr := &llm.ToolResult{ToolCallID: m.ToolCallID, Content: joinContent(msg)}
-		if contentHasImage(msg.Content) {
+		if contentHasImage(msg.Content) || contentHasCacheControl(msg.Content) {
 			tr.Blocks = msg.Content
 		}
 		msg.Content = []llm.Content{{Type: llm.ContentToolResult, ToolResult: tr}}
@@ -214,6 +230,15 @@ func joinContent(m llm.Message) string {
 func contentHasImage(blocks []llm.Content) bool {
 	for _, b := range blocks {
 		if b.Type == llm.ContentImage {
+			return true
+		}
+	}
+	return false
+}
+
+func contentHasCacheControl(blocks []llm.Content) bool {
+	for _, block := range blocks {
+		if block.CacheControl != nil {
 			return true
 		}
 	}
@@ -300,15 +325,31 @@ type streamChunk struct {
 }
 
 type usage struct {
-	PromptTokens     int           `json:"prompt_tokens"`
-	CompletionTokens int           `json:"completion_tokens"`
-	TotalTokens      int           `json:"total_tokens"`
-	Details          *usageDetails `json:"completion_tokens_details,omitempty"`
+	PromptTokens     int                 `json:"prompt_tokens"`
+	CompletionTokens int                 `json:"completion_tokens"`
+	TotalTokens      int                 `json:"total_tokens"`
+	Details          *usageDetails       `json:"completion_tokens_details,omitempty"`
+	PromptDetails    *promptUsageDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 type usageDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
-	CachedTokens    int `json:"cached_tokens,omitempty"`
+}
+
+type promptUsageDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+}
+
+func encodeUsage(u llm.Usage) *usage {
+	out := &usage{PromptTokens: u.InputTokens, CompletionTokens: u.OutputTokens, TotalTokens: u.TotalTokens}
+	if u.ReasoningTokens > 0 {
+		out.Details = &usageDetails{ReasoningTokens: u.ReasoningTokens}
+	}
+	if u.CachedTokens > 0 || u.CacheWriteTokens > 0 {
+		out.PromptDetails = &promptUsageDetails{CachedTokens: u.CachedTokens, CacheWriteTokens: u.CacheWriteTokens}
+	}
+	return out
 }
 
 // StreamEncoder 把 IR 事件编码为 Chat Completions 流式帧。
@@ -436,14 +477,7 @@ func (e *StreamEncoder) done(ev llm.ResponseEvent) ([]common.SSEEvent, error) {
 	}
 	var u *usage
 	if ev.Usage != nil {
-		u = &usage{
-			PromptTokens:     ev.Usage.InputTokens,
-			CompletionTokens: ev.Usage.OutputTokens,
-			TotalTokens:      ev.Usage.TotalTokens,
-		}
-		if ev.Usage.ReasoningTokens > 0 || ev.Usage.CachedTokens > 0 {
-			u.Details = &usageDetails{ReasoningTokens: ev.Usage.ReasoningTokens, CachedTokens: ev.Usage.CachedTokens}
-		}
+		u = encodeUsage(*ev.Usage)
 	}
 	data, err := json.Marshal(streamChunk{
 		ID: e.id, Object: "chat.completion.chunk", Created: e.created, Model: e.model,
@@ -528,11 +562,7 @@ func (Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, er
 		"choices": []map[string]any{
 			{"index": 0, "message": message, "finish_reason": reason, "logprobs": nil},
 		},
-		"usage": map[string]any{
-			"prompt_tokens":     msg.Usage.InputTokens,
-			"completion_tokens": msg.Usage.OutputTokens,
-			"total_tokens":      msg.Usage.TotalTokens,
-		},
+		"usage": encodeUsage(msg.Usage),
 	}
 	return json.Marshal(resp)
 }

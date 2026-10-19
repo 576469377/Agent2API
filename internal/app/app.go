@@ -303,8 +303,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 			failure.Code = "body_too_large"
 			failure.Message = fmt.Sprintf("请求体过大（传输上限 %d MiB）", bodyLimit>>20)
 		}
-		rec.OK, rec.Status, rec.Error = false, failure.HTTPStatus(), failure.Message
-		common.WriteError(w, failure)
+		common.WriteError(w, a.fail(rec, failure))
 		return
 	}
 
@@ -381,6 +380,8 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	rec.InputTokens = int64(msg.Usage.InputTokens)
 	rec.OutputTokens = int64(msg.Usage.OutputTokens)
 	rec.ReasoningTokens = int64(msg.Usage.ReasoningTokens)
+	rec.CachedTokens = int64(msg.Usage.CachedTokens)
+	rec.CacheWriteTokens = int64(msg.Usage.CacheWriteTokens)
 	// 未产出 token 或耗时不足 1ms 的请求不计入 TPS，避免污染分母。
 	if rec.OutputTokens > 0 && genMs > 0 {
 		rec.GenMs = genMs
@@ -392,7 +393,17 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(payload)
+	if _, err := w.Write(payload); err != nil {
+		a.recordWriteFailure(rec)
+	}
+}
+
+func (a *App) recordWriteFailure(rec *obs.Record) {
+	if rec.OK {
+		rec.OK = false
+		rec.Status = 499
+		rec.Error = "client_write_failed: 响应写回客户端失败"
+	}
 }
 
 // fail 把失败信息写入观测记录。
@@ -436,7 +447,16 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 	enc := proto.NewStreamEncoder(req.Model, req.IncludeUsage)
 	common.WriteSSEHeaders(w)
 
-	flusher, canFlush := w.(http.Flusher)
+	_, canFlush := w.(http.Flusher)
+	flush := func() bool {
+		if canFlush {
+			if err := http.NewResponseController(w).Flush(); err != nil {
+				a.recordWriteFailure(rec)
+				return false
+			}
+		}
+		return true
+	}
 	committed := false
 	dst := make([]byte, 0, 4096)
 	// 解码循环的起点，用作 TPS 的分母起点。
@@ -462,9 +482,12 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 				dst = proto.AppendSSE(dst, sse.Name, sse.Data)
 			}
 			if len(dst) > 0 {
-				_, _ = w.Write(dst)
-				if canFlush {
-					flusher.Flush()
+				if _, err := w.Write(dst); err != nil {
+					a.recordWriteFailure(rec)
+					return
+				}
+				if !flush() {
+					return
 				}
 			}
 			return
@@ -474,6 +497,8 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 			rec.InputTokens = int64(ev.Usage.InputTokens)
 			rec.OutputTokens = int64(ev.Usage.OutputTokens)
 			rec.ReasoningTokens = int64(ev.Usage.ReasoningTokens)
+			rec.CachedTokens = int64(ev.Usage.CachedTokens)
+			rec.CacheWriteTokens = int64(ev.Usage.CacheWriteTokens)
 			// 用法事件到达即视为生成结束；未产出 token 或不足 1ms 的不计入 TPS。
 			if ms := time.Since(genStart).Milliseconds(); rec.OutputTokens > 0 && ms > 0 {
 				rec.GenMs = ms
@@ -483,7 +508,11 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 		events, err := enc.Encode(ev)
 		if err != nil {
 			a.logger.Printf("编码事件失败: %v", err)
-			continue
+			a.fail(rec, &llm.Failure{Code: "encode_failed", Message: "响应事件编码失败", Cause: err})
+			if !committed {
+				common.WriteError(w, llm.Wrap(err))
+			}
+			return
 		}
 		for _, sse := range events {
 			dst = proto.AppendSSE(dst, sse.Name, sse.Data)
@@ -493,18 +522,22 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 		}
 		// 批次合并：一次 Write + Flush 下发当前所有待发帧。
 		if _, err := w.Write(dst); err != nil {
+			a.recordWriteFailure(rec)
 			return
 		}
 		committed = true
 		dst = dst[:0]
-		if canFlush {
-			flusher.Flush()
+		if !flush() {
+			return
 		}
 	}
 	if len(dst) > 0 {
-		_, _ = w.Write(dst)
-		if canFlush {
-			flusher.Flush()
+		if _, err := w.Write(dst); err != nil {
+			a.recordWriteFailure(rec)
+			return
+		}
+		if !flush() {
+			return
 		}
 	}
 }

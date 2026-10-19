@@ -6,9 +6,36 @@ import (
 )
 
 type liveSample struct {
-	second     int64
+	at         time.Time
 	characters int64
 }
+
+type requestRateBucket struct{ second, count int64 }
+
+func (m *Metrics) beginLocked(started time.Time) {
+	m.inFlight.Add(1)
+	second := started.Unix()
+	i := second % int64(len(m.requestStarts))
+	if i < 0 {
+		i += int64(len(m.requestStarts))
+	}
+	b := &m.requestStarts[i]
+	if b.second != second {
+		*b = requestRateBucket{second: second}
+	}
+	b.count++
+}
+
+func (m *Metrics) lastMinuteRPMLocked(now time.Time) int64 {
+	var total int64
+	for _, b := range m.requestStarts {
+		if b.second > now.Unix()-60 && b.second <= now.Unix() {
+			total += b.count
+		}
+	}
+	return total
+}
+
 type liveRequest struct {
 	ID                               uint64
 	Protocol, Platform, Model        string
@@ -49,10 +76,10 @@ type LiveSnapshot struct {
 
 // BeginLive tracks counters only, never prompt, output text or credentials.
 func (m *Metrics) BeginLive(protocol string, started time.Time) uint64 {
-	m.Begin()
 	id := m.liveSequence.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.beginLocked(started)
 	m.live[id] = &liveRequest{ID: id, Protocol: protocol, Started: started}
 	return id
 }
@@ -79,13 +106,8 @@ func (m *Metrics) ObserveLive(id uint64, characters int64, now time.Time) {
 	if request.FirstOutput.IsZero() {
 		request.FirstOutput = now
 	}
-	second := now.Unix()
-	if n := len(request.Samples); n > 0 && request.Samples[n-1].second == second {
-		request.Samples[n-1].characters += characters
-	} else {
-		request.Samples = append(request.Samples, liveSample{second, characters})
-	}
-	for len(request.Samples) > 0 && request.Samples[0].second < second-3 {
+	request.Samples = append(request.Samples, liveSample{now, characters})
+	for len(request.Samples) > 0 && request.Samples[0].at.Before(now.Add(-3*time.Second)) {
 		request.Samples = request.Samples[1:]
 	}
 }
@@ -103,7 +125,7 @@ func (m *Metrics) liveSnapshotAt(now time.Time) LiveSnapshot {
 		}
 		var chars int64
 		for _, sample := range request.Samples {
-			if sample.second >= now.Unix()-2 {
+			if !sample.at.Before(now.Add(-3*time.Second)) && !sample.at.After(now) {
 				chars += sample.characters
 			}
 		}
@@ -125,8 +147,9 @@ func (m *Metrics) liveSnapshotAt(now time.Time) LiveSnapshot {
 	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].ID < out.Active[j].ID })
 	for i := len(m.recent) - 1; i >= 0; i-- {
 		r := m.recent[i]
-		if r.OutputTokens > 0 && r.GenMs > 0 {
-			out.LastCompleted = &CompletedGeneration{r.Time, r.Platform, r.Model, r.OutputTokens, r.GenMs}
+		if r.OK && r.OutputTokens > 0 && r.GenMs > 0 {
+			completed := r.Time.Add(time.Duration(r.DurationMs) * time.Millisecond)
+			out.LastCompleted = &CompletedGeneration{completed, r.Platform, r.Model, r.OutputTokens, r.GenMs}
 			break
 		}
 	}

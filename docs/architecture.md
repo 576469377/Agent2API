@@ -2,13 +2,15 @@
 
 [文档导航](README.md) · [贡献指南](../CONTRIBUTING.md)
 
-Agent2API 的核心是多平台协议网关。WorkBuddy 是目前落地的适配器，国内版与国际版是两个独立运行时；平台接入不应写入下游协议层。
+Agent2API 的核心是多平台协议网关。WorkBuddy 国内版与国际版是两个独立运行时，OpenRouter 使用官方 API Key 接入免费模型，Cursor 只读复用当前桌面 Free 登录态并通过 HTTP/2 Connect 调用 Composer 2.5；平台接入不应写入下游协议层。
 
 ```
 internal/
 ├── llm/          IR 层（零依赖）：请求/响应/错误的中间表示
 ├── adapter/      上游平台接缝：Adapter 接口
-│   └── workbuddy/  WorkBuddy 实现：认证 / 请求 / SSE / 模型 / 脱敏
+│   ├── workbuddy/  WorkBuddy 两区：认证 / 请求 / SSE / 模型 / 脱敏
+│   ├── openrouter/ 官方 API：免费目录 / 零价格限制 / 请求 / SSE
+│   └── cursor/     桌面登录态 / Free 权益核验 / HTTP/2 Connect / 客户端工具
 ├── api/          下游协议编解码
 │   ├── common/     SSE 写出、错误载荷（三协议共用）
 │   ├── openai/chat/ · openai/responses/ · anthropic/messages/
@@ -18,9 +20,9 @@ internal/
 └── config/       配置
 ```
 
-**设计要点**：`api/*` 与 `adapter/*` 互不 import，只通过 `internal/llm` 通信 —— 把「N 个平台 × M 个协议」的复杂度从 N×M 降为 N+M。接入新平台时，三个下游协议一行都不用改。
+**设计要点**：`api/*` 与 `adapter/*` 互不 import，只通过 `internal/llm` 通信，把「N 个平台 × M 个协议」的适配拆成 N+M。现有 IR 能表达上游能力时，可以复用三个下游协议；新增能力仍可能需要扩展 IR 与编解码。
 
-多平台编排由 [`internal/app/hub.go`](../internal/app/hub.go) 的 **Hub** 承担：启动时为每个平台建独立的适配器/号池/登录会话，构建「模型 ID → 平台」索引，请求按模型名路由、未命中透传默认平台。号池（`Pool`）对 Hub 来说就是一个普通 Adapter，多账号与多平台两层互不感知。
+多平台编排由 [`internal/app/hub.go`](../internal/app/hub.go) 的 **Hub** 承担：启动时为每个平台建独立运行时，构建「模型 ID → 平台」索引，请求按模型名路由、未命中透传默认平台。WorkBuddy 两区各自使用号池与设备登录；OpenRouter 直连官方 API，Cursor 复用桌面登录态。号池（`Pool`）对 Hub 来说就是一个普通 Adapter，多账号与多平台两层互不感知。认证与能力对照见[平台支持](platforms.md)。
 
 接口刻意做小：`Adapter` 只有 3 个方法（`Stream` / `ListModels` / `Name`），`ResponseStream` 只有 1 个（`Recv`）。造假适配器做测试只要十行。
 
