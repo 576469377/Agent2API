@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,8 +60,10 @@ type loginSession struct {
 type loginManager struct {
 	logf func(format string, args ...any)
 
-	mu       sync.Mutex
-	sessions map[string]*loginSession
+	mu                sync.Mutex
+	sessions          map[string]*loginSession
+	credentialMu      sync.Mutex
+	replaceCredential func(string, *workbuddy.Credential) (string, bool, error)
 }
 
 func newLoginManager(logf func(string, ...any)) *loginManager {
@@ -97,10 +100,13 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 		defer cancel()
 
+		// Keep credentials out of the watched *.json files until account identity
+		// is known. A different Google account must not overwrite an existing file.
+		stagedPath := outPath + "." + s.ID + ".login.tmp"
 		cred, err := workbuddy.Login(ctx, baseURL, workbuddy.LoginOptions{
 			Region:     platform,
 			BaseURL:    baseURL,
-			OutputPath: outPath,
+			OutputPath: stagedPath,
 			OnAuthURL: func(u string) {
 				select {
 				case urlReady <- u:
@@ -108,6 +114,10 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 				}
 			},
 		})
+		finalPath := outPath
+		if err == nil {
+			finalPath, err = m.commitCredential(platform, outPath, stagedPath, cred)
+		}
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -119,21 +129,11 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 			return
 		}
 		s.Status = loginSuccess
+		s.OutPath = finalPath
 		if cred.Nickname != "" {
 			s.Account = cred.Nickname
 		} else {
 			s.Account = cred.UID
-		}
-		// 去重：同一账号（uid）若在同目录已有凭证，删掉刚写的这份。
-		//
-		// 为什么要删而不是留着：同一账号两份凭证会形成两条独立刷新链，
-		// 若上游 refresh token 是一次轮换型，它们会互相顶掉会话（表现为
-		// 随机 401）。实测用户在控制台重复点「添加账号」就会写出多份。
-		if dup := findDuplicateCredential(outPath, cred.UID); dup != "" {
-			if rmErr := os.Remove(outPath); rmErr == nil {
-				s.OutPath = dup // 让前端提示「已存在，复用原有凭证」
-				m.logf("账号 %s 已存在（%s），本次登录凭证已丢弃避免重复入池", s.Account, filepath.Base(dup))
-			}
 		}
 		m.logf("登录成功: %s", s.Account)
 	}()
@@ -156,6 +156,73 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 		ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, OutPath: s.OutPath,
 		Account: s.Account, Error: s.Error, StartedAt: s.StartedAt,
 	}, nil
+}
+
+// Commit the new session before removing its staging file. Failed commits
+// retain that file for recovery instead of reporting a false login success.
+func (m *loginManager) commitCredential(platform, outPath, stagedPath string, cred *workbuddy.Credential) (string, error) {
+	m.credentialMu.Lock()
+	defer m.credentialMu.Unlock()
+	if cred == nil || cred.UID == "" || cred.AccessToken == "" {
+		return "", fmt.Errorf("新登录态缺少账号或凭证，未替换原登录态")
+	}
+	if m.replaceCredential != nil {
+		path, found, err := m.replaceCredential(platform, cred)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			if err := os.Remove(stagedPath); err != nil && !os.IsNotExist(err) {
+				m.logf("新登录态已应用，临时凭证清理失败")
+			}
+			return path, nil
+		}
+	}
+	target := outPath
+	if duplicate := findDuplicateCredential(stagedPath, cred.UID); duplicate != "" {
+		// Preserve native encrypted fields when the matching file has not yet
+		// joined the pool. A failed load/update keeps the staged session intact.
+		adp, err := workbuddy.New(workbuddy.Config{Platform: platform, CredentialPath: duplicate})
+		if err != nil {
+			return "", err
+		}
+		if err := adp.ReplaceCredential(cred); err != nil {
+			return "", err
+		}
+		if err := os.Remove(stagedPath); err != nil && !os.IsNotExist(err) {
+			m.logf("新登录态已保存，临时凭证清理失败")
+		}
+		return duplicate, nil
+	} else if _, err := os.Stat(target); err == nil {
+		return "", fmt.Errorf("目标凭证已属于其他账号，新登录态已保留，请使用其他账号名称")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.Rename(stagedPath, target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+func (a *App) replaceLoginCredential(platform string, cred *workbuddy.Credential) (string, bool, error) {
+	rt := a.hub.Platform(platform)
+	if rt == nil {
+		return "", false, fmt.Errorf("登录目标平台不存在")
+	}
+	for _, status := range rt.AccountStatuses() {
+		adp, ok := status.Adapter.(*workbuddy.Adapter)
+		if !ok || adp.AccountUID() != cred.UID {
+			continue
+		}
+		if err := adp.ReplaceCredential(cred); err != nil {
+			return "", true, err
+		}
+		if rt.Pool != nil {
+			rt.Pool.AccountReauthenticated(status.Label)
+		}
+		return adp.AccountIdentity().CredPath, true, nil
+	}
+	return "", false, nil
 }
 
 // loginSnapshot 是会话状态的不可变快照。
@@ -233,7 +300,7 @@ func findDuplicateCredential(outPath, uid string) string {
 		}
 		var doc struct {
 			Auth struct {
-				AccessToken string `json:"accessToken"`
+				AccessToken json.RawMessage `json:"accessToken"`
 			} `json:"auth"`
 			Account struct {
 				UID string `json:"uid"`
@@ -243,7 +310,16 @@ func findDuplicateCredential(outPath, uid string) string {
 			continue
 		}
 		// 只把「有效且有 token」的当作重复源，避免被垃圾文件挡住。
-		if doc.Account.UID == uid && doc.Auth.AccessToken != "" {
+		var token string
+		valid := json.Unmarshal(doc.Auth.AccessToken, &token) == nil && token != ""
+		if !valid {
+			var encrypted struct {
+				Marker   int    `json:"$wbEncrypted"`
+				Envelope string `json:"envelope"`
+			}
+			valid = json.Unmarshal(doc.Auth.AccessToken, &encrypted) == nil && encrypted.Marker == 1 && encrypted.Envelope != ""
+		}
+		if doc.Account.UID == uid && valid {
 			return p
 		}
 	}

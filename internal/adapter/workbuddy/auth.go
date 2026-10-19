@@ -221,6 +221,25 @@ func (a *Auth) Credential() Credential {
 	return *a.cred
 }
 
+func (a *Auth) replaceCredential(cred *Credential) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if cred == nil || cred.UID == "" || cred.UID != a.cred.UID || cred.AccessToken == "" || globalDomain(cred.Domain) != globalDomain(a.cred.Domain) {
+		return &llm.Failure{Code: "credential_identity_mismatch", Message: "新登录态与当前账号或区域不匹配", ClientFixable: true}
+	}
+	previous := a.cred
+	next := *cred
+	if previous.MachineID != "" {
+		next.MachineID = previous.MachineID
+	}
+	a.cred = &next
+	if err := a.persistLocked(); err != nil {
+		a.cred = previous
+		return &llm.Failure{Code: "credential_write_failed", Message: "新登录态保存失败，原登录态已保留", Cause: err}
+	}
+	return nil
+}
+
 // BuildHeaders 在锁内构造请求头，避免与刷新竞争导致读到半更新的凭证。
 func (a *Auth) BuildHeaders(mode headerMode) http.Header {
 	a.mu.Lock()
@@ -366,6 +385,10 @@ func unwrapToken(raw json.RawMessage) (tokenPayload, error) {
 
 // persistLocked 把刷新后的凭证回写磁盘（尽力而为，失败不影响内存态）。
 func (a *Auth) persistLocked() error {
+	return a.persistLockedUsing(localCredentialKey)
+}
+
+func (a *Auth) persistLockedUsing(keyReader func(bool) ([]byte, error)) error {
 	if a.credentialPath == "" {
 		return nil
 	}
@@ -387,13 +410,13 @@ func (a *Auth) persistLocked() error {
 	}
 	var key []byte
 	defer func() { clear(key) }()
-	for field, value := range map[string]string{"accessToken": a.cred.AccessToken, "refreshToken": a.cred.RefreshToken} {
-		if wrapper, ok := authObj[field].(map[string]any); ok && wrapper["$wbEncrypted"] != nil {
+	setString := func(target map[string]any, field, value string) error {
+		if wrapper, ok := target[field].(map[string]any); ok && wrapper["$wbEncrypted"] != nil {
 			if wrapper["scheme"] != nil {
 				return fmt.Errorf("不支持的凭证加密格式")
 			}
 			if key == nil {
-				key, err = localCredentialKey(globalDomain(a.cred.Domain))
+				key, err = keyReader(globalDomain(a.cred.Domain))
 				if err != nil {
 					return err
 				}
@@ -402,9 +425,15 @@ func (a *Auth) persistLocked() error {
 			if err != nil {
 				return err
 			}
-			authObj[field] = sealed
+			target[field] = sealed
 		} else {
-			authObj[field] = value
+			target[field] = value
+		}
+		return nil
+	}
+	for field, value := range map[string]string{"accessToken": a.cred.AccessToken, "refreshToken": a.cred.RefreshToken} {
+		if err := setString(authObj, field, value); err != nil {
+			return err
 		}
 	}
 	authObj["expiresAt"] = a.cred.ExpiresAt
@@ -414,7 +443,18 @@ func (a *Auth) persistLocked() error {
 	authObj["lastRefreshTime"] = time.Now().UnixMilli()
 	if !flat {
 		doc["auth"] = authObj
+		account, _ := doc["account"].(map[string]any)
+		if account == nil {
+			account = map[string]any{}
+		}
+		for field, value := range map[string]string{"uid": a.cred.UID, "nickname": a.cred.Nickname, "enterpriseId": a.cred.EnterpriseID, "departmentInfo": a.cred.DepartmentInfo} {
+			if err := setString(account, field, value); err != nil {
+				return err
+			}
+		}
+		doc["account"] = account
 	}
+	doc["machineId"] = a.cred.MachineID
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err

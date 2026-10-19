@@ -82,12 +82,14 @@ func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 			logger.Printf("导入历史指标失败（保留既有统计）: %v", err)
 		}
 	}
-	return &App{
+	a := &App{
 		cfg: cfg, hub: hub, logger: logger,
 		metrics: metrics, metricsFile: metricsFile, metricsStorage: storage,
 		createdAt: now.Unix(), startedAt: now,
-		logins: newLoginManager(func(f string, a ...any) { logger.Printf(f, a...) }),
 	}
+	a.logins = newLoginManager(func(f string, args ...any) { logger.Printf(f, args...) })
+	a.logins.replaceCredential = a.replaceLoginCredential
+	return a
 }
 
 // StartMetricsPersistence 启动后台周期落盘，避免进程意外退出时丢失统计。

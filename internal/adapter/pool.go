@@ -1185,6 +1185,22 @@ func (p *Pool) ResetAccountCooldown(label string) error {
 	return &llm.Failure{Code: "account_not_found", Message: "账号不存在: " + label, ClientFixable: true}
 }
 
+// AccountReauthenticated clears only an authentication block. Reauthorizing
+// the same account does not replenish quota or override a manual disable.
+func (p *Pool) AccountReauthenticated(label string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, acc := range p.accounts {
+		if acc.label == label && acc.state == stateBlocked && acc.reason == reasonUnauthorized {
+			acc.state = stateReady
+			acc.cooldownUntil = time.Time{}
+			acc.reason = ""
+			acc.lastErr = ""
+			return
+		}
+	}
+}
+
 // AccountLabels 返回账号 label 列表（供控制台操作面做参数校验）。
 func (p *Pool) AccountLabels() []string {
 	p.mu.Lock()

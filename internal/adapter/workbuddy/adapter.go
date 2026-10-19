@@ -139,6 +139,16 @@ func (a *Adapter) AccountUID() string {
 	return a.auth.Credential().UID
 }
 
+// ReplaceCredential installs a newly authorized session for this same account.
+// Auth serializes it with refreshes and preserves the existing credential file.
+func (a *Adapter) ReplaceCredential(cred *Credential) error {
+	if err := a.auth.replaceCredential(cred); err != nil {
+		return err
+	}
+	a.InvalidateModels()
+	return nil
+}
+
 // AccountIdentity 是账号的身份与凭证健康度（供控制台展示登录状态）。
 type AccountIdentity struct {
 	UID      string `json:"uid,omitempty"`

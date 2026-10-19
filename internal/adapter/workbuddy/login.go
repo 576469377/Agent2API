@@ -90,6 +90,7 @@ func Login(ctx context.Context, baseURL string, opts LoginOptions) (*Credential,
 		RefreshToken: tok.RefreshToken,
 		TokenType:    tok.TokenType,
 		ExpiresAt:    tok.ExpiresAt,
+		RefreshExpAt: tok.RefreshExpiresAt,
 		Domain:       tok.Domain,
 		MachineID:    stableMachineID(),
 	}
@@ -105,6 +106,9 @@ func Login(ctx context.Context, baseURL string, opts LoginOptions) (*Credential,
 	}
 	if cred.ExpiresAt == 0 && tok.ExpiresIn > 0 {
 		cred.ExpiresAt = time.Now().UnixMilli() + tok.ExpiresIn*1000
+	}
+	if cred.RefreshExpAt == 0 && tok.RefreshExpiresIn > 0 {
+		cred.RefreshExpAt = time.Now().UnixMilli() + tok.RefreshExpiresIn*1000
 	}
 
 	// 步骤 4：账户信息可能异步就绪，需要重试。
@@ -245,11 +249,12 @@ func saveCredential(cred *Credential, path string) error {
 	}
 	doc := map[string]any{
 		"auth": map[string]any{
-			"accessToken":  cred.AccessToken,
-			"refreshToken": cred.RefreshToken,
-			"tokenType":    cred.TokenType,
-			"expiresAt":    cred.ExpiresAt,
-			"domain":       cred.Domain,
+			"accessToken":      cred.AccessToken,
+			"refreshToken":     cred.RefreshToken,
+			"tokenType":        cred.TokenType,
+			"expiresAt":        cred.ExpiresAt,
+			"refreshExpiresAt": cred.RefreshExpAt,
+			"domain":           cred.Domain,
 		},
 		"account": map[string]any{
 			"uid":            cred.UID,
