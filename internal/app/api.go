@@ -35,8 +35,9 @@ var builtinPlatforms = []struct {
 }{
 	{ID: "workbuddy", Name: "WorkBuddy / CodeBuddy", Note: "腾讯 CodeBuddy 桌面端登录态复用", Implemented: true},
 	{ID: "workbuddy-global", Name: "WorkBuddy International", Note: "WorkBuddy 国际版桌面端登录态复用", Implemented: true},
+	{ID: "openrouter", Name: "OpenRouter", Note: "配置 OPENROUTER_API_KEY，仅接入免费模型", Implemented: true},
 	{ID: "devin", Name: "Devin", Note: "上游为私有 protobuf over Connect，需独立适配器", Implemented: false},
-	{ID: "cursor", Name: "Cursor", Note: "待调研上游协议", Implemented: false},
+	{ID: "cursor", Name: "Cursor", Note: "桌面个人 Free 账号，仅 Composer 2.5 免费额度，禁用按量付费", Implemented: true},
 }
 
 // platformEntry 是「规划中 / 可用（已实现但当前未运行）」两类平台共用的精简描述。
@@ -489,7 +490,7 @@ func (a *App) apiPrometheus(w http.ResponseWriter, r *http.Request) {
 	// TPS 无样本时**不输出**（而不是输出 0）：0 tok/s 与「没测过」是两回事，
 	// 监控里出现 0 会误导告警（见 obs.Snapshot 的同名注释）。
 	if s.TPSSamples > 0 {
-		writeGauge("agent2api_decode_tokens_per_second_avg", "平均解码速度（输出 token/秒）", s.AvgTPS)
+		writeGauge("agent2api_decode_tokens_per_second_avg", "网关接流到用量结束的平均接收速率（输出 token/秒）", s.AvgTPS)
 	}
 	writeCounter("agent2api_requests_total", "累计请求数", s.Total)
 	writeCounter("agent2api_requests_ok_total", "累计成功请求数", s.OK)
@@ -911,7 +912,7 @@ func (a *App) updateConfig(w http.ResponseWriter, r *http.Request) {
 	if patch.RefreshModels {
 		n := 0
 		for _, rt := range targets {
-			if c, ok := rt.Adapter.(adapter.Configurable); ok {
+			if c, ok := rt.Adapter.(interface{ InvalidateModels() }); ok {
 				c.InvalidateModels()
 				n++
 			}
@@ -927,7 +928,7 @@ func (a *App) updateConfig(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		http.Error(w, "序列化失败", http.StatusInternalServerError)
 	}

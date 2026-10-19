@@ -113,7 +113,7 @@ test("live samples distinguish calibrated token estimates from actual character 
  const points=sampleLive([],data);assert.equal(sampleLive(points,data).length,1);
  const calibrated={...data,active:[{...data.active[0],estimated_tokens_per_second:5,estimated_output_tokens:25}]};
  assert.equal(liveGeneration(calibrated).tokensPerSecond,5);
- const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("生成速度 · 估算"));assert.ok(html.includes("≈ 25"));
+ const html=liveUsageView(calibrated,"",points,{...ui,timestamp:()=>"time"});assert.ok(html.includes("接收速度 · 估算"));assert.ok(html.includes("≈ 25"));
  assert.ok(liveUsageView(data,"",points,{...ui,timestamp:()=>"time"}).includes("Token 待结算"));
 });
 
@@ -133,4 +133,17 @@ test("live inspection keeps request details available without confusing estimate
  const failed=liveUsageView(data,"Unavailable",[],{...ui,timestamp:()=>"time"});
  assert.ok(failed.includes('data-action="refresh-live"'));
  assert.ok(!failed.includes('live-request-details'));
+});
+
+test("stalled and stale live snapshots are not presented as ongoing generation",()=>{
+ const data={sampled_at:new Date(now).toISOString(),in_flight:1,active:[{model:"m",output_characters:10,characters_per_second:0,last_output_at:new Date(now-4000).toISOString()}]};
+ const html=liveUsageView(data,"",[],{...ui,timestamp:()=>"time"});
+ assert.ok(html.includes("等待后续输出"));assert.ok(!html.includes("生成中"));
+ const stale=liveUsageView(data,"",[],{...ui,timestamp:()=>"time",stale:true});
+ assert.ok(stale.includes("实时数据已过期"));assert.ok(!stale.includes("live-request-list"));assert.ok(!stale.includes("0.0"));
+ const first=sampleLive([],data);
+ const afterGap=sampleLive(first,{...data,sampled_at:new Date(now+5000).toISOString()});
+ assert.equal(afterGap.length,3);assert.equal(afterGap[1].value,null);
+ const graph=liveUsageView({...data,in_flight:0,active:[]},"",afterGap,{...ui,timestamp:()=>"time"});
+ assert.ok(!graph.includes("NaN"));assert.ok(!graph.includes("Infinity"));
 });

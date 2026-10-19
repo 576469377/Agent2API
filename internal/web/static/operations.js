@@ -29,3 +29,13 @@ export function credentialState(account) {
   if (!account?.identity) return "unknown";
   return account.identity.needs_refresh ? "refresh" : "signed_in";
 }
+
+// Direct integrations expose a status record, but have no WorkBuddy pool or
+// device-login controls. Do not infer a credential file from missing identity.
+export function accountConnection(account) {
+  if (account?.platform === "openrouter") return { source: "api_key", pooled: false };
+  if (account?.platform === "cursor") return { source: "desktop", pooled: false };
+  const source = account?.identity?.source === "desktop" ? "desktop"
+    : account?.identity?.source === "file" || account?.identity?.credential_path ? "file" : "unknown";
+  return { source, pooled: ["workbuddy", "workbuddy-global"].includes(account?.platform) };
+}

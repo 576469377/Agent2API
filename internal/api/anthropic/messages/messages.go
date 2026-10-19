@@ -22,19 +22,20 @@ func (Protocol) Name() string { return "anthropic-messages" }
 // ───────────────────────── 请求解码 ─────────────────────────
 
 type request struct {
-	Model         string         `json:"model"`
-	System        any            `json:"system"`
-	Messages      []rawMessage   `json:"messages"`
-	MaxTokens     *int           `json:"max_tokens"`
-	Tools         []rawTool      `json:"tools"`
-	ToolChoice    any            `json:"tool_choice"`
-	Stream        bool           `json:"stream"`
-	Temperature   *float64       `json:"temperature"`
-	TopP          *float64       `json:"top_p"`
-	TopK          *int           `json:"top_k"`
-	StopSequences []string       `json:"stop_sequences"`
-	Thinking      *rawThinking   `json:"thinking"`
-	Metadata      map[string]any `json:"metadata"`
+	CacheControl  *llm.CacheControl `json:"cache_control"`
+	Model         string            `json:"model"`
+	System        any               `json:"system"`
+	Messages      []rawMessage      `json:"messages"`
+	MaxTokens     *int              `json:"max_tokens"`
+	Tools         []rawTool         `json:"tools"`
+	ToolChoice    any               `json:"tool_choice"`
+	Stream        bool              `json:"stream"`
+	Temperature   *float64          `json:"temperature"`
+	TopP          *float64          `json:"top_p"`
+	TopK          *int              `json:"top_k"`
+	StopSequences []string          `json:"stop_sequences"`
+	Thinking      *rawThinking      `json:"thinking"`
+	Metadata      map[string]any    `json:"metadata"`
 }
 
 type rawThinking struct {
@@ -48,23 +49,25 @@ type rawMessage struct {
 }
 
 type rawContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	Thinking  string          `json:"thinking"`
-	Signature string          `json:"signature"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Input     json.RawMessage `json:"input"`
-	ToolUseID string          `json:"tool_use_id"`
-	Content   json.RawMessage `json:"content"`
-	IsError   bool            `json:"is_error"`
-	Source    map[string]any  `json:"source"`
+	CacheControl *llm.CacheControl `json:"cache_control"`
+	Type         string            `json:"type"`
+	Text         string            `json:"text"`
+	Thinking     string            `json:"thinking"`
+	Signature    string            `json:"signature"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Input        json.RawMessage   `json:"input"`
+	ToolUseID    string            `json:"tool_use_id"`
+	Content      json.RawMessage   `json:"content"`
+	IsError      bool              `json:"is_error"`
+	Source       map[string]any    `json:"source"`
 }
 
 type rawTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	CacheControl *llm.CacheControl `json:"cache_control"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	InputSchema  map[string]any    `json:"input_schema"`
 }
 
 // DecodeRequest 把 Anthropic 请求解码为 IR。
@@ -80,16 +83,21 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 	}
 
 	out := llm.RequestMessages{
-		Model:       r.Model,
-		Messages:    make([]llm.Message, 0, len(r.Messages)),
-		MaxTokens:   r.MaxTokens,
-		Temperature: r.Temperature,
-		TopP:        r.TopP,
-		TopK:        r.TopK,
-		Stop:        r.StopSequences,
-		Stream:      r.Stream,
+		CacheControl: r.CacheControl,
+		Model:        r.Model,
+		Messages:     make([]llm.Message, 0, len(r.Messages)),
+		MaxTokens:    r.MaxTokens,
+		Temperature:  r.Temperature,
+		TopP:         r.TopP,
+		TopK:         r.TopK,
+		Stop:         r.StopSequences,
+		Stream:       r.Stream,
 	}
 	out.SystemPrompt = extractSystem(r.System)
+	if blocks, ok := r.System.([]any); ok {
+		raw, _ := json.Marshal(blocks)
+		out.SystemBlocks, _ = decodeContent(raw)
+	}
 
 	for _, m := range r.Messages {
 		msg := llm.Message{}
@@ -125,9 +133,10 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 				continue
 			}
 			out.Tools = append(out.Tools, llm.ToolDefinition{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  t.InputSchema,
+				Name:         t.Name,
+				Description:  t.Description,
+				Parameters:   t.InputSchema,
+				CacheControl: t.CacheControl,
 			})
 		}
 	}
@@ -185,6 +194,7 @@ func decodeContent(raw json.RawMessage) ([]llm.Content, error) {
 	}
 	out := make([]llm.Content, 0, len(blocks))
 	for _, b := range blocks {
+		before := len(out)
 		switch b.Type {
 		case "text":
 			if b.Text != "" {
@@ -216,13 +226,13 @@ func decodeContent(raw json.RawMessage) ([]llm.Content, error) {
 							case "text":
 								if ib.Text != "" {
 									tr.Content += ib.Text
-									tr.Blocks = append(tr.Blocks, llm.Content{Type: llm.ContentText, Text: ib.Text})
+									tr.Blocks = append(tr.Blocks, llm.Content{Type: llm.ContentText, Text: ib.Text, CacheControl: ib.CacheControl})
 								}
 							case "image":
 								// Claude Code 的 Read 工具会把图片作为 image 块嵌进 tool_result，
 								// 必须原样保留，否则模型拿不到图。
 								if u := decodeImageSource(ib.Source); u != "" {
-									tr.Blocks = append(tr.Blocks, llm.Content{Type: llm.ContentImage, ImageURL: u})
+									tr.Blocks = append(tr.Blocks, llm.Content{Type: llm.ContentImage, ImageURL: u, CacheControl: ib.CacheControl})
 								}
 							}
 						}
@@ -236,6 +246,9 @@ func decodeContent(raw json.RawMessage) ([]llm.Content, error) {
 			if url := decodeImageSource(b.Source); url != "" {
 				out = append(out, llm.Content{Type: llm.ContentImage, ImageURL: url})
 			}
+		}
+		if len(out) > before {
+			out[len(out)-1].CacheControl = b.CacheControl
 		}
 	}
 	return out, nil
@@ -488,11 +501,9 @@ func (e *StreamEncoder) done(ev llm.ResponseEvent) ([]common.SSEEvent, error) {
 		out = append(out, stopped...)
 	}
 
-	outTokens := 0
-	inTokens := 0
+	u := llm.Usage{}
 	if ev.Usage != nil {
-		outTokens = ev.Usage.OutputTokens
-		inTokens = ev.Usage.InputTokens
+		u = *ev.Usage
 	}
 	deltaData, err := json.Marshal(map[string]any{
 		"type": "message_delta",
@@ -504,7 +515,7 @@ func (e *StreamEncoder) done(ev llm.ResponseEvent) ([]common.SSEEvent, error) {
 		// 时还不知道，只能填 0。官方 SDK 对 message_delta 的 usage 按「累积总量、
 		// 直接覆盖」处理（_messages.py: input_tokens 若非 None 则覆盖快照值），
 		// 所以在这里给出真实值即可修正快照，与官方 API 的行为一致。
-		"usage": map[string]any{"input_tokens": inTokens, "output_tokens": outTokens},
+		"usage": encodeUsage(u),
 	})
 	if err != nil {
 		return nil, err
@@ -572,11 +583,18 @@ func (Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, er
 	return json.Marshal(map[string]any{
 		"id": id, "type": "message", "role": "assistant", "model": m,
 		"content": content, "stop_reason": mapStopReason(msg.StopReason), "stop_sequence": nil,
-		"usage": map[string]any{
-			"input_tokens":  msg.Usage.InputTokens,
-			"output_tokens": msg.Usage.OutputTokens,
-		},
+		"usage": encodeUsage(msg.Usage),
 	})
+}
+
+func encodeUsage(u llm.Usage) map[string]any {
+	// IR input includes cache reads and writes; Anthropic reports them separately.
+	return map[string]any{
+		"input_tokens":                max(0, u.InputTokens-u.CachedTokens-u.CacheWriteTokens),
+		"output_tokens":               u.OutputTokens,
+		"cache_read_input_tokens":     u.CachedTokens,
+		"cache_creation_input_tokens": u.CacheWriteTokens,
+	}
 }
 
 // AppendSSE 使用带 event 名的风格。

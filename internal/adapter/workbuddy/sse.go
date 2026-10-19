@@ -58,8 +58,27 @@ type chunkUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 	Details          struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
-		CachedTokens    int `json:"cached_tokens"`
 	} `json:"completion_tokens_details"`
+	PromptDetails struct {
+		CachedTokens     *int `json:"cached_tokens"`
+		CacheWriteTokens *int `json:"cache_write_tokens"`
+	} `json:"prompt_tokens_details"`
+	CachedTokens           *int `json:"cached_tokens"`
+	CacheReadTokens        *int `json:"cache_read_input_tokens"`
+	PromptCacheHitTokens   *int `json:"prompt_cache_hit_tokens"`
+	CacheCreationTokens    *int `json:"cache_creation_input_tokens"`
+	PromptCacheWriteTokens *int `json:"prompt_cache_write_tokens"`
+}
+
+// Usage aliases describe the same tokens, so take the first reported field
+// rather than adding aliases together or reading completion-side cache counts.
+func firstTokenCount(values ...*int) int {
+	for _, value := range values {
+		if value != nil {
+			return max(0, *value)
+		}
+	}
+	return 0
 }
 
 // toolCallState 累计一个工具调用的分片。
@@ -261,11 +280,12 @@ func (s *upstreamStream) consume(c *chunk) {
 
 	if c.Usage != nil {
 		s.usage = &llm.Usage{
-			InputTokens:     c.Usage.PromptTokens,
-			OutputTokens:    c.Usage.CompletionTokens,
-			TotalTokens:     c.Usage.TotalTokens,
-			ReasoningTokens: c.Usage.Details.ReasoningTokens,
-			CachedTokens:    c.Usage.Details.CachedTokens,
+			InputTokens:      c.Usage.PromptTokens,
+			OutputTokens:     c.Usage.CompletionTokens,
+			TotalTokens:      c.Usage.TotalTokens,
+			ReasoningTokens:  c.Usage.Details.ReasoningTokens,
+			CachedTokens:     firstTokenCount(c.Usage.PromptDetails.CachedTokens, c.Usage.CacheReadTokens, c.Usage.PromptCacheHitTokens, c.Usage.CachedTokens),
+			CacheWriteTokens: firstTokenCount(c.Usage.PromptDetails.CacheWriteTokens, c.Usage.CacheCreationTokens, c.Usage.PromptCacheWriteTokens),
 		}
 	}
 }

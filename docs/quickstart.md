@@ -1,16 +1,23 @@
 # 快速开始
 
-[文档导航](README.md) · [客户端接入](clients.md) · [故障排查](troubleshooting.md)
+[文档导航](README.md) · [平台支持](platforms.md) · [客户端接入](clients.md) · [故障排查](troubleshooting.md)
 
-以下以当前已实现的 WorkBuddy 适配器为例。Agent2API 的路由、标准协议与控制台面向多平台扩展；其他上游平台尚未实现。
+先选择需要的上游，再构建同一个网关。无需同时拥有所有平台账号。
 
 ## 1. 准备环境
 
 - Git 与 Go 1.23+。
-- 本人已授权的 WorkBuddy 国内版或国际版账号。
-- 可复用桌面客户端登录态，也可在启动后的控制台完成首次登录。
+- 至少一种本人已授权的上游访问方式：
 
-普通网关不需要 Node.js、Python 或前端构建工具。ZCode 同步脚本需要 Python 3.9+。Windows 已验证国际桌面加密凭证；macOS / Linux 可构建网关，但这一凭证路径尚未端到端验证。
+| 使用平台 | 启动前准备 | 启用方式 |
+|---|---|---|
+| WorkBuddy 国内 / 国际 | 已有桌面登录态，或启动后在控制台首次登录 | 不带配置默认启用两区 |
+| OpenRouter | 自己的 `OPENROUTER_API_KEY` | `-platform openrouter` 或平台列表 |
+| Cursor | 同一系统用户登录个人 Free 账号，关闭按量付费 | `-platform cursor` 或平台列表 |
+
+完整能力与限制见[平台支持](platforms.md)。下方第 3 步以 WorkBuddy 为例；其他平台构建后按 [OpenRouter 配置](configuration.md#openrouter仅免费模型)或 [Cursor 配置](configuration.md#cursor个人-free-额度)启动，再进行第 4 步验证。
+
+普通网关不需要 Node.js 或前端构建工具。ZCode 同步脚本需要 Python 3.9+；Cursor 在 macOS / Linux 读取桌面登录态需要 Python 3，Windows 使用系统 SQLite。Windows 已验证国际桌面加密凭证；macOS / Linux 可构建网关，但这一凭证路径尚未端到端验证。
 
 ## 2. 获取并构建
 
@@ -79,7 +86,7 @@ Copy-Item config.example.json config.json
 ./bin/agent2api.exe -config config.json
 ```
 
-macOS / Linux 使用 `cp config.example.json config.json`，再执行 `./bin/agent2api -config config.json`。示例不包含账号凭证；按需修改别名指向目录中的真实模型。
+macOS / Linux 使用 `cp config.example.json config.json`，再执行 `./bin/agent2api -config config.json`。示例不包含账号凭证，包含 WorkBuddy 两区、OpenRouter、Cursor 四个平台。删除不使用的平台；保留 OpenRouter 时配置自己的密钥，保留 Cursor 时准备桌面 Free 登录态。按需修改别名指向目录中的真实模型。
 
 配置项见[配置与模型路由](configuration.md)。启动命令没有 `-config` 时，不会自动加载当前目录的 `config.json`。更改配置文件通常需要下次启动时读取；控制台只热更新明确支持的项目。
 

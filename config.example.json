@@ -5,6 +5,12 @@
     "read_timeout_sec": 60
   },
   "upstream": {
+    "platforms": [
+      { "id": "workbuddy", "sanitize": true },
+      { "id": "workbuddy-global", "sanitize": true },
+      { "id": "openrouter", "api_key_env": "OPENROUTER_API_KEY" },
+      { "id": "cursor" }
+    ],
     "sanitize": true,
     "stream_idle_timeout_sec": 120,
     "stream_total_timeout_sec": 1800,
@@ -15,10 +21,7 @@
   "models": {
     "image_limits": {},
     "image_overflow_policies": {},
-    "aliases": {
-      "claude-sonnet-4-5-20250929": "glm-5.3",
-      "gpt-4o": "workbuddy/deepseek-v4-pro"
-    }
+    "aliases": {}
   },
   "auth": {
     "api_key": ""

@@ -2,16 +2,15 @@
 
 [项目首页](../README.md) · [English overview](../README.en.md) · [更新日志](../CHANGELOG.md)
 
-第一次使用，按「快速开始 → 客户端接入 → 模型测试」阅读。处理问题时直接进入故障排查；调研文档用于解释协议依据，不作为日常配置指南。
+第一次使用，按「平台支持 → 快速开始 → 客户端接入」阅读，并在控制台「模型测试」验证回复。处理问题时直接进入故障排查；调研文档用于解释协议依据，不作为日常配置指南。
 
-Agent2API 是可扩展的多平台协议网关，目前实现的上游是 WorkBuddy 国内版与国际版。使用指南中的登录路径与账号区域针对当前适配器；新增平台的接入边界见[当前架构](architecture.md#新增平台)。
-
-核心逻辑的源码对照、已修复问题与后续实现顺序见[反代逻辑审查（2026-10-12）](reviews/2026-10-12-proxy-logic-review.md)。
+Agent2API 是可扩展的多平台协议网关，目前实现的上游是 WorkBuddy 国内版、国际版、OpenRouter 免费模型与 Cursor Composer 2.5 Free 额度；新增平台的接入边界见[当前架构](architecture.md#新增平台)。
 
 ## 使用指南
 
 | 文档 | 内容 |
 |---|---|
+| [平台支持](platforms.md) | 四个平台的认证、模型能力、免费策略与限制对照 |
 | [快速开始](quickstart.md) | Windows / macOS / Linux 构建、登录、启动与验证 |
 | [客户端接入](clients.md) | 地址与密钥、ZCode 增量同步、备份与恢复 |
 | [配置与模型路由](configuration.md) | CLI / 环境变量 / JSON、区域前缀、别名、回退、并发与指标 |
@@ -22,8 +21,6 @@ Agent2API 是可扩展的多平台协议网关，目前实现的上游是 WorkBu
 | [400 请求诊断](request-diagnostics.md) | 不停反代，取得参数和历史结构摘要；不记录密钥或正文 |
 
 ## 维护与开发
-
-[控制台显示逻辑复查与后续改进](reviews/2026-10-12-console-review.md)：刷新、筛选、冷却、费用元数据和账号可用性的边界。
 
 | 文档 | 内容 |
 |---|---|
@@ -43,5 +40,8 @@ Agent2API 是可扩展的多平台协议网关，目前实现的上游是 WorkBu
 | [WorkBuddy 上游协议](research/02-WorkBuddy上游协议逆向.md) | 私有协议、SSE 与字段映射 |
 | [ZCode 配置结构](research/03-ZCode供应商配置逆向.md) | schema、热加载与排错依据 |
 | [WorkBuddy 国际版接入](research/04-WorkBuddy国际版接入.md) | 区域、加密凭证与 2026-10-11 实测 |
+| [Cursor 接入验证](research/05-Cursor接入调研.md) | 3.24.18 实测、免费额度、HTTP/2 与客户端工具转发 |
+| [反代逻辑审查](reviews/2026-10-12-proxy-logic-review.md) | 2026-10-12 的代码对照、修复与后续实现建议 |
+| [控制台显示逻辑复查](reviews/2026-10-12-console-review.md) | 2026-10-12 的刷新、筛选、费率与账号可用性审查 |
 | [最初架构设计](design/01-架构设计.md) | 历史设计稿，包含尚未落地的规划 |
 | [发布检查清单](开源发布检查清单.md) | 维护者发布前参考 |

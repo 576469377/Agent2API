@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage } from "../internal/web/static/monitor.js";
+import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage } from "../internal/web/static/monitor.js";
 
 const now = Date.UTC(2026, 9, 12, 1, 0);
 const records = [
@@ -8,6 +8,14 @@ const records = [
   { time: new Date(now - 120000).toISOString(), platform: "global", model: "shared", account: "same", protocol: "messages", ok: false, status: 429, error: "rate limit", duration_ms: 200, input_tokens: 0 },
   { time: new Date(now - 3600000).toISOString(), platform: "global", model: "other", account: "other", protocol: "chat", ok: true, status: 200, duration_ms: 3000, input_tokens: 200, output_tokens: 900, gen_ms: 3000 },
 ];
+
+test("missing final usage is distinct from an upstream-reported zero and legacy numeric observations",()=>{
+ assert.equal(hasTokenUsage({output_characters:50,ok:false}),false);
+ assert.equal(hasTokenUsage({usage_reported:true}),true);
+ assert.equal(hasTokenUsage({input_tokens:10}),true);
+ assert.equal(hasTokenUsage({output_tokens:0}),true);
+ assert.equal(hasTokenUsage({input_tokens:null}),false);
+});
 test("Request drill-down isolates a platform even with identical account/model labels", () => {
   assert.notEqual(requestKey(records[0]), requestKey({ ...records[0], platform: "global" }));
   assert.notEqual(requestKey(records[0]), requestKey({ ...records[0], protocol: "chat" }));

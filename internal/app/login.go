@@ -70,6 +70,12 @@ func newLoginManager(logf func(string, ...any)) *loginManager {
 // Start 发起一次登录，立刻返回会话（含授权 URL）。
 // platform 决定登录方式；当前仅实现 workbuddy 的设备码授权。
 func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*loginSnapshot, error) {
+	if platform == "cursor" {
+		return nil, &llm.Failure{Code: "cursor_desktop_login", Message: "请在本机 Cursor 桌面端登录个人 Free 账号，再刷新模型目录", ClientFixable: true}
+	}
+	if platform != "workbuddy" && platform != workbuddy.GlobalPlatform {
+		return nil, &llm.Failure{Code: "api_key_required", Message: "该平台使用 API Key；OpenRouter 请设置 OPENROUTER_API_KEY 后重启网关", ClientFixable: true}
+	}
 	baseURL := workbuddy.BaseURLForPlatform(platform)
 	if len(baseURLs) > 0 && baseURLs[0] != "" {
 		baseURL = baseURLs[0]

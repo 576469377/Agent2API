@@ -1,6 +1,6 @@
 # 配置与模型路由
 
-[文档导航](README.md) · [快速开始](quickstart.md) · [账号管理](accounts.md)
+[文档导航](README.md) · [平台支持](platforms.md) · [快速开始](quickstart.md) · [账号管理](accounts.md)
 
 优先级：命令行参数 > 环境变量 > 配置文件 > 内置默认。示例见 [`config.example.json`](../config.example.json)。
 
@@ -18,7 +18,7 @@
 | `-metrics-file` | — | 指标落盘路径；缺省写配置文件同目录的 `metrics.json`，无配置文件时写工作目录的 `agent2api-metrics.json` |
 | `-no-persist` | — | 关闭指标落盘 |
 | `-no-sanitize` | — | 关闭内容脱敏 |
-| `-platform` | — | 固定单平台（`workbuddy` 国内版 / `workbuddy-global` 国际版）；缺省自动集成全部内置平台 |
+| `-platform` | — | 固定单平台（`workbuddy` / `workbuddy-global` / `openrouter` / `cursor`）；缺省自动集成 WorkBuddy 两区 |
 
 ### 多平台配置（upstream.platforms）
 
@@ -29,17 +29,52 @@
   "upstream": {
     "platforms": [
       { "id": "workbuddy", "accounts_dir": "auths/cn", "sanitize": true },
-      { "id": "workbuddy-global", "accounts_dir": "auths/global", "sanitize": true }
+      { "id": "workbuddy-global", "accounts_dir": "auths/global", "sanitize": true },
+      { "id": "openrouter", "api_key_env": "OPENROUTER_API_KEY" },
+      { "id": "cursor" }
     ]
   }
 }
 ```
 
 - **路由语义**：裸模型名按配置中的平台顺序选取，同名时优先第一个平台；`workbuddy/模型名` 与 `workbuddy-global/模型名` 固定区域。`/v1/models` 返回唯一的裸模型名和各平台限定名，`/api/models` 提供 `routing_id` 与 `default_route`。未知裸模型名透传默认平台。
-- **同名回退**：`models.fallback_on_unavailable: true` 时，裸名在建流前遇到额度不足、限流或 HTTP 5xx，可尝试其他平台目录中的同名模型。默认为关闭；显式平台限定名或指定平台的别名始终固定区域，响应开始后不回退。用 `models.aliases: {"glm-5.3":"workbuddy-global/glm-5.3"}` 可覆盖某个裸名的默认路由。
+- **同名回退**：`models.fallback_on_unavailable: true` 时，裸名在建流前遇到额度不足、限流或 HTTP 5xx，可尝试其他平台目录中的同名模型。默认为关闭；显式平台限定名或指定平台的别名始终固定区域，响应开始后不回退。用 `models.aliases: {"hy3":"workbuddy-global/hy3"}` 可覆盖某个裸名的默认路由。
 - **字段回退**：平台内的 `credential_path` / `accounts_dir` / `base_url` / 各超时项缺省时回退到顶层同名配置；平台之间完全隔离（各自独立的号池、冷却与登录会话）
 - **`sanitize` 例外**：显式声明 platforms 时，每个平台单独填写 `"sanitize": true` 才会开启内容脱敏；未填视为关闭，不继承顶层值。建议接入客户端时保持开启。
 - **零配置（缺省）**：保留国内版与国际版；没有可用凭证的平台保留空账号池与登录入口，完成首次登录后自动入池
+
+### Cursor（个人 Free 额度）
+
+在 `upstream.platforms` 保留或追加 `{"id":"cursor"}`，用**启动网关的同一系统用户**登录最新 Cursor 桌面端，再启动新版网关。不使用配置文件时，可用 `agent2api -platform cursor` 单独启动。当前只发布真实调用验证过的 `cursor/composer-2.5`，不列出 Auto、Max、Fast 或其他未验证模型。Free 有额度限制，耗尽后报错，不转为付费请求。
+
+每次生成前重新读取本机登录态，并从上游检查：个人 / individual 都为 Free、订阅为 unpaid、非团队、非学生套餐、按量付费被明确禁用；状态不完整或发生变化时拒绝调用。目录也会重新检查相同权益。该平台不参与 WorkBuddy 设备码登录或号池。
+
+Windows 从 `%APPDATA%/Cursor/User/globalStorage/state.vscdb` 以只读方式读取访问令牌，使用系统 SQLite，不依赖 Python、不导出凭证；实际版本、commit 和已有设备标识从安装与用户数据读取。不会生成或重置设备标识。macOS / Linux 读取 SQLite 需要 Python 3。自定义位置可使用 `CURSOR_USER_DATA_DIR`（用户数据根目录）、`CURSOR_CLIENT_PATH`（包含 package.json / product.json 的 resources/app 目录）；平台 `credential_path` 可单独指定 SQLite 文件。
+
+三种下游协议支持文本、历史、思考与客户端工具。工具参数通过 API 返回 ZCode 等调用方，网关自身不执行命令、文件或浏览器操作。图片暂不支持。Cursor 保留原生 Agent 系统规则：客户端 `system` 作为明确标注的客户端上下文传递，不能提供与标准模型 API 完全相同的 system 优先级。工具历史使用原生结构化调用与结果，保留 ID、参数和错误状态；工具描述直接传入，避免进入桌面工具描述文件的发现流程。原生 Read 仅在已声明兼容的客户端 Read 时转换为客户端调用，其他未声明的主机操作仍拒绝。
+
+Cursor Agent 不开放采样、effort、JSON 输出模式及 stop 参数，传入这些参数会返回可读错误。ZCode 同步为 Cursor 设置固定的思考选项，不发送 effort 参数。`max_tokens` / `max_output_tokens` 依据上游 token 增量在网关侧截断，默认与最大为 8192，包含思考与工具步骤，可能有一个增量块的误差；工具提前返回时用量只包含已观察的输出，完整回复使用上游结算用量。
+
+诊断命令：`python scripts/diagnose-cursor.py`，只检查账号、计费状态、实际版本与目录，不调用生成。实现依据、实测范围及旧协议失败原因见 [Cursor 接入验证](research/05-Cursor接入调研.md)。
+
+### OpenRouter（仅免费模型）
+
+在现有 `upstream.platforms` 中追加 `{"id":"openrouter","api_key_env":"OPENROUTER_API_KEY"}`。不使用配置文件时，可用 `agent2api -platform openrouter` 单独启动。默认上游为 `https://openrouter.ai/api/v1`，自定义 `base_url` 应包含 `/api/v1`。
+
+从 [OpenRouter 密钥管理](https://openrouter.ai/settings/keys)创建自己的 API Key，然后在启动网关的终端里设置 `OPENROUTER_API_KEY`。PowerShell 示例：
+
+```powershell
+$env:OPENROUTER_API_KEY = '<YOUR_OPENROUTER_API_KEY>'
+./bin/agent2api.exe -config config.json
+```
+
+平台配置也支持 `api_key`；优先使用 `api_key_env` 指定的环境变量（缺省 `OPENROUTER_API_KEY`），避免将密钥写入仓库。上游密钥按平台隔离，不使用 `auth.api_key`，后者只保护本地网关。OpenRouter 使用单个 API Key 直连，不参与 WorkBuddy 设备码登录、凭证目录或多账号号池调度。
+
+适配器从官方 `/models` 动态获取目录，要求输入、输出以及所有已发布的额外价格均为零；收费、动态价格、价格缺失及无法解析的条目不会暴露或允许调用。请求再次校验免费目录，并发送 `provider.max_price` 的输入、输出、请求、图片零价格限制；目录过期后若刷新失败，拒绝生成。不会删去 `:free` 后缀或回退到付费版本。
+
+模型路由保留 OpenRouter 原始作者前缀，例如 `openrouter/作者/模型:free`。官方免费随机路由若在免费目录中，会显示为 `openrouter/openrouter/free`；其输出上限缺失时，ZCode 同步会跳过。三种下游协议共用此适配器，支持文本、图片输入、工具调用、思考输出和用量聚合。官方 API 不需要 WorkBuddy 的内容脱敏。
+
+免费模型仍有频率、每日额度与可用性限制；增加 API Key 不会提高同账号限额。接入依据：[模型 API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)、[免费变体](https://openrouter.ai/docs/guides/routing/model-variants/free)、[零价格路由限制](https://openrouter.ai/docs/guides/routing/provider-selection#max-price)、[官方限额](https://openrouter.ai/docs/api_reference/limits)。
 
 子命令：
 
@@ -112,8 +147,8 @@
 {
   "models": {
     "aliases": {
-      "claude-sonnet-4-5-20250929": "glm-5.3",
-      "gpt-4o": "workbuddy/deepseek-v4-pro"
+      "local-free": "workbuddy/hy3",
+      "local-free-global": "workbuddy-global/hy3"
     }
   }
 }
@@ -125,6 +160,7 @@
   不让一个配置笔误把网关变成不可用
 - 别名只影响路由与发往上游的模型名：会话亲和、号池调度、脱敏都不变
 - 调用日志会同时记录「请求的模型」与「实际使用的模型」，便于核对映射
+- 示例只使用本机观察为免费的目标；使用前仍须刷新目录确认。默认示例不预设付费模型别名。
 
 ### 并发上限（max_concurrency_per_account）
 

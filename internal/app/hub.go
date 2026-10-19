@@ -44,6 +44,8 @@ type PlatformRuntime struct {
 var platformDefaultBaseURLs = map[string]string{
 	"workbuddy":        "https://copilot.tencent.com",
 	"workbuddy-global": "https://www.workbuddy.ai",
+	"openrouter":       "https://openrouter.ai/api/v1",
+	"cursor":           "https://api2.cursor.sh",
 }
 
 // Hub 是多平台集成的核心：一个进程里管着所有上游平台，
@@ -220,7 +222,7 @@ func (h *Hub) ListModels(ctx context.Context) ([]ModelInfo, error) {
 // InvalidateModels 让所有平台的模型缓存失效（控制台「刷新」按钮）。
 func (h *Hub) InvalidateModels() {
 	for _, rt := range h.Platforms() {
-		if c, ok := rt.Adapter.(adapter.Configurable); ok {
+		if c, ok := rt.Adapter.(interface{ InvalidateModels() }); ok {
 			c.InvalidateModels()
 		}
 	}

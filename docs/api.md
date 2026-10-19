@@ -11,7 +11,7 @@
 | `GET /metrics` | Prometheus 文本格式指标（与控制台指标同源；启用鉴权时需 API Key） | — | ✅ |
 | `GET /health` | 健康检查（只报状态与平台 ID，不探测上游） | — | ✅ |
 
-支持文本、思考过程、工具调用、多轮对话、系统提示词、采样参数、图片输入。
+三个生成端点共用模型路由，支持文本、多轮对话，以及模型声明支持的思考、工具与图片能力。参数兼容性由实际平台决定：Cursor 暂不支持图片、采样、effort、JSON 输出模式及 stop，客户端 system 作为上下文转交，保留原生 Agent 规则。跨协议接入前请核对[平台能力对照](platforms.md#协议与能力)。
 
 管理与调试界面在 `/`（见[网页控制台](console.md)），不属于 API。
 
@@ -30,6 +30,22 @@
 调用记录中的 `image_count` 是原请求图片内容块总数，含历史与工具结果；`max_images` 是当次实际平台的护栏值。旧记录没有这些字段，不应解释为 0 张。默认 `reject` 模式下，超限请求在上游调用前返回 `image_count_exceeded` / HTTP 400，并且不裁剪内容。
 
 显式启用 `models.image_overflow_policies` 的 `trim_oldest` 时，已知超限请求改为省略最旧图片并继续转发；默认 `reject` 不变。`image_limit.overflow_policy` 提供有效策略；记录另含 `forwarded_image_count`（准备发往最后实际平台的数量）、`removed_image_count`、`image_overflow_policy`。清理响应头为 `X-Agent2API-Images-Removed` / `X-Agent2API-Images-Forwarded` / `X-Agent2API-Image-Overflow-Policy`，本地对话未被修改。护栏配置、行为和代价见[旧对话续聊策略](configuration.md#旧对话超限后的续聊策略modelsimage_overflow_policies)。
+
+## 提示缓存与用量
+
+网关不缓存模型的完整回答。提示缓存由实际服务商管理，重复请求仍会发送给上游；是否命中应查看返回用量，不能只比较耗时。
+
+- Chat Completions：输入缓存位于 `usage.prompt_tokens_details.cached_tokens`，写入数为同一对象的 `cache_write_tokens`；思考输出位于 `completion_tokens_details.reasoning_tokens`。
+- Responses：对应 `usage.input_tokens_details.cached_tokens` / `cache_write_tokens`，以及 `output_tokens_details.reasoning_tokens`。
+- Messages：分别返回 `cache_read_input_tokens`、`cache_creation_input_tokens` 和未命中 / 未写入的 `input_tokens`。三者相加才是总输入，不能将缓存数再次加到 Chat / Responses 的总输入上。
+
+流式与非流式使用相同口径，流式真实用量在结束事件补报。`/api/metrics` 的最近调用记录保留 `cached_tokens` / `cache_write_tokens`；旧记录没有字段，无法追补真实历史命中率。
+
+新调用记录的 `usage_reported: true` 表示实际收到上游用量，可据此区分明确零用量与未报告；不应将缺失的缓存字段自动解释为历史零命中。`first_output_ms` 是从请求到达至首段非空文本 / 思考 / 工具参数的等待毫秒数，缺失代表未测得。`gen_ms` 则保留接流之后的接收时长口径，不能将其解释为模型内部解码时长。
+
+OpenRouter 适配器保留客户端显式设置的顶层 / 文本块 / 图片块 / 工具 `cache_control`（含 TTL），以及 `prompt_cache_key`。同一会话的路由键经哈希后传入上游 `session_id`，避免暴露本地用户标识。缓存仍取决于模型、供应端、最小长度和上游策略，网关不会自动为用户开启收费缓存或取消免费模型与零价格路由限制。规则见 [OpenRouter 提示缓存](https://openrouter.ai/docs/guides/best-practices/prompt-caching)。
+
+WorkBuddy 与 Cursor 未确认存在可由普通 API 客户端强制控制的缓存断点接口：不要把传入 `cache_control` 当作这些平台已开启缓存的证明。网关维持稳定内容并转回上游实际报告的用量。换账号、换模型 / 供应端、前缀改动或缓存过期，都可能需要重新预热。
 
 ## 请求示例
 

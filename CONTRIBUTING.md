@@ -7,7 +7,7 @@
 - **Go 1.23+**（`go.mod` 声明 `go 1.23.0`）
 - 无需任何前端工具链（静态资源通过 `go:embed` 编进二进制）
 - 依赖只有 `golang.org/x/text`（用于 GBK 兜底解码）
-- 前端离线测试需要支持 `node --test` 的 Node.js；ZCode 脚本与测试需要 Python 3.9+。普通网关构建不需要这两项。
+- 前端离线测试需要支持 `node --test` 的 Node.js；ZCode、诊断脚本与测试需要 Python 3.9+。普通网关构建不需要这两项；Cursor 在 macOS / Linux 读取登录态时需要 Python 3。
 - 提交凭证检查同样需要 Python 3.9+。安装 `scripts/pre-commit` 后会检查暂存内容；CI 还会扫描可达历史，诊断只显示文件、位置和类型，不打印密钥值。
 
 使用指南与当前实现架构见[文档导航](docs/README.md)。修改配置、模型路由或客户端行为时，请同步中英文首页及对应指南。
@@ -31,8 +31,8 @@ Windows 无需安装 Make，直接使用以下跨平台命令：
 go build -trimpath -o bin/agent2api-dev.exe ./cmd/agent2api
 go test ./...
 go vet ./...
-node --test scripts/test-console-core.mjs scripts/test-console-monitor.mjs
-python -m unittest discover -s scripts -p test_sync_zcode.py
+node --test scripts/test-console-*.mjs
+python -m unittest discover -s scripts -p 'test_*.py'
 python scripts/check-secrets.py --staged
 python -m unittest discover -s scripts -p test_check_secrets.py
 ```

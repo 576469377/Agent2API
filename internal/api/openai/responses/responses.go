@@ -21,15 +21,17 @@ func (Protocol) Name() string { return "openai-responses" }
 // ───────────────────────── 请求解码 ─────────────────────────
 
 type request struct {
-	Model           string          `json:"model"`
-	Input           json.RawMessage `json:"input"`
-	Instructions    string          `json:"instructions"`
-	Tools           []rawTool       `json:"tools"`
-	ToolChoice      any             `json:"tool_choice"`
-	MaxOutputTokens *int            `json:"max_output_tokens"`
-	Temperature     *float64        `json:"temperature"`
-	TopP            *float64        `json:"top_p"`
-	Stream          bool            `json:"stream"`
+	CacheControl    *llm.CacheControl `json:"cache_control"`
+	PromptCacheKey  string            `json:"prompt_cache_key"`
+	Model           string            `json:"model"`
+	Input           json.RawMessage   `json:"input"`
+	Instructions    string            `json:"instructions"`
+	Tools           []rawTool         `json:"tools"`
+	ToolChoice      any               `json:"tool_choice"`
+	MaxOutputTokens *int              `json:"max_output_tokens"`
+	Temperature     *float64          `json:"temperature"`
+	TopP            *float64          `json:"top_p"`
+	Stream          bool              `json:"stream"`
 	Reasoning       *struct {
 		Effort  string `json:"effort"`
 		Summary string `json:"summary"`
@@ -44,10 +46,11 @@ type request struct {
 }
 
 type rawTool struct {
-	Type        string         `json:"type"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	CacheControl *llm.CacheControl `json:"cache_control"`
+	Type         string            `json:"type"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	Parameters   map[string]any    `json:"parameters"`
 }
 
 type rawInputMessage struct {
@@ -73,14 +76,16 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 	}
 
 	out := llm.RequestMessages{
-		Model:        r.Model,
-		SystemPrompt: r.Instructions,
-		Messages:     nil,
-		MaxTokens:    r.MaxOutputTokens,
-		Temperature:  r.Temperature,
-		TopP:         r.TopP,
-		Stream:       r.Stream,
-		IncludeUsage: true,
+		CacheControl:   r.CacheControl,
+		PromptCacheKey: r.PromptCacheKey,
+		Model:          r.Model,
+		SystemPrompt:   r.Instructions,
+		Messages:       nil,
+		MaxTokens:      r.MaxOutputTokens,
+		Temperature:    r.Temperature,
+		TopP:           r.TopP,
+		Stream:         r.Stream,
+		IncludeUsage:   true,
 	}
 	if r.Reasoning != nil && r.Reasoning.Effort != "" {
 		out.ReasoningEffort = r.Reasoning.Effort
@@ -103,7 +108,7 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 				continue
 			}
 			out.Tools = append(out.Tools, llm.ToolDefinition{
-				Name: name, Description: t.Description, Parameters: t.Parameters,
+				Name: name, Description: t.Description, Parameters: t.Parameters, CacheControl: t.CacheControl,
 			})
 		}
 	}
@@ -392,11 +397,7 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 	case llm.EventDone:
 		usage := map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 		if ev.Usage != nil {
-			usage = map[string]any{
-				"input_tokens":  ev.Usage.InputTokens,
-				"output_tokens": ev.Usage.OutputTokens,
-				"total_tokens":  ev.Usage.TotalTokens,
-			}
+			usage = encodeUsage(*ev.Usage)
 		}
 		return e.ev("response.completed", map[string]any{
 			"response": e.responseShell("completed", usage),
@@ -514,12 +515,19 @@ func (Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, er
 		"id": id, "object": "response", "created_at": time.Now().Unix(), "status": "completed",
 		"model": m, "output": output, "output_text": text,
 		"parallel_tool_calls": true, "tool_choice": "auto", "tools": []any{},
-		"usage": map[string]any{
-			"input_tokens":  msg.Usage.InputTokens,
-			"output_tokens": msg.Usage.OutputTokens,
-			"total_tokens":  msg.Usage.TotalTokens,
-		},
+		"usage": encodeUsage(msg.Usage),
 	})
+}
+
+func encodeUsage(u llm.Usage) map[string]any {
+	out := map[string]any{"input_tokens": u.InputTokens, "output_tokens": u.OutputTokens, "total_tokens": u.TotalTokens}
+	if u.CachedTokens > 0 || u.CacheWriteTokens > 0 {
+		out["input_tokens_details"] = map[string]any{"cached_tokens": u.CachedTokens, "cache_write_tokens": u.CacheWriteTokens}
+	}
+	if u.ReasoningTokens > 0 {
+		out["output_tokens_details"] = map[string]any{"reasoning_tokens": u.ReasoningTokens}
+	}
+	return out
 }
 
 // AppendSSE 使用带 event 名的风格。

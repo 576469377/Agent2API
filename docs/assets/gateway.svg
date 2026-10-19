@@ -1,41 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="320" viewBox="0 0 1040 320" role="img" aria-labelledby="title desc">
-  <title id="title">Agent2API gateway architecture</title>
-  <desc id="desc">Standard clients connect through shared routing and protocol conversion to extensible platform adapters. WorkBuddy China and International are implemented; additional adapters are planned.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="376" viewBox="0 0 1040 376" role="img" aria-labelledby="title desc">
+  <title id="title">Agent2API: four platforms, three standard APIs</title>
+  <desc id="desc">Chat Completions, Responses and Anthropic Messages clients connect through Agent2API to WorkBuddy China, WorkBuddy International, free OpenRouter models and Cursor Composer 2.5 Free allowance. Each platform uses its own authentication and capability limits.</desc>
   <defs>
     <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0d192b"/><stop offset="1" stop-color="#152f39"/></linearGradient>
     <linearGradient id="accent"><stop stop-color="#7ce6c3"/><stop offset="1" stop-color="#79c3ff"/></linearGradient>
   </defs>
-  <rect width="1040" height="320" rx="20" fill="url(#bg)"/>
+  <rect width="1040" height="376" rx="20" fill="url(#bg)"/>
   <g font-family="Segoe UI,Arial,sans-serif">
-    <text x="40" y="48" fill="#82d9c2" font-size="12" letter-spacing="3">EXTENSIBLE · LOCAL · STANDARD APIs</text>
-    <text x="40" y="88" fill="#f1f6fb" font-size="28" font-weight="700">Many platforms. One API gateway.</text>
-    <text x="40" y="116" fill="#a9bfce" font-size="14">Platform adapters · Shared protocol layers · Unified routing and management</text>
-    <path d="M302 220 H365 M675 220 H731 M731 177 V265 M731 177 H766 M731 221 H766 M731 265 H766" fill="none" stroke="#52959b" stroke-width="2"/>
+    <text x="40" y="43" fill="#82d9c2" font-size="12" letter-spacing="3">LOCAL GATEWAY · STANDARD APIs</text>
+    <text x="40" y="82" fill="#f1f6fb" font-size="28" font-weight="700">Four platforms. One local endpoint.</text>
+    <text x="40" y="110" fill="#a9bfce" font-size="14">Model routing · Streaming · Client tools · Usage analytics · Web console</text>
+    <path d="M290 237 H347 M655 237 H708 M708 167 V305 M708 167 H750 M708 213 H750 M708 259 H750 M708 305 H750" fill="none" stroke="#52959b" stroke-width="2"/>
     <g fill="#172d3e" stroke="#355064">
-      <rect x="40" y="156" width="262" height="128" rx="12"/>
-      <rect x="366" y="156" width="308" height="128" rx="12" stroke="#72d8c3"/>
-      <rect x="766" y="156" width="234" height="40" rx="8"/>
-      <rect x="766" y="200" width="234" height="40" rx="8"/>
-      <rect x="766" y="244" width="234" height="40" rx="8" stroke-dasharray="4 4"/>
+      <rect x="40" y="163" width="250" height="148" rx="12"/>
+      <rect x="347" y="163" width="308" height="148" rx="12" stroke="#72d8c3"/>
+      <rect x="750" y="147" width="250" height="40" rx="8"/>
+      <rect x="750" y="193" width="250" height="40" rx="8"/>
+      <rect x="750" y="239" width="250" height="40" rx="8"/>
+      <rect x="750" y="285" width="250" height="40" rx="8"/>
     </g>
-    <rect x="366" y="156" width="5" height="128" rx="2" fill="url(#accent)"/>
+    <rect x="347" y="163" width="5" height="148" rx="2" fill="url(#accent)"/>
     <g fill="#f1f6fb" font-size="17" font-weight="600">
-      <text x="60" y="184">Standard clients</text>
-      <text x="390" y="186">Agent2API</text>
-      <text x="783" y="182" font-size="13">WorkBuddy China</text>
-      <text x="783" y="226" font-size="13">WorkBuddy International</text>
-      <text x="783" y="270" font-size="13" fill="#a9bfce">Future platform adapters</text>
+      <text x="60" y="193">Standard clients</text>
+      <text x="371" y="193">Agent2API</text>
+      <text x="767" y="172" font-size="13">WorkBuddy China</text>
+      <text x="767" y="218" font-size="13">WorkBuddy International</text>
+      <text x="767" y="264" font-size="13">OpenRouter</text>
+      <text x="767" y="310" font-size="13">Cursor</text>
     </g>
     <g fill="#afc5d5" font-size="13">
-      <text x="60" y="210">Chat Completions</text>
-      <text x="60" y="234">Responses</text>
-      <text x="60" y="258">Anthropic Messages</text>
-      <text x="390" y="215">Model routing + protocol translation</text>
-      <text x="390" y="242">Accounts · SSE · Usage · Tools</text>
-      <text x="390" y="265" fill="#7ce6c3">127.0.0.1:8787</text>
-      <text x="940" y="182" font-size="10" fill="#7ce6c3">READY</text>
-      <text x="940" y="226" font-size="10" fill="#7ce6c3">READY</text>
-      <text x="940" y="270" font-size="10">PLANNED</text>
+      <text x="60" y="225">Chat Completions</text>
+      <text x="60" y="253">Responses</text>
+      <text x="60" y="281">Anthropic Messages</text>
+      <text x="371" y="225">Shared routing + protocol translation</text>
+      <text x="371" y="253">Platform-specific authentication</text>
+      <text x="371" y="281" fill="#7ce6c3">127.0.0.1:8787</text>
+      <text x="985" y="264" text-anchor="end" font-size="11" fill="#7ce6c3">Free models</text>
+      <text x="985" y="310" text-anchor="end" font-size="11" fill="#7ce6c3">Composer 2.5 Free</text>
+      <text x="40" y="351" font-size="12">Model capabilities and quotas depend on the upstream platform and account.</text>
     </g>
   </g>
 </svg>

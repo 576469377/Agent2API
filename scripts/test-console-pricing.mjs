@@ -4,6 +4,15 @@ import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, 
 
 const now = Date.UTC(2026, 9, 12, 1, 0);
 const pricing = (rate, status = "credits") => ({ status, credit_multiplier: rate, source: "upstream_config", observed_at: new Date(now).toISOString() });
+test("OpenRouter free pricing keeps freshness checks without inventing credit multipliers", () => {
+  const model = { platform: "openrouter", id: "author/model:free", pricing: { status: "free", source: "openrouter_models", observed_at: new Date(now).toISOString() } };
+  assert.equal(modelPricing(model, now).status, "free");
+  assert.equal(modelPricing(model, now).multiplier, undefined);
+  assert.equal(modelPricing(model, now + RATE_MAX_AGE_MS + 1).status, "unknown");
+  assert.equal(modelPricing({ ...model, pricing_sync_failed: true }, now).status, "unknown");
+  assert.equal(modelPricing({ ...model, pricing: { ...model.pricing, status: "unknown" } }, now).status, "unknown");
+  assert.equal(compareModelRates(model, { pricing: pricing(.1) }, now), -1);
+});
 test("Pricing snapshot keeps identical model names isolated by platform and never overrides native metadata", () => {
   const models = [{ platform: "cn", id: "same" }, { platform: "global", id: "same" }, { platform: "global", id: "native", pricing: { status: "unknown" } }];
   const snapshot = { version: 1, models: [{ platform: "cn", id: "same", pricing: pricing(.11) }, { platform: "global", id: "same", pricing: pricing(0) }, { platform: "global", id: "native", pricing: pricing(0) }] };
@@ -21,6 +30,13 @@ test("Missing, invalid and stale pricing cannot become free", () => {
   assert.equal(old.status, "unknown"); assert.equal(old.stale, true);
   assert.equal(modelPricing({ pricing: pricing(undefined, "dynamic") }, now).status, "dynamic");
   assert.equal(modelPricing({ pricing: pricing(.001) }, now).multiplier, .001);
+});
+
+test("Cursor Free allowance requires fresh explicit plan observations", () => {
+  const p = { status: "free", source: "cursor_free_plan", observed_at: new Date(now).toISOString(), upstream_label: "Free allowance" };
+  assert.equal(modelPricing({ pricing: p }, now).status, "free");
+  assert.equal(modelPricing({ pricing: p }, now + RATE_MAX_AGE_MS + 1).status, "unknown");
+  assert.equal(modelPricing({ pricing: { ...p, status: "unknown" } }, now).status, "unknown");
 });
 test("Rate ordering puts zero before charged rates and unknowns last", () => {
   const rows = [{ id: "unknown" }, { id: "costly", pricing: pricing(2) }, { id: "zero", pricing: pricing(0) }, { id: "low", pricing: pricing(.11) }];

@@ -30,6 +30,9 @@ const poolWatchInterval = 10 * time.Second
 // 保证控制台添加的凭证总能被捡到。
 func startPoolWatchers(hub *app.Hub, cfg config.Config, logger *log.Logger) {
 	for _, rt := range hub.Platforms() {
+		if rt.Pool == nil {
+			continue
+		}
 		dir := rt.AccountsDir()
 		if dir == "" {
 			dir = workbuddy.AccountsDirForPlatform(rt.ID)
@@ -53,7 +56,7 @@ func scanAccountDir(rt *app.PlatformRuntime, dir string, cfg config.Config, logg
 	logf := func(format string, args ...any) { logger.Printf(format, args...) }
 	pool := rt.Pool
 	if pool == nil {
-		return // 理论不可达：buildAdapter 恒返回号池
+		return // API Key 直连平台没有可热加载的 WorkBuddy 凭证池。
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

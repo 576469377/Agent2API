@@ -31,6 +31,8 @@ const seriesWindow = 30
 type Record struct {
 	LiveID           uint64    `json:"-"`
 	OutputCharacters int64     `json:"output_characters,omitempty"`
+	FirstOutputMs    *int64    `json:"first_output_ms,omitempty"`
+	UsageReported    bool      `json:"usage_reported,omitempty"`
 	Time             time.Time `json:"time"`
 	Protocol         string    `json:"protocol"`
 	Model            string    `json:"model"`
@@ -41,6 +43,8 @@ type Record struct {
 	InputTokens      int64     `json:"input_tokens,omitempty"`
 	OutputTokens     int64     `json:"output_tokens,omitempty"`
 	ReasoningTokens  int64     `json:"reasoning_tokens,omitempty"`
+	CachedTokens     int64     `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
 	Error            string    `json:"error,omitempty"`
 	// Pointers distinguish newly measured zero from legacy records with no count.
 	ImageCount          *int   `json:"image_count,omitempty"`
@@ -62,7 +66,8 @@ type Record struct {
 	// 控制台据此回答「这条 claude-sonnet-4-5 的请求实际用了哪个模型」。
 	ModelRequested string `json:"model_requested,omitempty"`
 
-	// GenMs 是本次请求的「生成耗时」（毫秒）：从上游开始产出算起，到流结束或被中断为止。
+	// GenMs 是网关取得上游流后，到用量结束的接收耗时（毫秒）。
+	// 含流内网络等待及客户端背压，不代表模型内部解码耗时。
 	// 它是 TPS 的分母，与 DurationMs（含建连、解码、写回）语义不同。
 	// 0 表示**未测量**（失败请求、未产出 token、或来自无该字段的旧指标文件），
 	// 因此取值时必须把 0 当作「无数据」而不是「0 毫秒」——否则会算出 +Inf。
@@ -121,6 +126,7 @@ type Metrics struct {
 	liveSequence   atomic.Uint64
 	savedAt        atomic.Int64
 	live           map[uint64]*liveRequest
+	requestStarts  [60]requestRateBucket
 	calibrations   map[string]TokenCalibration
 	mu             sync.Mutex
 	byModel        map[string]*groupCounter
@@ -153,10 +159,16 @@ func New() *Metrics {
 }
 
 // Begin 标记一个请求开始，返回后必须配对调用 Record。
-func (m *Metrics) Begin() { m.inFlight.Add(1) }
+func (m *Metrics) Begin() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.beginLocked(time.Now())
+}
 
 // Abandon 标记一个请求异常终止（未走正常 Record 路径）。
 func (m *Metrics) Abandon() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if v := m.inFlight.Add(-1); v < 0 {
 		m.inFlight.Store(0)
 	}
@@ -164,6 +176,8 @@ func (m *Metrics) Abandon() {
 
 // Record 记录一次已完成的请求。
 func (m *Metrics) Record(r Record) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if v := m.inFlight.Add(-1); v < 0 {
 		m.inFlight.Store(0)
 	}
@@ -190,9 +204,6 @@ func (m *Metrics) Record(r Record) {
 
 	minute := r.Time.Unix() / 60
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	delete(m.live, r.LiveID)
 	if r.OK && r.OutputCharacters > 0 && r.OutputTokens > 0 {
 		key := calibrationKey(r.Platform, r.Model)
@@ -213,14 +224,15 @@ func (m *Metrics) Record(r Record) {
 		m.recent = m.recent[len(m.recent)-recentCap:]
 	}
 
-	// 分钟桶
-	if n := len(m.series); n == 0 || m.series[n-1].Minute != minute {
-		m.series = append(m.series, minuteBucket{Minute: minute})
-		if len(m.series) > seriesCap {
-			m.series = m.series[len(m.series)-seriesCap:]
-		}
+	// Concurrent requests can finish out of start-time order. Merge the actual
+	// minute rather than appending duplicate buckets which hide earlier counts.
+	i := sort.Search(len(m.series), func(i int) bool { return m.series[i].Minute >= minute })
+	if i == len(m.series) || m.series[i].Minute != minute {
+		m.series = append(m.series, minuteBucket{})
+		copy(m.series[i+1:], m.series[i:])
+		m.series[i] = minuteBucket{Minute: minute}
 	}
-	b := &m.series[len(m.series)-1]
+	b := &m.series[i]
 	b.Total++
 	b.InputTokens += r.InputTokens
 	b.OutputTokens += r.OutputTokens
@@ -232,6 +244,9 @@ func (m *Metrics) Record(r Record) {
 		b.OK++
 	} else {
 		b.Failed++
+	}
+	if len(m.series) > seriesCap {
+		m.series = m.series[len(m.series)-seriesCap:]
 	}
 }
 
@@ -297,6 +312,10 @@ type Snapshot struct {
 
 // Snapshot 生成当前快照。
 func (m *Metrics) Snapshot() Snapshot {
+	// All counters, groups and recent records belong to one completed-request
+	// snapshot; reading independent atomics before the lock can mix generations.
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	total := m.total.Load()
 	ok := m.okCount.Load()
 	failed := m.failed.Load()
@@ -319,7 +338,6 @@ func (m *Metrics) Snapshot() Snapshot {
 		tps = float64(m.genTokSum.Load()) / (float64(genMs) / 1000.0)
 	}
 
-	m.mu.Lock()
 	byModel := toStats(m.byModel)
 	byProto := toStats(m.byProto)
 	byAccount := toStats(m.byAccount)
@@ -332,11 +350,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	for i, r := range m.recent {
 		recent[len(m.recent)-1-i] = r // 反转：最新的排最前
 	}
-	rpm := int64(0)
-	if len(rawSeries) > 0 {
-		rpm = rawSeries[len(rawSeries)-1].Total
-	}
-	m.mu.Unlock()
+	rpm := m.lastMinuteRPMLocked(time.Now())
 
 	return Snapshot{
 		UptimeSec:       int64(time.Since(m.started).Seconds()),
@@ -401,10 +415,7 @@ func fillSeriesBuckets(raw []minuteBucket, window int) []minuteBucket {
 	nowMin := time.Now().Unix() / 60
 	startMin := nowMin - int64(window) + 1
 
-	idx := make(map[int64]minuteBucket, len(raw))
-	for _, b := range raw {
-		idx[b.Minute] = b
-	}
+	idx := indexMinuteBuckets(raw)
 
 	out := make([]minuteBucket, 0, window)
 	for m := startMin; m <= nowMin; m++ {
@@ -415,6 +426,36 @@ func fillSeriesBuckets(raw []minuteBucket, window int) []minuteBucket {
 		}
 	}
 	return out
+}
+
+func indexMinuteBuckets(raw []minuteBucket) map[int64]minuteBucket {
+	idx := make(map[int64]minuteBucket, len(raw))
+	for _, b := range raw {
+		sum := idx[b.Minute]
+		sum.Minute = b.Minute
+		sum.Total += b.Total
+		sum.OK += b.OK
+		sum.Failed += b.Failed
+		sum.InputTokens += b.InputTokens
+		sum.OutputTokens += b.OutputTokens
+		sum.GenMs += b.GenMs
+		sum.GenTok += b.GenTok
+		idx[b.Minute] = sum
+	}
+	return idx
+}
+
+func normalizeMinuteBuckets(raw []minuteBucket) []minuteBucket {
+	idx := indexMinuteBuckets(raw)
+	result := make([]minuteBucket, 0, len(idx))
+	for _, b := range idx {
+		result = append(result, b)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Minute < result[j].Minute })
+	if len(result) > seriesCap {
+		result = result[len(result)-seriesCap:]
+	}
+	return result
 }
 
 // ───────────────────────── 持久化 ─────────────────────────
@@ -534,6 +575,8 @@ func (m *Metrics) Load(path string) error {
 	if err := json.Unmarshal(b, &p); err != nil {
 		return err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.total.Store(p.Total)
 	m.okCount.Store(p.OK)
 	m.failed.Store(p.Failed)
@@ -545,12 +588,11 @@ func (m *Metrics) Load(path string) error {
 	m.genTokSum.Store(p.GenTokSum)
 	m.genCount.Store(p.GenCount)
 	m.savedAt.Store(p.SavedAt)
-	m.mu.Lock()
 	m.byModel = rebuildCounters(p.ByModel)
 	m.byProto = rebuildCounters(p.ByProto)
 	m.byAccount = rebuildCounters(p.ByAccount)
 	m.recent = append([]Record(nil), p.Recent...)
-	m.series = append([]minuteBucket(nil), p.Series...)
+	m.series = normalizeMinuteBuckets(p.Series)
 	if p.UsageHistory != nil {
 		p.UsageHistory.RecordIDs = p.HistoryRecordIDs
 	}
@@ -559,7 +601,6 @@ func (m *Metrics) Load(path string) error {
 	for key, value := range p.Calibrations {
 		m.calibrations[key] = value
 	}
-	m.mu.Unlock()
 	return nil
 }
 

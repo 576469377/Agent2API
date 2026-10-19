@@ -163,5 +163,6 @@ export function sampleLive(points,data) {
   if(!live||!Number.isFinite(live.sampledAt)) return points;
   const previous=points.at(-1);
   if(previous&&previous.time>=live.sampledAt)return points;
-  return [...points,{time:live.sampledAt,value:live.charactersPerSecond}].filter(p=>p.time>=live.sampledAt-30000);
+  const gap=previous&&live.sampledAt-previous.time>3000?[{time:previous.time+1,value:null}]:[];
+  return [...points,...gap,{time:live.sampledAt,value:live.charactersPerSecond}].filter(p=>p.time>=live.sampledAt-30000);
 }

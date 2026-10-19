@@ -37,8 +37,8 @@ type ModelsConfig struct {
 	//
 	// 两种写法：
 	//
-	//	"claude-sonnet-4-5-20250929": "glm-5.3"                // 同平台，换模型
-	//	"gpt-4o": "workbuddy/deepseek-v4-pro"                  // 指定平台 + 模型
+	//	"local-free": "hy3"                                    // 默认平台
+	//	"local-free-global": "workbuddy-global/hy3"             // 指定平台 + 模型
 	//
 	// 用途：Claude Code / Codex 这类客户端会发固定的模型名，别名把它们映射到
 	// 账号实际可用的模型上，客户端零改动即可接入——即 sub2api 的 composite
@@ -59,7 +59,7 @@ type ServerConfig struct {
 
 // UpstreamConfig 是上游配置。
 type UpstreamConfig struct {
-	// Platform 是单平台模式的上游平台（支持 workbuddy / workbuddy-global）。
+	// Platform 是单平台模式的上游平台（workbuddy / workbuddy-global / openrouter / cursor）。
 	//
 	// 空字符串（默认）表示「自动集成」：ResolvePlatforms 返回 autoPlatforms
 	// （国内版与国际版），网关自动探测本机登录态。显式填写（配置文件或
@@ -77,6 +77,10 @@ type UpstreamConfig struct {
 	Platforms []PlatformConfig `json:"platforms"`
 
 	BaseURL string `json:"base_url"`
+	// APIKey/APIKeyEnv are upstream API credentials (currently OpenRouter).
+	// They are separate from Auth.APIKey, which protects the local gateway.
+	APIKey    string `json:"api_key,omitempty"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
 
 	// CredentialPath 为空时自动探测本机已登录凭证。
 	CredentialPath string `json:"credential_path"`
@@ -112,7 +116,9 @@ type PlatformConfig struct {
 	// AccountsDir 该平台的多账号号池目录；非空时启用号池。
 	AccountsDir string `json:"accounts_dir,omitempty"`
 	// BaseURL 该平台上游地址；为空时用平台默认值。
-	BaseURL string `json:"base_url,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	APIKey    string `json:"api_key,omitempty"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
 	// Sanitize 该平台是否开启脱敏。
 	Sanitize bool `json:"sanitize"`
 	// 超时/缓存项：为 0 时回退到 UpstreamConfig 顶层同名项。
@@ -147,6 +153,8 @@ func (c Config) ResolvePlatforms() []PlatformConfig {
 			CredentialPath:           c.Upstream.CredentialPath,
 			AccountsDir:              c.Upstream.AccountsDir,
 			BaseURL:                  c.Upstream.BaseURL,
+			APIKey:                   c.Upstream.APIKey,
+			APIKeyEnv:                c.Upstream.APIKeyEnv,
 			Sanitize:                 c.Upstream.Sanitize,
 			StreamIdleTimeoutSec:     c.Upstream.StreamIdleTimeoutSec,
 			StreamTotalTimeoutSec:    c.Upstream.StreamTotalTimeoutSec,
@@ -170,6 +178,16 @@ func (c Config) ResolvePlatforms() []PlatformConfig {
 // 这样 buildAdapter / newPlatformAdapter 可以复用「读顶层字段」的旧逻辑无需改动。
 func (c Config) CloneForPlatform(pc PlatformConfig) Config {
 	c.Upstream.Platform = pc.ID
+	// API keys never inherit across platforms in a multi-platform configuration.
+	c.Upstream.APIKey = pc.APIKey
+	c.Upstream.APIKeyEnv = pc.APIKeyEnv
+	// Direct providers must not inherit another platform's endpoint or desktop
+	// credential path. Single-platform ResolvePlatforms already copies its values.
+	if pc.ID == "cursor" || pc.ID == "openrouter" {
+		c.Upstream.BaseURL = pc.BaseURL
+		c.Upstream.CredentialPath = pc.CredentialPath
+		c.Upstream.AccountsDir = ""
+	}
 	if pc.CredentialPath != "" {
 		c.Upstream.CredentialPath = pc.CredentialPath
 	}

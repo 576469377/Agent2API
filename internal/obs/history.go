@@ -67,6 +67,9 @@ func (m *Metrics) recordHistory(r Record) {
 	}
 	c.InputTokens += r.InputTokens
 	c.OutputTokens += r.OutputTokens
+	if r.OutputCharacters > 0 && !r.UsageReported && r.InputTokens == 0 && r.OutputTokens == 0 {
+		c.UnknownTokenRequests++
+	}
 	c.DurationSum += r.DurationMs
 }
 
