@@ -243,6 +243,23 @@ func httpError(status int, raw []byte, retryAfter string) error {
 		// 这句文案既要回给客户端、也要写进日志，必须提出可读的那段。
 		msg = m
 	}
+	businessCode := env.Code
+	if businessCode == 0 {
+		businessCode = nestedBusinessCode(raw)
+	}
+	// request illegal is shared by several upstream refusals. Preserve the
+	// vendor's explanation instead of guessing an image, quota or account cause.
+	if strings.EqualFold(msg, "request illegal") {
+		var display map[string]string
+		if json.Unmarshal(env.DisplayMsg, &display) == nil {
+			for _, language := range []string{"zh", "zh-CN", "en", "zh-hant"} {
+				if explanation := strings.TrimSpace(display[language]); explanation != "" {
+					msg = explanation + "（" + msg + "）"
+					break
+				}
+			}
+		}
+	}
 	if len(msg) > 500 {
 		msg = msg[:500]
 	}
@@ -251,6 +268,9 @@ func httpError(status int, raw []byte, retryAfter string) error {
 		Message:       msg,
 		ClientFixable: status == 400 || status == 401 || status == 403 || status == 404 || status == 422,
 		UpstreamFault: status >= 500,
+	}
+	if businessCode >= 10000 {
+		f.Code = fmt.Sprintf("upstream_%d", businessCode)
 	}
 	if status == 401 {
 		f.Code = "unauthorized"
@@ -273,8 +293,8 @@ func httpError(status int, raw []byte, retryAfter string) error {
 	// 「购买加量包」，没有可解析的重置时刻。识别它并打上 QuotaExhausted 标记，
 	// 号池据此走「拿不到重置时刻就不加锁、直接换号」的路径
 	//（不再像早期那样整号长冷却——那会把同账号的免费模型一起锁死）。
-	if code := nestedBusinessCode(raw); code == 14018 {
-		f.Code = fmt.Sprintf("upstream_%d", code)
+	if businessCode == 14018 {
+		f.Code = fmt.Sprintf("upstream_%d", businessCode)
 		f.RateLimited = true
 		f.QuotaExhausted = true
 	}
