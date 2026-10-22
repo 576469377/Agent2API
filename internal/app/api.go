@@ -217,11 +217,6 @@ type accountIdentityProvider interface {
 	AccountIdentity() workbuddy.AccountIdentity
 }
 
-// accountLister 由能列出账号的适配器实现（号池或单账号）。
-type accountLister interface {
-	AccountLabels() []string
-}
-
 // apiAccountsManage 是账号管理端点（全部平台账号合并为一个号池视图）：
 //
 //	GET    /api/accounts/manage          列出所有平台的账号 + 登录状态（每项带 platform 来源）

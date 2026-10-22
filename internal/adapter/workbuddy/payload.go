@@ -1,8 +1,6 @@
 package workbuddy
 
 import (
-	"encoding/json"
-
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
@@ -335,6 +333,3 @@ func convertMessages(msgs []llm.Message, sanitize bool) []upstreamMessage {
 	}
 	return out
 }
-
-// marshalJSON 便于调试与测试。
-func (r upstreamRequest) marshalJSON() ([]byte, error) { return json.Marshal(r) }

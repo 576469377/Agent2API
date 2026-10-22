@@ -325,9 +325,8 @@ func normalizeToolChoice(v any) *llm.ToolChoice {
 // Anthropic 的 content block 下标是全消息内递增的，与 IR 的 ContentIndex 语义一致，
 // 因此可以直接映射，无需额外的下标表。
 type StreamEncoder struct {
-	id       string
-	model    string
-	blockIdx int
+	id    string
+	model string
 	// startedBlock 记录已发出 content_block_start 的下标；
 	// openBlock 记录已 start 但尚未 stop 的下标。
 	//
