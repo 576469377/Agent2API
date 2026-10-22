@@ -8,6 +8,124 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
+import importlib.util
+import sqlite3
+
+
+spec = importlib.util.spec_from_file_location('sync_zcode', Path(__file__).with_name('sync-zcode.py'))
+sync = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sync)
+
+
+class ConfigWriteSafetyTest(unittest.TestCase):
+    def test_unchanged_json_preserves_bytes_mtime_and_creates_no_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            raw = b'\xef\xbb\xbf{ "keep": true, "models": [] }\r\n'
+            path.write_bytes(raw)
+            os.utime(path, ns=(1600000000000000000, 1600000000000000000))
+            before = path.stat()
+            self.assertEqual(sync.write_config(path, {'models': [], 'keep': True}, raw), (None, None))
+            self.assertEqual(path.read_bytes(), raw)
+            self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
+    def test_edit_during_catalogue_refresh_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            source = b'{"old":true}'
+            edited = b'{"user_edit":true}'
+            path.write_bytes(edited)
+            with self.assertRaisesRegex(ValueError, 'changed during sync'):
+                sync.write_config(path, {'old': False}, source)
+            self.assertEqual(path.read_bytes(), edited)
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
+    def test_edit_during_temporary_write_is_not_overwritten_and_temp_is_cleaned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            source = b'{"old":true}'
+            edited = b'{"user_edit":true}'
+            path.write_bytes(source)
+            with mock.patch.object(sync.os, 'fsync', side_effect=lambda _: path.write_bytes(edited)):
+                with self.assertRaisesRegex(ValueError, 'changed during sync'):
+                    sync.write_config(path, {'old': False}, source)
+            self.assertEqual(path.read_bytes(), edited)
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
+    def test_atomic_write_preserves_original_backup_and_does_not_reuse_a_foreign_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            source = b'{"old":true}\r\n'
+            path.write_bytes(source)
+            foreign = path.with_name(path.name + '.tmp')
+            foreign.write_bytes(b'other-sync-in-progress')
+            output, backup = sync.write_config(path, {'new': '\u4e2d\u6587'}, source)
+            self.assertEqual(output, path)
+            self.assertEqual(backup.read_bytes(), source)
+            self.assertEqual(json.loads(path.read_text(encoding='utf-8')), {'new': '\u4e2d\u6587'})
+            self.assertEqual(foreign.read_bytes(), b'other-sync-in-progress')
+            self.assertEqual(len(list(path.parent.iterdir())), 3)
+
+    def test_replace_failure_leaves_valid_source_and_cleans_own_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            source = b'{"old":true}'
+            path.write_bytes(source)
+            with mock.patch.object(sync.os, 'replace', side_effect=PermissionError('locked')):
+                with self.assertRaises(PermissionError):
+                    sync.write_config(path, {'new': True}, source)
+            self.assertEqual(path.read_bytes(), source)
+            self.assertEqual(list(path.parent.glob('*.tmp')), [])
+
+
+class UsageVerificationTest(unittest.TestCase):
+    def test_wal_data_is_read_without_rewriting_storage_or_emitting_private_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'db.sqlite'
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute('pragma journal_mode=wal')
+                connection.execute('pragma wal_autocheckpoint=0')
+                connection.execute('create table model_usage(started_at integer, computed_total_tokens integer, raw_usage_json text)')
+                connection.executemany('insert into model_usage values(?,?,?)', [(1000, 200, 'private-prompt-secret'), (2000, 300, 'private-identity'), (9000, 900, 'future-request')])
+                connection.commit()
+                wal = path.with_name(path.name + '-wal')
+                original, original_wal = path.read_bytes(), wal.read_bytes()
+                snapshot = sync.usage_snapshot(path, 3000)
+                self.assertEqual(snapshot['status'], 'ready')
+                self.assertEqual(snapshot['model_requests'], 2)
+                self.assertEqual(snapshot['tokens'], 500)
+                report = sync.usage_report(path, snapshot, 3000)
+                self.assertEqual(report['comparison'], 'no_record_count_decrease')
+                self.assertFalse(report['client_ui_verified'])
+                text = json.dumps(report)
+                self.assertNotIn('private-', text)
+                self.assertNotIn('future-request', text)
+                self.assertNotIn(str(path), text)
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual(wal.read_bytes(), original_wal)
+                connection.execute('delete from model_usage where started_at=1000'); connection.commit()
+                self.assertEqual(sync.usage_report(path, snapshot, 3000)['comparison'], 'record_count_decreased')
+            finally:
+                connection.close()
+
+    def test_missing_invalid_and_unsupported_database_remain_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'db.sqlite'
+            self.assertEqual(sync.usage_snapshot(path, 10), {'status': 'missing'})
+            self.assertFalse(path.exists())
+            path.write_bytes(b'not-a-database-private-secret')
+            self.assertEqual(sync.usage_snapshot(path, 10), {'status': 'unavailable'})
+            self.assertEqual(path.read_bytes(), b'not-a-database-private-secret')
+            path.unlink()
+            with sqlite3.connect(path) as connection:
+                connection.execute('create table unrelated(value text)')
+            connection.close()
+            before = path.read_bytes()
+            self.assertEqual(sync.usage_snapshot(path, 10), {'status': 'unsupported_schema'})
+            self.assertEqual(path.read_bytes(), before)
 
 
 class SyncPreservationTest(unittest.TestCase):
@@ -68,9 +186,6 @@ class SyncPreservationTest(unittest.TestCase):
 
 class FreeOnlySyncTest(unittest.TestCase):
     def test_cursor_free_plan_requires_fresh_verified_metadata(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('sync_zcode', Path(__file__).with_name('sync-zcode.py'))
-        sync = importlib.util.module_from_spec(spec); spec.loader.exec_module(sync)
         model = self.model('composer-2.5', 'free', 'cursor')
         model['pricing']['source'] = 'cursor_free_plan'
         model['pricing'].pop('credit_multiplier')
@@ -89,6 +204,7 @@ class FreeOnlySyncTest(unittest.TestCase):
                        self.model('auto', 'dynamic'), self.model('unknown', 'unknown'),
                        self.model('author/model:free', 'free', 'openrouter')]
         self.catalog_status = []
+        self.catalog_hook = None
         self.doc = {'schemaVersion': 1, 'config': {
             'providerOrder': ['other', 'agent2api'],
             'providerConfigRules': {'providerRules': [
@@ -111,6 +227,8 @@ class FreeOnlySyncTest(unittest.TestCase):
                 self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
             def do_GET(self):
                 case.assertEqual(self.path, '/api/models?refresh=1')
+                if case.catalog_hook:
+                    case.catalog_hook()
                 self.send_response(200); self.end_headers()
                 self.wfile.write(json.dumps({'models': case.models, 'catalog_status': case.catalog_status}).encode())
             def log_message(self, *args):
@@ -151,6 +269,42 @@ class FreeOnlySyncTest(unittest.TestCase):
                          ['workbuddy/free', 'openrouter/author/model:free'])
         self.assertEqual(cfg['providerConfigRules']['providerRules'][0], self.doc['config']['providerConfigRules']['providerRules'][0])
         self.assertEqual(len(list(self.path.parent.glob('zcode.json.bak-*'))), 1)
+
+    def test_second_sync_does_not_rewrite_config_or_create_another_backup(self):
+        first = self.run_sync(); self.assertEqual(first.returncode, 0, first.stderr)
+        original = self.path.read_bytes()
+        os.utime(self.path, ns=(1600000000000000000, 1600000000000000000))
+        mtime = self.path.stat().st_mtime_ns
+        result = self.run_sync(); self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b'Unchanged:', result.stdout)
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.path.stat().st_mtime_ns, mtime)
+        self.assertEqual(len(list(self.path.parent.glob('zcode.json.bak-*'))), 1)
+
+    def test_concurrent_client_edit_during_network_request_is_preserved(self):
+        edited = {**self.doc, 'clientEdit': True}
+        self.catalog_hook = lambda: self.path.write_text(json.dumps(edited), encoding='utf-8')
+        result = self.run_sync()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'changed during sync', result.stderr)
+        self.assertEqual(json.loads(self.path.read_text()), edited)
+        self.assertEqual(list(self.path.parent.glob('*.bak-*')), [])
+
+    def test_usage_check_does_not_write_database_or_include_private_details(self):
+        path = self.path.parent / 'usage.sqlite'
+        with sqlite3.connect(path) as connection:
+            connection.execute('create table model_usage(started_at integer, computed_total_tokens integer, raw_usage_json text)')
+            connection.execute('insert into model_usage values(1,123,?)', ('private-prompt-secret',))
+        connection.close()
+        before = path.read_bytes()
+        result = self.run_sync('--verify-usage', '--usage-db', str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(next(line.removeprefix('ZCode usage check: ') for line in result.stdout.decode().splitlines() if line.startswith('ZCode usage check: ')))
+        self.assertEqual(report['before']['tokens'], 123)
+        self.assertEqual(report['after']['tokens'], 123)
+        self.assertEqual(report['comparison'], 'no_record_count_decrease')
+        self.assertNotIn(b'private-', result.stdout)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_explicit_paid_unknown_and_incomplete_models_refused_without_writes(self):
         self.models.append({**self.model('incomplete', 'free'), 'max_output_tokens': 0})

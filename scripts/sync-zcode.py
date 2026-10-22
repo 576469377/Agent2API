@@ -2,11 +2,15 @@
 """Sync only confirmed free gateway models to ZCode, pruning paid/unknown entries and backing up first."""
 
 import argparse
+from contextlib import closing
 import datetime
 import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
+import tempfile
+import time
 import urllib.request
 
 
@@ -34,6 +38,79 @@ def output_limit(model):
     return min(maximum, 8192) if model.get("platform") == "openrouter" else maximum
 
 
+def read_source(path):
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def write_config(path, document, source, dry_run=False):
+    """Do not overwrite an intervening edit or rewrite an unchanged document."""
+    def check_source():
+        if read_source(path) != source:
+            raise ValueError("ZCode config changed during sync; no configuration was replaced. Run sync again with the latest file")
+
+    check_source()
+    if not dry_run and source is not None and json.loads(source.decode("utf-8-sig")) == document:
+        return None, None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    output = path.with_name(path.name + ".candidate") if dry_run else path
+    temporary = None
+    backup = None
+    try:
+        # Each writer owns its temporary file. A second sync must not truncate
+        # another process's candidate before it is atomically installed.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=path.parent, prefix=output.name + ".", suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(document, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        check_source()
+        if not dry_run and source is not None:
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            backup = path.with_name(path.name + ".bak-" + stamp)
+            shutil.copy2(path, backup)
+        check_source()
+        os.replace(temporary, output)
+        return output, backup
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def usage_snapshot(path, cutoff_ms):
+    """Read aggregate counters only, including committed WAL data; never open a new database."""
+    if not path.is_file():
+        return {"status": "missing"}
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(model_usage)")}
+            if not {"started_at", "computed_total_tokens"} <= columns:
+                return {"status": "unsupported_schema"}
+            count, tokens, first, last = connection.execute(
+                "SELECT count(*), coalesce(sum(computed_total_tokens), 0), min(started_at), max(started_at) "
+                "FROM model_usage WHERE started_at <= ?", (cutoff_ms,)).fetchone()
+            day = lambda value: datetime.datetime.fromtimestamp(value / 1000, datetime.timezone.utc).date().isoformat() if value is not None else None
+            return {"status": "ready", "model_requests": count, "tokens": tokens,
+                    "first_day_utc": day(first), "last_day_utc": day(last)}
+    except (OSError, sqlite3.Error, OverflowError, ValueError, TypeError):
+        # Database errors can include paths or SQL values. Keep those local.
+        return {"status": "unavailable"}
+
+
+def usage_report(path, before, cutoff_ms):
+    after = usage_snapshot(path, cutoff_ms)
+    comparison = "unavailable"
+    if before["status"] == after["status"] == "ready":
+        comparison = "no_record_count_decrease" if after["model_requests"] >= before["model_requests"] else "record_count_decreased"
+    return {"schema": "agent2api-zcode-usage-check-v1", "scope": "local-zcode-agent-db", "through_ms": cutoff_ms, "before": before, "after": after,
+            "comparison": comparison, "client_ui_verified": False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config.json", help="Gateway configuration (API key stays local)")
@@ -44,10 +121,15 @@ def main():
     parser.add_argument("--models", nargs="+", help="Only add these confirmed free model IDs, in this order")
     parser.add_argument("--default-model", help="Also select this provider/model as the default")
     parser.add_argument("--dry-run", action="store_true", help="Write a candidate beside the config without applying it")
+    parser.add_argument("--verify-usage", action="store_true", help="Read local ZCode usage counters before/after sync; never writes session or statistics storage")
+    parser.add_argument("--usage-db", help="Explicit local ZCode agent database for --verify-usage; otherwise derived from the selected v2 profile")
     args = parser.parse_args()
+    if args.usage_db and not args.verify_usage:
+        parser.error("--usage-db requires --verify-usage")
 
     path = Path(args.zcode_config).expanduser()
-    document = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {
+    source = read_source(path)
+    document = json.loads(source.decode("utf-8-sig")) if source is not None else {
         "schemaVersion": 1,
         "config": {
             "providerOrder": [],
@@ -57,6 +139,19 @@ def main():
     }
     if document.get("schemaVersion") != 1:
         raise ValueError("Unsupported ZCode config version; no changes made")
+    usage_path = None
+    usage_before = None
+    cutoff_ms = int(time.time() * 1000)
+    if args.verify_usage:
+        if args.usage_db:
+            usage_path = Path(args.usage_db).expanduser()
+        elif path.parent.name == "v2":
+            usage_path = path.parent.parent / "cli/db/db.sqlite"
+        else:
+            parser.error("--verify-usage with a non-v2 config requires --usage-db; no changes made")
+        if usage_path.resolve() in {path.resolve(), path.with_name(path.name + ".candidate").resolve()}:
+            parser.error("Usage database must be separate from the provider config and candidate; no changes made")
+        usage_before = usage_snapshot(usage_path, cutoff_ms)
     key = os.environ.get("AGENT2API_API_KEY") or json.loads(Path(args.config).read_text(encoding="utf-8-sig")).get("auth", {}).get("api_key", "")
     headers = {"Authorization": "Bearer " + key} if key else {}
 
@@ -210,21 +305,18 @@ def main():
         else:
             config.pop("defaultModelSelection", None)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    output = path.with_name(path.name + ".candidate") if args.dry_run else path
-    text = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
-    if not args.dry_run and path.exists():
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        backup = path.with_name(path.name + ".bak-" + stamp)
-        shutil.copy2(path, backup)
+    output, backup = write_config(path, document, source, args.dry_run)
+    if backup is not None:
         print("Backup:", backup)
-    temporary = output.with_name(output.name + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, output)
-    print("Candidate:" if args.dry_run else "Updated:", output)
+    if output is None:
+        print("Unchanged: ZCode config already matches; no write or backup needed")
+    else:
+        print("Candidate:" if args.dry_run else "Updated:", output)
     print("Models:", ", ".join(selected))
     if removed:
         print("Removed paid/unknown/unavailable models:", ", ".join(removed))
+    if usage_path is not None:
+        print("ZCode usage check:", json.dumps(usage_report(usage_path, usage_before, cutoff_ms), ensure_ascii=False))
 
 
 if __name__ == "__main__":
