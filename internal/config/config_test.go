@@ -30,7 +30,7 @@ func TestDefaultValues(t *testing.T) {
 
 func TestGatewayLimitsDefaultsAndValidation(t *testing.T) {
 	g := GatewayConfig{}
-	if g.MaxAttempts() != 6 || g.RoutingTimeout().Seconds() != 120 || g.QueueTimeout().Seconds() != 30 || g.MaxQueued() != 128 {
+	if g.MaxAttempts() != 6 || g.RoutingTimeout().Seconds() != 600 || g.QueueTimeout().Seconds() != 30 || g.MaxQueued() != 128 {
 		t.Fatal("unsafe zero-value scheduling defaults")
 	}
 	path := filepath.Join(t.TempDir(), "config.json")

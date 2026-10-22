@@ -141,7 +141,7 @@ func BeginAttempt(ctx context.Context, platform string, headerTimeout time.Durat
 				e.mu.Unlock()
 				return ctx, nil, &Failure{Code: "routing_timeout", Message: "本次请求等待上游的总时间已用尽，请稍后再试", Local: true}
 			}
-			if headerTimeout <= 0 || remaining < headerTimeout {
+			if headerTimeout > 0 && remaining < headerTimeout {
 				headerTimeout = remaining
 			}
 		}
@@ -168,7 +168,8 @@ func BeginAttempt(ctx context.Context, platform string, headerTimeout time.Durat
 				result = &Failure{Code: "upstream_header_timeout", Message: "等待上游响应超时", Cause: context.DeadlineExceeded, Timeout: true, UpstreamFault: true}
 			}
 			if ctx.Err() != nil {
-				result = ctx.Err()
+				// 保留网关主动超时的原因，不能把它记为客户端断开。
+				result = context.Cause(ctx)
 			}
 			if result != nil {
 				cancel()
@@ -177,6 +178,9 @@ func BeginAttempt(ctx context.Context, platform string, headerTimeout time.Durat
 				e.mu.Lock()
 				defer e.mu.Unlock()
 				e.attempts[index].DurationMs = time.Since(started).Milliseconds()
+				if status == 0 && result != nil {
+					status = Wrap(result).HTTPStatus()
+				}
 				e.attempts[index].Status = status
 				if result != nil {
 					e.attempts[index].ErrorCode = Wrap(result).Code

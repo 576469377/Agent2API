@@ -131,3 +131,45 @@ func TestRoutingDeadlineCancelsWaitingButNotAnAcceptedStream(t *testing.T) {
 		cancel()
 	}
 }
+
+func TestWorkBuddyRoutingTimeoutKeepsAccountAndAttemptClassification(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v3/config" {
+			_, _ = io.WriteString(w, `{"code":0,"data":{"models":[{"id":"m","name":"M","credits":"x0.00"}]}}`)
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "account.json")
+	if err := os.WriteFile(path, []byte(`{"auth":{"accessToken":"fixture-token","expiresAt":9999999999999},"account":{"uid":"fixture"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := workbuddy.New(workbuddy.Config{BaseURL: server.URL, CredentialPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := adapter.NewPool("workbuddy", nil)
+	pool.Add("fixture", upstream)
+	logger := log.New(io.Discard, "", 0)
+	hub, err := NewHub([]*PlatformRuntime{{ID: "workbuddy", Adapter: pool}}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(config.Default(), hub, logger)
+	execution := llm.NewExecution(6)
+	execution.StartRouting(100 * time.Millisecond)
+	ctx := llm.WithExecution(context.Background(), execution)
+	_, _, err = a.openRoutedStream(ctx, llm.RequestMessages{Model: "m"}, "workbuddy")
+	if f := llm.Wrap(err); f == nil || f.Code != "routing_timeout" || f.HTTPStatus() != 503 {
+		t.Fatalf("routing timeout lost: %v", err)
+	}
+	trace := execution.Snapshot()
+	if trace.AttemptCount != 1 || trace.Attempts[0].Status != 503 || trace.Attempts[0].ErrorCode != "routing_timeout" {
+		t.Fatalf("routing timer recorded as client cancellation: %+v", trace)
+	}
+	if status := pool.Statuses()[0]; status.InFlight != 0 || !status.Healthy {
+		t.Fatal("local routing timeout leaked capacity or damaged account")
+	}
+}

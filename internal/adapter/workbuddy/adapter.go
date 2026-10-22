@@ -34,7 +34,7 @@ type Config struct {
 	// 否则上游审核会拦截大量请求。
 	Sanitize bool
 
-	RequestTimeout     time.Duration // 等待上游建立响应的超时，不截断已接受的流
+	RequestTimeout     time.Duration // 非流式请求超时，不限制流式图片上传与建流
 	StreamIdleTimeout  time.Duration // 流式空闲超时（看门狗）
 	StreamTotalTimeout time.Duration // 流式总时长上限
 	ModelCacheTTL      time.Duration

@@ -66,6 +66,7 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 - 国际桌面加密凭证已在 Windows 验证；macOS / Linux 尚未完成该凭证路径的端到端验证，见[国际版说明](docs/research/04-WorkBuddy国际版接入.md)。
 - 国际版聊天已补齐必需的会话标识头；同一会话保持稳定，修复官方客户端可用、反代却返回 `11128 / request illegal` 的情况。该错误不等同于账号封禁，见[故障排查](docs/troubleshooting.md)。
 - 请求具有跨账号 / 平台的重试预算和建流等待上限；启用账号并发限制时使用有界队列。后台显示实时阶段、排队耗时和逐次尝试，配置见[调度预算](docs/configuration.md#请求预算和等待队列gateway)，设计依据见[稳定性调研](docs/reviews/2026-10-23-gateway-stability-review.md)。
+- WorkBuddy 流式的大图片 / 长会话请求保留完整上传与预处理时间，默认建流总预算为 600 秒，不再被非流式的 60 秒超时提前取消；网关主动超时与客户端断开分别记录。
 
 ## 接入客户端
 

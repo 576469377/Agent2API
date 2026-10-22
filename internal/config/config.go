@@ -38,7 +38,7 @@ func (g GatewayConfig) MaxAttempts() int {
 }
 func (g GatewayConfig) RoutingTimeout() time.Duration {
 	if g.RoutingTimeoutSec <= 0 {
-		return 120 * time.Second
+		return 10 * time.Minute
 	}
 	return time.Duration(g.RoutingTimeoutSec) * time.Second
 }
@@ -374,7 +374,7 @@ func (c Config) StreamTotalTimeout() time.Duration {
 	return time.Duration(c.Upstream.StreamTotalTimeoutSec) * time.Second
 }
 
-// RequestTimeout 返回上游响应等待及非流式请求总超时。
+// RequestTimeout 返回非流式请求总超时；OpenRouter / Cursor 也用作建流超时。
 func (c Config) RequestTimeout() time.Duration {
 	if c.Upstream.RequestTimeoutSec <= 0 {
 		return 60 * time.Second

@@ -18,28 +18,28 @@ func (a *App) openRoutedStream(ctx context.Context, req llm.RequestMessages, hin
 	if execution == nil {
 		return a.routeStream(ctx, req, hint, records...)
 	}
-	routingCtx, cancel := context.WithCancel(ctx)
+	routingCtx, cancel := context.WithCancelCause(ctx)
+	failure := &llm.Failure{Code: "routing_timeout", Message: "本次请求等待上游的总时间已用尽，请稍后再试", Local: true}
 	expired := make(chan struct{})
-	timer := time.AfterFunc(execution.Remaining(), func() { cancel(); close(expired) })
+	timer := time.AfterFunc(execution.Remaining(), func() { cancel(failure); close(expired) })
 	stream, rt, err := a.routeStream(routingCtx, req, hint, records...)
 	if !timer.Stop() {
 		<-expired
 		if closer, ok := stream.(io.Closer); ok {
 			closer.Close()
 		}
-		cancel()
+		cancel(nil)
 		if ctx.Err() != nil {
 			return nil, rt, ctx.Err()
 		}
-		failure := &llm.Failure{Code: "routing_timeout", Message: "本次请求等待上游的总时间已用尽，请稍后再试", Local: true}
 		llm.NoteAttemptFailure(ctx, failure)
 		return nil, rt, failure
 	}
 	if err != nil {
-		cancel()
+		cancel(nil)
 		return stream, rt, err
 	}
-	return &routedStream{ResponseStream: stream, cancel: cancel}, rt, nil
+	return &routedStream{ResponseStream: stream, cancel: func() { cancel(nil) }}, rt, nil
 }
 
 type routedStream struct {
