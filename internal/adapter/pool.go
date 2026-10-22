@@ -116,7 +116,7 @@ type poolAccount struct {
 	//
 	// sem 是并发槽位信号量（容量 = Pool.maxConc）；不限并发（maxConc=0）时为 nil。
 	// inFlight 是当前在途请求数，含正在生成中的流，仅用于展示与选号。
-	// 两者都由 acquireSlot/releaseSlot 维护：槽位在**流的整个生命周期**内占用，
+	// 两者由 Pool.reserve 及其归还函数维护：槽位在**流的整个生命周期**内占用，
 	// 流关闭或读到结尾才归还（提前归还等于没有限制）。
 	sem      chan struct{}
 	inFlight int32
@@ -423,7 +423,7 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 				}
 				// 带上账号标签：app 层据此把请求归因到具体账号，
 				// 控制台才能回答「每个账号用了多少额度」。
-				// withSlot 让槽位在流的整个生命周期内保持占用。
+				// slotStream 让槽位在流的整个生命周期内保持占用。
 				return &labeledStream{ResponseStream: &slotStream{ResponseStream: bs, release: release}, label: acc.label}, nil
 			}
 			_ = closeStream(s)
@@ -615,48 +615,6 @@ func (a *poolAccount) hasCapacity() bool {
 		return true
 	}
 	return atomic.LoadInt32(&a.inFlight) < int32(cap(a.sem))
-}
-
-// acquireSlot 占用一个并发槽位；账号不限并发时立即返回。
-//
-// 槽位满时**阻塞等待**（select 在 ctx 上可取消）：这是背压而不是失败——
-// 上游并没有拒绝我们，只是本地要按账号能承受的并发发请求。
-// 等待期间不持有任何锁（否则会堵住整个号池）。
-func (a *poolAccount) acquireSlot(ctx context.Context) error {
-	if a.sem == nil {
-		atomic.AddInt32(&a.inFlight, 1)
-		return nil
-	}
-	select {
-	case a.sem <- struct{}{}:
-		atomic.AddInt32(&a.inFlight, 1)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// releaseSlot 归还槽位。幂等（withSlot 用 sync.OnceFunc 包了一层，
-// 但直接调用也不会把计数减成负数或阻塞）。
-func (a *poolAccount) releaseSlot() {
-	if atomic.AddInt32(&a.inFlight, -1) < 0 {
-		atomic.StoreInt32(&a.inFlight, 0) // 防御：重复释放不留下负计数
-	}
-	if a.sem != nil {
-		select {
-		case <-a.sem:
-		default: // 没有已占用的槽位：重复释放，忽略。
-		}
-	}
-}
-
-// withSlot 把「归还槽位」绑到流上：流关闭或读到结尾时归还（只归还一次）。
-//
-// 为什么不在这里立刻归还：请求的整个生命周期（含上游生成）都占用该账号的
-// 并发额度，提前归还等于没有上限。
-func (a *poolAccount) withSlot(s llm.ResponseStream) llm.ResponseStream {
-	// 即便不限并发（sem == nil）也要包装：inFlight 计数同样要归还。
-	return &slotStream{ResponseStream: s, release: sync.OnceFunc(a.releaseSlot)}
 }
 
 // slotStream 在流结束时归还账号并发槽位（Close 或 Recv 出错，只归还一次）。

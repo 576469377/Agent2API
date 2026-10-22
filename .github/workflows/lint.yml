@@ -21,7 +21,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          # v1.62 的分析器使用 Go 1.23 导出格式；追随 stable 会先于代码检查失败。
+          # 最新工具链兼容性和竞态检测仍由 CI 的 stable 矩阵验证。
+          go-version: '1.23.x'
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
