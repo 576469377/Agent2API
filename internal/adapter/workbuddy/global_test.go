@@ -90,7 +90,7 @@ func TestGlobalChatFallbackOnlyOnMissingRoute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s, err := a.dial(context.Background(), upstreamRequest{Model: "fast-model"})
+			s, err := a.dial(context.Background(), upstreamRequest{Model: "fast-model"}, a.newConversationMetadata(""))
 			want := status == 404 || status == 405
 			if (err == nil) != want || (fallbackHits == 1) != want {
 				t.Fatalf("status=%d fallback=%d err=%v", status, fallbackHits, err)

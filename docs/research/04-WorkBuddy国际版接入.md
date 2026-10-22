@@ -30,6 +30,18 @@
 
 ## 实测结果
 
+### 2026-10-22：会话字段缺失导致的生成拒绝
+
+同一个已登录的国际版桌面账号和最小文本请求，原请求返回 HTTP 400、业务码 `11128`、`request illegal`；仅补齐 `X-Conversation-ID`、`X-Conversation-Request-ID`、`X-Conversation-Message-ID` 后返回正常 SSE 和最终回复。此处是请求兼容问题，不能据此认定账号封禁。已从本机 WorkBuddy AI 5.8.4 的请求构造确认这三个字段。
+
+适配器在每次生成开始时建立会话元数据。已有会话路由键按平台、账号和键值派生 32 位十六进制会话标识，不向上游发送原始键；消息历史增长、适配器重新载入不改变该会话标识。无路由键时为单次调用生成独立会话标识。每次生成使用新的请求、消息标识，连接重试、令牌刷新和 404/405 兼容路由回退沿用本次标识，鉴权头仍读取当前凭证。
+
+这保证请求携带稳定的会话字段，不代表已经命中上游缓存；缓存读写以实际 `usage` 为准。设备标识、账号权限、免费模型判断及限额处理保持原规则。
+
+修复后逐个固定账号测试：三个国际版账号的 Hy3、DeepSeek V4.1 Flash、Step 5 Preview 共九次零积分请求全部成功；两个国内版账号的 Hy3 仍可正常回复。更新运行中的网关后，Chat Completions、Responses、Anthropic Messages 均返回正确文本；Messages 的流式工具调用、工具结果回传及最终回复完成了端到端验证。相关标识不写入公开实测记录。
+
+### 首次接入记录
+
 修正 WorkBuddy 产品标识后，当前国际账号返回 28 个模型条目，排除两个图片/视频模型后为 26 个聊天入口。包括 GPT-6.1-Sol、GPT-6 系列、GPT-5.6 系列、Gemini-3.5-Flash、Grok-4.7，以及与国内同名的 GLM、Hy3、DeepSeek 等。模型可用范围取决于账号及上游服务；没有把模式入口猜测成某个底层模型。
 
 国际版 `workbuddy-global/glm-5.3` 已通过 Chat Completions / Responses / Anthropic Messages 的真实非流式请求，`workbuddy-global/gpt-6.1-sol` 已通过 Anthropic 流式请求。此前 `fast-model` 的工具调用已完成 `tool_use → tool_result → 最终文本` 往返。

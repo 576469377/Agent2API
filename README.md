@@ -64,6 +64,7 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 - 只启用国内版：启动参数 `-platform workbuddy`；国际版：`-platform workbuddy-global`。
 - 没有桌面登录态：在「账号管理 → 添加账号」选择国内版或国际版；也可执行 `login -region cn/global`。
 - 国际桌面加密凭证已在 Windows 验证；macOS / Linux 尚未完成该凭证路径的端到端验证，见[国际版说明](docs/research/04-WorkBuddy国际版接入.md)。
+- 国际版聊天已补齐必需的会话标识头；同一会话保持稳定，修复官方客户端可用、反代却返回 `11128 / request illegal` 的情况。该错误不等同于账号封禁，见[故障排查](docs/troubleshooting.md)。
 
 ## 接入客户端
 

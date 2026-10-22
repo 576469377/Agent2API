@@ -15,7 +15,7 @@
 | `address already in use` | 已有程序占用端口；已有网关正在使用时，连接原进程或启动独立控制台，不要重复启动 |
 | 国内与国际同名模型选错区域 | 改用 `workbuddy/模型名` 或 `workbuddy-global/模型名`；裸名优先级取决于平台配置顺序 |
 | 模型在目录里但生成失败 | 检查账号权限、额度和上游实际服务；目录条目不保证当前可用 |
-| WorkBuddy 返回 `request illegal` / `upstream_11128` | 上游业务码 `11128` 的说明是“请求被拦截，请重新发送”。更新网关后可保留业务码及 `displayMsg`；这句通用拒绝不能直接证明图片超限、额度耗尽或账号封禁。用官方客户端对照相同账号的简单请求；模型目录可读、凭证健康也不保证生成接口接受请求 |
+| WorkBuddy 返回 `request illegal` / `upstream_11128` | 官方客户端同账号可用时，先更新并重启网关：已修复缺少 `X-Conversation-ID`、`X-Conversation-Request-ID`、`X-Conversation-Message-ID` 导致的国际版拒绝；同一会话使用稳定标识，无会话的单次请求也会补齐。该错误不能直接证明图片超限、额度耗尽或账号封禁；更新后仍失败时保留业务码和具体 `displayMsg` 排查，模型目录可读不保证生成接口接受请求 |
 | OpenRouter Dots 提示 `Provider returned error` / HTTP 400 | 2026-10-19 实测其免费端点拒绝目录标称的 `max_tokens=460800`，相同测试使用 8192 可以开始回复；重新运行 ZCode 同步脚本，修复已有规则的输出预算。新版错误会补充供应端名称和经脱敏的错误原因，其他 400 仍需按实际原因排查 |
 | OpenRouter 所有免费模型都报 `free-models-per-day` / 429 | 表示账号每日免费调用额度耗尽，切换 OpenRouter 免费模型不增加额度。可通过官方 `GET /api/v1/key` 查看 `free_model_daily_requests`；等待恢复或主动选择其他平台的免费模型。免费限制见 [OpenRouter 文档](https://openrouter.ai/docs/api_reference/limits)，失败尝试也可能计入额度 |
 | Cursor 工具续接变成 `<tool_call>` 普通文本，或只执行第一步就结束 | 更新网关后端。旧实现把历史工具调用拼成文本；新版改用结构化历史、完整工具描述，并已验证 ZCode 多轮工具调用。原生规则和其他未声明的主机操作限制仍见 [Cursor 配置](configuration.md#cursor个人-free-额度) |

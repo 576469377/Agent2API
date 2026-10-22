@@ -223,6 +223,8 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 		}
 	}
 
+	// 一次生成的连接重试及路由回退沿用同一组会话字段；鉴权头仍每次重建。
+	conversation := a.newConversationMetadata(req.SessionKey)
 	backoff := 500 * time.Millisecond
 	var lastErr error
 	var refreshedOnAttempt bool
@@ -230,7 +232,7 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 		if attempt > 1 {
 			a.logf("重试上游连接（第 %d/%d 次）: %s", attempt, retryAttemptLimit, lastErr)
 		}
-		s, err := a.dial(ctx, body)
+		s, err := a.dial(ctx, body, conversation)
 		if err == nil {
 			return s, nil
 		}
@@ -322,9 +324,10 @@ func retryAfterOf(err error) time.Duration {
 //
 // 超时 ctx 的 cancel 交给流对象保管（Close 时调用），因此这里不能 defer cancel：
 // 流要在函数返回后继续存活。
-func (a *Adapter) dial(ctx context.Context, body upstreamRequest) (llm.ResponseStream, error) {
+func (a *Adapter) dial(ctx context.Context, body upstreamRequest, conversation conversationMetadata) (llm.ResponseStream, error) {
 	streamCtx, cancel := context.WithTimeout(ctx, a.cfg.StreamTotalTimeout)
 	headers := a.auth.BuildHeaders(headerModeFull)
+	conversation.apply(headers)
 
 	resp, err := a.cli.openStream(streamCtx, chatCompletionsPath, body, headers)
 	// Older international deployments expose the same protocol under /console.
