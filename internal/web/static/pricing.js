@@ -2,6 +2,12 @@
 export const RATE_REFRESH_MS = 60_000;
 export const RATE_MAX_AGE_MS = 5 * 60_000;
 
+// Use concrete platform routes: a free model in one region says nothing about
+// the price of a same-name model selected by automatic routing elsewhere.
+export function confirmedFreeModels(models = [], now = Date.now()) {
+  return models.filter(model => model.platform && model.platform !== "(别名)" && !model.pricing_from_snapshot && modelPricing(model, now).status === "free");
+}
+
 export function rateRefreshDue(lastAttempt, now = Date.now(), manual = false) {
   return manual || !lastAttempt || now - lastAttempt >= RATE_REFRESH_MS;
 }

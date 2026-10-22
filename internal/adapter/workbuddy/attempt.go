@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/llm"
 )
 
@@ -14,7 +15,7 @@ func (a *Adapter) openChatAttempt(ctx context.Context, path string, body upstrea
 	if err != nil {
 		return nil, err
 	}
-	response, err := a.cli.openStream(attemptCtx, path, body, headers)
+	response, err := a.cli.openStream(adapter.TraceRequest(attemptCtx), path, body, headers)
 	status := 0
 	if response != nil {
 		status = response.StatusCode

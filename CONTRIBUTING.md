@@ -10,7 +10,7 @@
 - 前端离线测试需要支持 `node --test` 的 Node.js；ZCode、诊断脚本与测试需要 Python 3.9+。普通网关构建不需要这两项；Cursor 在 macOS / Linux 读取登录态时需要 Python 3。
 - 提交凭证检查同样需要 Python 3.9+。安装 `scripts/pre-commit` 后会检查暂存内容；CI 还会扫描可达历史，诊断只显示文件、位置和类型，不打印密钥值。
 
-使用指南与当前实现架构见[文档导航](docs/README.md)。修改配置、模型路由或客户端行为时，请同步中英文首页及对应指南。
+使用指南见[文档导航](docs/README.md)，阅读源码先看[开发与仓库导览](docs/development.md)。修改配置、模型路由或客户端行为时，请同步中英文首页及对应指南；指标变更还需更新[口径定义](docs/metrics.md)。
 
 ## 构建与测试
 
@@ -33,11 +33,14 @@ go test ./...
 go vet ./...
 node --test scripts/test-console-*.mjs
 python -m unittest discover -s scripts -p 'test_*.py'
+python scripts/check-docs.py
 python scripts/check-secrets.py --staged
 python -m unittest discover -s scripts -p test_check_secrets.py
 ```
 
 已有网关在使用时，不覆盖或启动当前服务的可执行文件。前端开发使用[独立控制台](docs/console.md)，与原网关共存；后端测试使用离线样本或独立端口。`make run` 会启动网关，`make clean` 会删除 `bin/`，运行服务期间不要执行这些操作。
+
+`check-docs.py` 离线检查根目录、`docs/`、`fixtures/` 和 `.github/` 的 Markdown 本地目标、页内标题与代码块；CI 同时验证检查器。它不验证外部站点在线状态，也不能替代命令、默认值和能力说明与代码的交叉核对。当前用户指南与带日期的历史研究分开维护，保留已有文档路径，避免破坏引用。
 
 ## 提交前的自查清单
 
@@ -45,6 +48,7 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 - [ ] 涉及协议转换的改动**必须**补/更新测试
 - [ ] `gofmt` 已格式化（`make fmt`）
 - [ ] **没有提交任何凭证**（见下方「切勿提交」）
+- [ ] 文档检查通过，当前指南与历史计划的状态明确
 
 ## 测试要求
 

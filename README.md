@@ -7,7 +7,7 @@
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
-**简体中文** · [English](README.en.md) · [快速开始](docs/quickstart.md) · [平台支持](docs/platforms.md) · [文档导航](docs/README.md) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/576469377/Agent2API/issues)
+**简体中文** · [English](README.en.md) · [快速开始](docs/quickstart.md) · [平台支持](docs/platforms.md) · [运行升级](docs/operations.md) · [指标口径](docs/metrics.md) · [文档导航](docs/README.md) · [更新日志](CHANGELOG.md)
 
 ![Agent2API：可扩展的平台适配器、统一网关与标准 API](docs/assets/gateway.svg)
 
@@ -24,14 +24,14 @@
 | 路由 | 平台前缀、模型别名、可选的建流前同名回退 |
 | 账号 | WorkBuddy 双区域隔离、凭证发现与刷新、多账号调度、会话亲和、可选并发上限 |
 | 对话 | 文本、图片输入、思考输出、原生工具调用；具体能力以模型目录为准 |
-| 管理 | 九页控制台、交互趋势与用量分析、组合日志筛选、账号表格、客户端接入、中英文与深浅主题 |
+| 管理 | 九页控制台、近期故障与取消分流、首段等待 / 缓存样本统计、用量来源标记、诊断摘要、中英文与深浅主题 |
 | 扩展 | 平台适配器与下游协议分离，新增上游复用路由、协议层与控制台 |
 
 ## 选择上游平台
 
 | 平台 ID | 接入方式 | 当前范围与限制 |
 |---|---|---|
-| `workbuddy` | 国内桌面登录态 / 控制台设备登录 | 多账号号池；模型和积分倍率以当前目录为准，允许请求付费模型 |
+| `workbuddy` | 国内桌面登录态 / 控制台设备登录 | 多账号号池；客户端配置和模型测试仅选择当前确认免费的模型 |
 | `workbuddy-global` | 国际桌面登录态 / 控制台设备登录 | 独立区域与号池；国际加密桌面凭证已在 Windows 验证 |
 | `openrouter` | 自己的 `OPENROUTER_API_KEY` | 动态免费目录；拒绝收费及价格未知的模型，不使用 WorkBuddy 号池 |
 | `cursor` | 同一系统用户的 Cursor 个人 Free 登录态 | 仅 `cursor/composer-2.5`；每次生成核验免费权益，暂不支持图片及采样参数 |
@@ -106,11 +106,15 @@ python scripts/sync-zcode.py --config config.json
 
 模型目录按账号动态获取。**目录支持、账号可调度和剩余额度是不同信息**；目录中的条目不保证当前可以生成。详见[配置与模型路由](docs/configuration.md)。
 
+模型测试同时核对当前费率、已保存的选择和发送目标，只使用明确平台的免费路由。同名模型在不同平台可能收费；WorkBuddy 的原始 API 仍按账号权限受理手工请求，免费策略的实际边界见[平台支持](docs/platforms.md#免费与额度的区别)。
+
 ## 网页控制台
 
 概览、调用日志、用量分析、账号管理、平台连接、模型目录、模型测试、客户端接入和设置共享已配置平台的数据。交互趋势、运行诊断与累计排行可联动查看调用日志；WorkBuddy 账号支持登录与号池管理，OpenRouter 和 Cursor 按各自方式配置。接入页提供三种协议的真实网关地址与请求示例。
 
 界面随网关嵌入，无前端构建步骤。已有网关正在使用时，独立控制台可从磁盘加载新版界面，**无需重启原反代或修改客户端地址**。见[控制台使用说明](docs/console.md)。常规页面使用本地资源；数学公式按需加载 KaTeX，离线时显示原文。
+
+调用日志区分近期样本与累计故障，支持按超时、限流、取消和多次尝试筛选。用量页区分上传、等待与接收，明确标记历史估算，年度日历按需展开。P95、缓存比例及实时估算的范围见[指标手册](docs/metrics.md)。
 
 ## 文档
 
@@ -122,9 +126,12 @@ python scripts/sync-zcode.py --config config.json
 | 配置区域、模型前缀、别名与回退 | [配置与模型路由](docs/configuration.md) |
 | 管理账号、冷却与并发 | [账号与调度](docs/accounts.md) |
 | 使用或更新控制台 | [控制台](docs/console.md) |
+| 升级、回退并保留历史 | [运行、升级与恢复](docs/operations.md) |
+| 理解 Token、缓存、P95 与估算 | [指标与数据口径](docs/metrics.md) |
 | 查看接口、鉴权和请求示例 | [API 参考](docs/api.md) |
 | 排查密钥、模型、额度与登录问题 | [故障排查](docs/troubleshooting.md) |
-| 理解代码、参与维护 | [当前架构](docs/architecture.md) · [贡献指南](CONTRIBUTING.md) |
+| 理解代码、参与维护 | [开发导览](docs/development.md) · [当前架构](docs/architecture.md) · [贡献指南](CONTRIBUTING.md) |
+| 查看本轮调研、发现与取舍 | [控制台与全仓审查](docs/reviews/2026-10-23-console-and-repository-review.md) |
 
 历史设计、协议调研与实测报告见[文档导航](docs/README.md)。
 
@@ -165,6 +172,7 @@ go test ./...
 go vet ./...
 node --test scripts/test-console-*.mjs
 python -m unittest discover -s scripts -p 'test_*.py'
+python scripts/check-docs.py
 ```
 
 测试使用离线样本与模拟服务，不消耗真实模型额度。前端测试需要 Node.js，ZCode、诊断脚本及测试需要 Python 3.9+；常规网关构建不需要这两项，Cursor 在 macOS / Linux 读取登录态时需要 Python 3。竞态检查与开发流程见[贡献指南](CONTRIBUTING.md)。

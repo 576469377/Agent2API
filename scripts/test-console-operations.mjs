@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection } from "../internal/web/static/operations.js";
+import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms } from "../internal/web/static/operations.js";
+
+test("sanitization settings follow explicit backend capabilities and safe legacy platform fallback", () => {
+  const custom = { id: "custom", supports_sanitize: true };
+  const china = { id: "workbuddy" };
+  assert.deepEqual(sanitizePlatforms([custom, china, { id: "workbuddy-global", supports_sanitize: false }, { id: "openrouter" }, { id: "cursor" }]), [custom, china]);
+  assert.deepEqual(sanitizePlatforms(), []);
+});
 
 test("generic provider 400 wording must not become an image-overflow diagnosis", () => {
   for (const error of ["Invalid request parameters", "http_400: the request parameters were rejected by the model provider"]) {

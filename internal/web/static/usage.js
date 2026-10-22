@@ -128,14 +128,16 @@ export function heatmapColumns(calendar, mode = "daily", metric = "tokens") {
   for (let i=0,n=new Date(cells[0].ms).getUTCDay();i<n;i++) cells.unshift(null);
   while(cells.length % 7) cells.push(null);
   const weeks = Array.from({length:cells.length/7},(_,i)=>cells.slice(i*7,i*7+7));
-  let cumulative=0, observedDays=0, incomplete=false;
+  let cumulative=0, observedDays=0, incomplete=false, cumulativeEstimated=false;
   const columns=weeks.map(days=>{
     const real=days.filter(Boolean), known=real.filter(d=>d.coverage!=="unknown");
     const value=known.reduce((sum,d)=>sum+count(d[metric]),0);
     const partial=real.some(d=>d.coverage!=="complete"||metric==="tokens"&&d.unknown_token_requests>0);
+    const estimated=known.some(day=>day.coverage==="estimated"||day.estimated_requests>0||day.estimated_tokens>0);
+    cumulativeEstimated ||= estimated;
     cumulative+=value; observedDays+=known.length; incomplete ||= partial;
     const end=real.at(-1)?.date, start=real[0]?.date;
-    return {days,start,end,value:mode==="cumulative"?cumulative:value,
+    return {days,start,end,value:mode==="cumulative"?cumulative:value,estimated:mode==="cumulative"?cumulativeEstimated:estimated,
       coverage:mode==="cumulative" ? observedDays ? incomplete?"partial":"complete" : "unknown" : known.length ? partial?"partial":"complete":"unknown",
       monthDate:real.find(d=>d.date.endsWith("-01"))?.date||start};
   });
@@ -144,7 +146,7 @@ export function heatmapColumns(calendar, mode = "daily", metric = "tokens") {
   return columns.map(c=>{
     const level=c.value>0?Math.min(4,Math.max(1,Math.ceil(c.value/maximum*4))):0;
     const filled=c.value>0?Math.min(7,Math.max(1,Math.ceil(c.value/maximum*7))):0;
-    return {...c,cells:c.days.map((day,i)=> mode==="daily" ? {day,date:day?.date,level:day?.[metric]>0?Math.min(4,Math.max(1,Math.ceil(day[metric]/dayMaximum*4))):0,coverage:day?.coverage||"blank",value:day?.[metric]||0} : {day,date:day?.date,level:i>=7-filled?level:0,coverage:c.coverage,value:c.value})};
+    return {...c,cells:c.days.map((day,i)=> mode==="daily" ? {day,date:day?.date,estimated:day?.coverage==="estimated"||day?.estimated_requests>0||day?.estimated_tokens>0,level:day?.[metric]>0?Math.min(4,Math.max(1,Math.ceil(day[metric]/dayMaximum*4))):0,coverage:day?.coverage||"blank",value:day?.[metric]||0} : {day,date:day?.date,estimated:c.estimated,level:i>=7-filled?level:0,coverage:c.coverage,value:c.value})};
   });
 }
 

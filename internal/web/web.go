@@ -43,8 +43,8 @@ func Index(w http.ResponseWriter, r *http.Request) {
 //
 // 必须加 no-cache：go:embed 的文件 ModTime 恒为零值（实测），
 // http.FileServer 因此既不发 Last-Modified 也不发 ETag，只能靠
-// Cache-Control 阻止浏览器缓存。而 index.html 引用 app.js 时没有版本
-// 查询串 —— 一旦 JS 被缓存，升级网关后就会出现「新 HTML 调新字段、
+// Cache-Control 要求浏览器重新校验；即使入口带有版本查询串，模块导入
+// 仍可能复用原路径。一旦 JS 被直接复用，升级后就会出现「新 HTML 调新字段、
 // 旧 JS 读旧字段」的混搭，这类故障最难定位。
 func Static() http.Handler {
 	fsys, err := sub()

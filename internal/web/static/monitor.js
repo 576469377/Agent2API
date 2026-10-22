@@ -10,12 +10,30 @@ export const accountKey = (row) => JSON.stringify([row.platform || "", row.accou
 // observations while allowing explicitly reported all-zero usage in new rows.
 export const hasTokenUsage = row => row?.usage_reported === true || Number.isFinite(row?.input_tokens) || Number.isFinite(row?.output_tokens);
 
+export function requestOutcome(row) {
+  if (row?.ok) return "ok";
+  const code = String(row?.error_code || row?.error || "").split(":", 1)[0];
+  if (Number(row?.status) === 499) return "canceled";
+  if (Number(row?.status) === 504 || /timeout|deadline/i.test(code)) return "timeout";
+  if (Number(row?.status) === 429) return "limited";
+  return "failed";
+}
+
+function matchesStatus(row, status) {
+  if (!status || status === "all") return true;
+  if (status === "ok") return !!row.ok;
+  if (status === "failed") return !row.ok;
+  if (status === "errors") return !row.ok && requestOutcome(row) !== "canceled";
+  if (status === "retried") return Number(row.attempt_count) > 1;
+  return requestOutcome(row) === status;
+}
+
 export function filterRequests(rows, filters = {}, now = Date.now()) {
   const query = (filters.query || "").trim().toLowerCase();
   const since = filters.range && filters.range !== "all" ? now - Number(filters.range) * 60000 : -Infinity;
   return rows.filter((row) =>
     (!filters.platform || filters.platform === "all" || row.platform === filters.platform) &&
-    (!filters.status || filters.status === "all" || (filters.status === "ok" ? row.ok : !row.ok)) &&
+    matchesStatus(row, filters.status) &&
     (!filters.protocol || filters.protocol === "all" || row.protocol === filters.protocol) &&
     (!filters.account || filters.account === "all" || (filters.account.startsWith("label:") ? (row.account || "") === filters.account.slice(6) : accountKey(row) === filters.account)) &&
     (!filters.model || filters.model === "all" || row.model === filters.model) &&

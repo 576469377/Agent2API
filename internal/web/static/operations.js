@@ -1,7 +1,10 @@
 // Explain recorded facts only. Generic provider wording is never a diagnosis.
 export function requestIssue(row) {
-  if (!row || row.ok || !row.error) return null;
-  const code = String(row.error).split(":", 1)[0].trim();
+  if (!row || row.ok) return null;
+  const code = String(row.error_code || row.error || "").split(":", 1)[0].trim();
+  if (row.status === 499) return { kind: "canceled", hint: "canceled" };
+  if (row.status === 504 || /timeout|deadline/.test(code)) return { kind: "timeout", hint: "timeout" };
+  if (["queue_full", "retry_budget_exhausted"].includes(code)) return { kind: "capacity", hint: "capacity" };
   if (code === "image_count_exceeded") return { kind: "images", hint: "images" };
   if (code === "image_cleanup_unavailable") return { kind: "image_structure", hint: "image_structure" };
   if (row.status === 401 || row.status === 403) return { kind: "auth", hint: "auth" };
@@ -38,4 +41,9 @@ export function accountConnection(account) {
   const source = account?.identity?.source === "desktop" ? "desktop"
     : account?.identity?.source === "file" || account?.identity?.credential_path ? "file" : "unknown";
   return { source, pooled: ["workbuddy", "workbuddy-global"].includes(account?.platform) };
+}
+
+export function sanitizePlatforms(platforms = []) {
+  return platforms.filter(platform => typeof platform.supports_sanitize === "boolean" ? platform.supports_sanitize :
+    ["workbuddy", "workbuddy-global"].includes(platform.id));
 }

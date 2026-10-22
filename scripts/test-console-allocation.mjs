@@ -77,16 +77,14 @@ test("invalid dates, live-day overlap and excess archived data never overwrite m
   assert.equal(missingGroups.tokens, metrics.input_tokens + metrics.output_tokens);
 });
 
-test("usage surfaces show model totals while methodology retains the allocation rule", () => {
+test("derived history is visibly marked and its allocation rule remains inspectable", () => {
   const ui = { e: escapeHTML, n: number, compact, icon, L: zh => zh };
   const html = usageView(metrics, state, ui), methodology = usageMethodologyView(metrics, state, ui);
-  for (const text of ["部分记录", "均摊估算", "含历史均摊", "历史汇总"]) {
-    assert.ok(!html.includes(text));
-    assert.ok(!usageTooltip(metrics, state, 0, ui).includes(text));
-  }
+  assert.ok(html.includes("含历史均摊估算"));
+  assert.ok(usageTooltip(metrics, state, 0, ui).includes("不能视为当日实测"));
   assert.ok(html.includes("workbuddy/deepseek-v4.1-flash"));
   assert.ok(!html.includes('stroke-dasharray="5 4"'));
-  assert.ok(!html.includes('data-action="usage-allocation-settings"'));
+  assert.ok(html.includes('data-action="usage-allocation-settings"'));
   assert.ok(methodology.includes("2026-09-15"));
   assert.ok(methodology.includes("28,766"));
   assert.ok(methodology.includes("workbuddy/deepseek-v4.1-flash"));

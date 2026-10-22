@@ -11,14 +11,15 @@ import {
   markdown,
 } from "./core.js";
 import { renderMath } from "./math.js";
-import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage } from "./monitor.js";
-import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges } from "./pricing.js";
+import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage, requestOutcome } from "./monitor.js";
+import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 import { buildUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
 import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageModelLabel } from "./usage-view.js";
+import { recentHealthView, requestSampleView, requestDiagnostic, gatewayPolicyView } from "./insights.js";
 import { allocationPeriod } from "./usage-allocation.js";
-import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection } from "./operations.js";
+import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms } from "./operations.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -53,7 +54,7 @@ const s = {
   dashboardScope: "all",
   refreshEvery: [0, 10, 30, 60].includes(Number(saved("agent2api_refresh", "10"))) ? Number(saved("agent2api_refresh", "10")) : 10,
   lastPoll: Date.now(),
-  usageInsights: { range: "all", platform: "all", metric: "tokens", heatMetric: "tokens", heatMode: "daily", hidden: new Set(), allocation: { enabled: saved("agent2api_usage_allocation", "on") !== "off", days: 30, start: saved("agent2api_usage_allocation_start"), end: saved("agent2api_usage_allocation_end") } },
+  usageInsights: { range: "all", platform: "all", metric: "tokens", heatMetric: "tokens", heatMode: "daily", calendarExpanded: false, hidden: new Set(), allocation: { enabled: saved("agent2api_usage_allocation", "on") !== "off", days: 30, start: saved("agent2api_usage_allocation_start"), end: saved("agent2api_usage_allocation_end") } },
   analytics: { dimension: "by_model", metric: "tokens", sort: "tokens", query: "", expanded: false },
   connectionModel: "",
   connectionProtocol: "openai-chat",
@@ -387,6 +388,8 @@ function chrome() {
   $("autoRefresh").innerHTML = options([["0", L("手动刷新", "Manual refresh")], ["10", L("每 10 秒刷新", "Every 10s")], ["30", L("每 30 秒刷新", "Every 30s")], ["60", L("每 60 秒刷新", "Every 60s")]], String(s.refreshEvery));
   $("autoRefresh").setAttribute("aria-label", L("自动刷新间隔", "Auto-refresh interval"));
   $("footerText").textContent = "Agent2API";
+  $("docsLink").textContent = L("使用文档", "Documentation");
+  $("troubleshootingLink").textContent = L("故障排查", "Troubleshooting");
   $("footerEndpoint").textContent = s.cache.status?.listen || "";
   if (chrome.language !== s.lang)
     $("themeSel").innerHTML = options(
@@ -499,6 +502,7 @@ function draw(force = false) {
   if (s.page === "analytics") {
     updateAnalyticsTable();
     if ($("liveRequestDetails")) $("liveRequestDetails").open = liveDetailsOpen;
+    if ($("usageCalendarDetails")) $("usageCalendarDetails").open = s.usageInsights.calendarExpanded;
     usageDetails.forEach(name => { const el = document.querySelector("." + name); if (el) el.open = true; });
     if (usagePoint) [...document.querySelectorAll('[data-kind="usage"]')].find(el => el.dataset.chartPoint === usagePoint.point && el.dataset.viewWidth === usagePoint.width)?.focus({ preventScroll: true });
     if (usageLegend != null) [...document.querySelectorAll('[data-action="usage-curve"]')].find(el => el.dataset.value === usageLegend)?.focus({ preventScroll: true });
@@ -678,7 +682,7 @@ function updateAnalyticsTable() {
   $("analyticsResults").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${e(L("统计项", "Group"))}</th><th class="num">${e(L("调用次数", "Requests"))}</th><th class="num">${e(L("成功率", "Success rate"))}</th><th class="num">${e(L("平均耗时", "Avg duration"))}</th><th class="num">${e(L("输入 Token", "Input tokens"))}</th><th class="num">${e(L("输出 Token", "Output tokens"))}</th><th class="num">${e(L("失败", "Failed"))}</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td class="usage-label mono" title="${e(name(row))}">${e(name(row))}<div class="usage-bar"><i style="width:${total ? value(row) / total * 100 : 0}%"></i></div></td><td class="num numeric">${n(row.total)}</td><td class="num"><span class="${row.failed ? "negative" : "positive"}">${row.total ? (row.success_rate * 100).toFixed(1) + "%" : "—"}</span></td><td class="num mono">${e(duration(row.total ? row.avg_latency_ms : null))}</td><td class="num numeric">${n(row.input_tokens)}</td><td class="num numeric">${n(row.output_tokens)}</td><td class="num numeric ${row.failed ? "negative" : "muted"}">${n(row.failed)}</td><td><button class="button small" data-action="usage-requests" data-kind="${s.analytics.dimension}" data-value="${e(row.key)}">${e(L("记录", "Logs"))}${icon("arrow")}</button></td></tr>`).join("")}</tbody></table></div><div class="table-footer">${rows.length} ${e(L("个统计项", "groups"))} · ${e(L("累计统计", "Cumulative aggregates"))}</div>` : empty(L("没有匹配的统计项", "No matching groups"));
 }
 function connectionPage() {
-  const freeModels = models().filter((m) => modelPricing(m).status === "free");
+  const freeModels = confirmedFreeModels(models());
   const selected = freeModels.find((m) => routeId(m) === s.connectionModel) || freeModels.find((m) => m.routing_id) || freeModels[0];
   s.connectionModel = selected ? routeId(selected) : "";
   const origin = gatewayURL(), protocol = s.connectionProtocol;
@@ -1001,7 +1005,7 @@ function renderActiveFilters(kind) {
   if (!target) return;
   const filters = s[kind], keys = activeFilterKeys(filters, kind === "accounts" ? ["query", "platform", "status"] : ["query", "platform", "status", "protocol", "model", "account", "range"]);
   const titles = { query: L("搜索", "Search"), platform: L("平台", "Platform"), status: L("状态", "Status"), protocol: L("协议", "Protocol"), model: L("模型", "Model"), account: L("账号", "Account"), range: L("时间", "Range") };
-  const labels = { ready: L("就绪", "Ready"), attention: L("需关注", "Attention"), disabled: L("已停用", "Disabled"), ok: L("成功", "Success"), failed: L("失败", "Failed") };
+  const labels = { ready: L("就绪", "Ready"), attention: L("需关注", "Attention"), disabled: L("已停用", "Disabled"), ok: L("成功", "Success"), failed: L("未成功", "Unsuccessful"), errors: L("失败 · 不含取消", "Failed · excluding canceled"), timeout: L("超时", "Timeouts"), limited: L("限流 / 额度", "Rate limit / quota"), canceled: L("客户端取消", "Client canceled"), retried: L("多次尝试", "Multiple attempts") };
   const label = key => key === "platform" ? platformName(filters[key]) : key === "protocol" ? protocolName(filters[key]) : key === "range" ? L(`最近 ${filters[key]} 分钟`, `Last ${filters[key]} min`) : key === "account" ? (filters[key].startsWith("label:") ? filters[key].slice(6) : (() => { try { const [p, a] = JSON.parse(filters[key]); return `${platformName(p)} / ${a || "—"}`; } catch { return filters[key]; } })()) : key === "status" ? labels[filters[key]] || filters[key] : filters[key];
   target.hidden = !keys.length;
   target.innerHTML = `<span>${e(L("当前筛选", "Active filters"))}</span>${keys.map(key => `<button class="filter-chip" data-action="clear-filter" data-kind="${kind}" data-key="${key}" aria-label="${e(L("移除", "Remove") + " " + titles[key] + ": " + label(key))}"><span>${e(titles[key])}: ${e(label(key))}</span>${icon("close")}</button>`).join("")}<button class="text-link" data-action="reset-${kind === "accounts" ? "account" : "request"}-filters">${e(L("清空", "Clear all"))}</button>`;
@@ -1017,11 +1021,16 @@ function requestPage() {
   }
   const modelOptions = [...new Set(sample.map((row) => row.model))];
   if (s.requests.model !== "all" && !modelOptions.includes(s.requests.model)) modelOptions.push(s.requests.model);
-  return `<section class="card resource-workspace request-workspace"><div class="card-head request-table-head"><div><h2>${e(L("调用记录", "Request records"))}</h2><p>${e(L("最近 200 条调用", "Latest 200 requests"))}</p></div><div class="toolbar-group"><select id="requestSort" class="select" aria-label="${e(L("记录排序", "Request sort"))}">${options([["time", L("最新优先", "Newest first")], ["latency", L("耗时优先", "Longest duration")], ["tokens", L("Token 优先", "Most tokens")]], s.requests.sort)}</select><select id="requestPageSize" class="select" aria-label="${e(L("每页记录数", "Records per page"))}">${options([["20", "20 / " + L("页", "page")], ["50", "50 / " + L("页", "page")], ["100", "100 / " + L("页", "page")]], String(s.requests.size))}</select>${densityControl()}${button(L("导出", "Export"), "export-requests", "small", "requests")}</div></div><div class="request-filters"><div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号、请求编号、状态码或错误…", "Search model, account, request ID, status or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
+  return `${recentHealthView(s.cache.metrics, { e, L, n, duration })}<section class="card resource-workspace request-workspace"><div class="card-head request-table-head"><div><h2>${e(L("调用记录", "Request records"))}</h2><p>${e(L("最近 200 条已完成样本 · 不是完整历史", "Latest 200 completed samples · not full history"))}</p></div><div class="toolbar-group"><select id="requestSort" class="select" aria-label="${e(L("记录排序", "Request sort"))}">${options([["time", L("最新优先", "Newest first")], ["latency", L("耗时优先", "Longest duration")], ["tokens", L("Token 优先", "Most tokens")]], s.requests.sort)}</select><select id="requestPageSize" class="select" aria-label="${e(L("每页记录数", "Records per page"))}">${options([["20", "20 / " + L("页", "page")], ["50", "50 / " + L("页", "page")], ["100", "100 / " + L("页", "page")]], String(s.requests.size))}</select>${densityControl()}${button(L("导出", "Export"), "export-requests", "small", "requests")}</div></div><div class="request-filters"><div class="toolbar"><div class="toolbar-group">${search("requestSearch", s.requests.query, L("搜索模型、账号、请求编号、状态码或错误…", "Search model, account, request ID, status or error…"))}<select id="requestPlatformFilter" class="select" aria-label="${e(L("平台筛选", "Platform filter"))}">${platformOptions(s.requests.platform)}</select><select id="requestStatusFilter" class="select" aria-label="${e(L("调用状态", "Request status"))}">${options(
     [
       ["all", L("全部状态", "All states")],
       ["ok", L("成功", "Success")],
-      ["failed", L("失败", "Failed")],
+      ["failed", L("未成功 · 含取消", "Unsuccessful · includes canceled")],
+      ["errors", L("失败 · 不含取消", "Failed · excluding canceled")],
+      ["timeout", L("超时", "Timeouts")],
+      ["limited", L("限流 / 额度", "Rate limit / quota")],
+      ["canceled", L("客户端取消", "Client canceled")],
+      ["retried", L("多次上游尝试", "Multiple attempts")],
     ],
     s.requests.status,
   )}</select><select id="requestProtocolFilter" class="select" aria-label="${e(L("协议筛选", "Protocol filter"))}">${options(
@@ -1037,6 +1046,11 @@ function requestPage() {
 function filteredRequests() {
   return filterRequests(recentRequests(), s.requests);
 }
+function requestStatusTag(row) {
+  const outcome = requestOutcome(row);
+  const labels = { ok: L("成功", "Success"), canceled: L("已取消", "Canceled"), timeout: L("超时", "Timeout"), limited: L("限流 / 额度", "Rate limit / quota"), failed: L("失败", "Failed") };
+  return tag(`${row.status} · ${labels[outcome]}`, outcome === "ok" ? "green" : outcome === "canceled" ? "" : "red");
+}
 function requestTable(rows, details = true) {
   if (!rows.length)
     return empty(
@@ -1051,7 +1065,7 @@ function requestTable(rows, details = true) {
     .map((row) => {
       // Use a stable key instead of object identity: overview and logs have separate array copies.
       const key = requestKey(row);
-      return `<tr class="request-click" data-action="request-detail" data-key="${e(key)}" tabindex="0" aria-label="${e(`${row.model} · ${timestamp(row.time)} · ${L("调用详情", "Request details")}`)}"><td class="mono">${e(timestamp(row.time))}<div class="cell-sub">${e(new Date(row.time).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" }))}</div></td><td class="cell-model"><div class="cell-main mono" title="${e(row.model)}">${e(row.model)}</div><div class="cell-sub">${row.platform ? regionTag(row.platform) : e(L("来源未记录", "Source unrecorded"))} ${e(row.account || "")}</div>${row.model_requested ? `<div class="cell-sub requested-model" title="${e(row.model_requested)}">${e(L("请求", "Requested"))}: ${e(row.model_requested)}</div>` : ""}</td><td><span style="font-size:12px">${e(protocolName(row.protocol))}</span><div class="cell-sub">${e(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div></td><td>${tag(`${row.status} · ${row.ok ? L("成功", "OK") : L("失败", "Failed")}`, row.ok ? "green" : "red")} ${!row.ok && row.error ? `<span class="table-short-error" title="${e(row.error)}">${e(row.error.slice(0, 120))}</span>` : ""}</td><td class="num mono">${e(duration(row.duration_ms))}${row.gen_ms > 0 && row.output_tokens > 0 ? `<div class="cell-sub">${(row.output_tokens / (row.gen_ms / 1000)).toFixed(1)} tok/s</div>` : ""}</td><td class="num mono">${e(tokenAmount(row,"input_tokens"))} <span class="muted">/</span> ${e(tokenAmount(row,"output_tokens"))}</td><td>${iconButton("chevron", L("调用详情", "Request details"), "request-detail", `data-key="${e(key)}"`)}</td></tr>`;
+      return `<tr class="request-click" data-action="request-detail" data-key="${e(key)}" tabindex="0" aria-label="${e(`${row.model} · ${timestamp(row.time)} · ${L("调用详情", "Request details")}`)}"><td class="mono">${e(timestamp(row.time))}<div class="cell-sub">${e(new Date(row.time).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" }))}</div></td><td class="cell-model"><div class="cell-main mono" title="${e(row.model)}">${e(row.model)}</div><div class="cell-sub">${row.platform ? regionTag(row.platform) : e(L("来源未记录", "Source unrecorded"))} ${e(row.account || "")}</div>${row.model_requested ? `<div class="cell-sub requested-model" title="${e(row.model_requested)}">${e(L("请求", "Requested"))}: ${e(row.model_requested)}</div>` : ""}</td><td><span style="font-size:12px">${e(protocolName(row.protocol))}</span><div class="cell-sub">${e(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div></td><td>${requestStatusTag(row)} ${!row.ok && row.error ? `<span class="table-short-error" title="${e(row.error)}">${e(row.error.slice(0, 120))}</span>` : ""}</td><td class="num mono">${e(duration(row.duration_ms))}${row.first_output_ms != null ? `<div class="cell-sub">${e(L("首段", "First output"))} ${e(duration(row.first_output_ms))}</div>` : ""}</td><td class="num mono">${e(tokenAmount(row,"input_tokens"))} <span class="muted">/</span> ${e(tokenAmount(row,"output_tokens"))}</td><td>${iconButton("chevron", L("调用详情", "Request details"), "request-detail", `data-key="${e(key)}"`)}</td></tr>`;
     })
     .join("")}</tbody></table></div>`;
 }
@@ -1061,16 +1075,15 @@ function updateRequestTable() {
   const filtered = filteredRequests(),
     { rows, footer } = paginate(filtered, "requests", s.requests.size);
   $("requestResults").innerHTML = requestTable(rows) + footer;
-  const stats = summarizeRequests(filtered);
   const advancedCount = [s.requests.model, s.requests.account, s.requests.range].filter(v => v !== "all").length;
   $("requestFilterCount").textContent = advancedCount ? String(advancedCount) : "";
-  $("requestSampleStats").innerHTML = `<span><span>${e(L("匹配记录", "Matched records"))}</span><strong>${n(stats.total)}</strong><small>/ ${recentRequests().length}</small></span><span><span>${e(L("成功率", "Success rate"))}</span><strong>${stats.total ? (stats.success_rate * 100).toFixed(1) + "%" : "—"}</strong></span><span><span>${e(L("失败", "Failed"))}</span><strong class="${stats.failed ? "negative" : ""}">${n(stats.failed)}</strong></span><span><span>${e(L("P95 完整耗时", "P95 total duration"))}</span><strong>${e(duration(stats.p95))}</strong></span><span><span>${e(L("输出 Token", "Output tokens"))}</span><strong>${compact(stats.output_tokens)}</strong></span>`;
+  $("requestSampleStats").innerHTML = requestSampleView(filtered, recentRequests().length, { e, L, n, duration });
 }
 
 function settingsPage() {
   const config = s.cache.config || {},
     upstream = config.upstream || {};
-  return `<div class="settings-grid"><div class="settings-stack"><section class="card">${cardHead(L("客户端连接", "Client connection"), L("ZCode 与其他客户端使用同一个网关入口", "ZCode and other clients share this gateway"))}<div class="card-body"><div class="field"><span>OpenAI Base URL</span><div class="endpoint-box"><code>${e(gatewayURL() ? `${gatewayURL()}/v1` : "—")}</code>${iconButton("copy", L("复制地址", "Copy URL"), "copy-openai")}</div></div><div class="field"><span>Anthropic Base URL</span><div class="endpoint-box"><code>${e(gatewayURL() || "—")}</code>${iconButton("copy", L("复制地址", "Copy URL"), "copy-base")}</div></div><div class="setting-row"><div>${e(L("网关鉴权", "Gateway authentication"))}<p>${e(config.auth_enabled ? L("客户端需要配置有效的 API Key。", "Clients need a valid API key.") : L("当前本地网关未启用 API Key 校验。", "API key validation is disabled on this local gateway."))}</p></div>${tag(config.auth_enabled ? L("已启用", "Enabled") : L("未启用", "Disabled"), config.auth_enabled ? "green" : "")}</div><div class="setting-row"><div>${e(L("控制台连接凭据", "Console credentials"))}<p>${e(L("只保存到当前浏览器，不更改后端鉴权。", "Saved in this browser only; does not change gateway authentication."))}</p></div>${button(L("配置", "Configure"), "auth", "small")}</div></div></section><section class="card">${cardHead(L("平台兼容设置", "Platform compatibility"), L("支持即时修改，无需重启网关", "Changes apply immediately without restarting"))}<div class="card-body">${(config.platforms || []).map((p) => `<div class="setting-row"><div>${e(platformName(p.id))}<p>${e(L("请求内容脱敏", "Request content sanitization"))}</p></div><input type="checkbox" class="switch" data-sanitize="${e(p.id)}" ${p.sanitize ? "checked" : ""} aria-label="${e(platformName(p.id) + " " + L("内容脱敏", "sanitization"))}"></div>`).join("")}</div></section></div><div class="settings-stack"><section class="card">${cardHead(L("运行参数", "Runtime parameters"), L("连接参数由启动配置管理", "Connection parameters are managed by startup configuration"))}<div class="card-body"><dl class="details-list">${detailItem(L("监听地址", "Listen address"), config.listen, "mono")}${detailItem(L("普通请求超时", "Request timeout"), upstream.request_timeout)}${detailItem(L("流式空闲超时", "Stream idle timeout"), upstream.stream_idle_timeout)}${detailItem(L("流式总超时", "Stream total timeout"), upstream.stream_total_timeout)}${detailItem(L("模型目录缓存", "Model catalog cache"), upstream.model_cache_ttl)}</dl></div></section><section class="card">${cardHead(L("模型目录", "Model catalog"), L("从已连接的平台更新可用模型", "Reload available models from connected platforms"))}<div class="card-body"><p class="muted" style="font-size:12px;margin-bottom:15px">${e(L("保留平台前缀与同名模型路由，更新后可回到模型目录查看。", "Keeps platform prefixes and shared-name routing. Review changes in the model catalog."))}</p>${button(L("更新模型目录", "Refresh model catalog"), "reload-models", "", "refresh")}</div></section></div></div>`;
+  return `<div class="settings-grid"><div class="settings-stack"><section class="card">${cardHead(L("客户端连接", "Client connection"), L("ZCode 与其他客户端使用同一个网关入口", "ZCode and other clients share this gateway"))}<div class="card-body"><div class="field"><span>OpenAI Base URL</span><div class="endpoint-box"><code>${e(gatewayURL() ? `${gatewayURL()}/v1` : "—")}</code>${iconButton("copy", L("复制地址", "Copy URL"), "copy-openai")}</div></div><div class="field"><span>Anthropic Base URL</span><div class="endpoint-box"><code>${e(gatewayURL() || "—")}</code>${iconButton("copy", L("复制地址", "Copy URL"), "copy-base")}</div></div><div class="setting-row"><div>${e(L("网关鉴权", "Gateway authentication"))}<p>${e(config.auth_enabled ? L("客户端需要配置有效的 API Key。", "Clients need a valid API key.") : L("当前本地网关未启用 API Key 校验。", "API key validation is disabled on this local gateway."))}</p></div>${tag(config.auth_enabled ? L("已启用", "Enabled") : L("未启用", "Disabled"), config.auth_enabled ? "green" : "")}</div><div class="setting-row"><div>${e(L("控制台连接凭据", "Console credentials"))}<p>${e(L("只保存到当前浏览器，不更改后端鉴权。", "Saved in this browser only; does not change gateway authentication."))}</p></div>${button(L("配置", "Configure"), "auth", "small")}</div></div></section><section class="card">${cardHead(L("平台兼容设置", "Platform compatibility"), L("支持即时修改，无需重启网关", "Changes apply immediately without restarting"))}<div class="card-body">${sanitizePlatforms(config.platforms || []).length ? sanitizePlatforms(config.platforms || []).map((p) => `<div class="setting-row"><div>${e(platformName(p.id))}<p>${e(L("请求内容脱敏", "Request content sanitization"))}</p></div><input type="checkbox" class="switch" data-sanitize="${e(p.id)}" ${p.sanitize ? "checked" : ""} aria-label="${e(platformName(p.id) + " " + L("内容脱敏", "sanitization"))}"></div>`).join("") : `<p class="muted">${e(L("当前平台没有内容脱敏开关。", "No content sanitization setting is available for these platforms."))}</p>`}</div></section></div><div class="settings-stack"><section class="card">${cardHead(L("运行参数", "Runtime parameters"), L("连接参数由启动配置管理", "Connection parameters are managed by startup configuration"))}<div class="card-body"><dl class="details-list">${detailItem(L("监听地址", "Listen address"), config.listen, "mono")}${detailItem(L("非流式请求总超时", "Non-streaming request timeout"), upstream.request_timeout)}${detailItem(L("流式空闲超时", "Stream idle timeout"), upstream.stream_idle_timeout)}${detailItem(L("流式总超时", "Stream total timeout"), upstream.stream_total_timeout)}${detailItem(L("模型目录缓存", "Model catalog cache"), upstream.model_cache_ttl)}</dl></div></section>${gatewayPolicyView(config, { e, L, n, duration })}<section class="card">${cardHead(L("模型目录", "Model catalog"), L("从已连接的平台更新可用模型", "Reload available models from connected platforms"))}<div class="card-body"><p class="muted" style="font-size:12px;margin-bottom:15px">${e(L("保留平台前缀与同名模型路由，更新后可回到模型目录查看。", "Keeps platform prefixes and shared-name routing. Review changes in the model catalog."))}</p>${button(L("更新模型目录", "Refresh model catalog"), "reload-models", "", "refresh")}</div></section></div></div>`;
 }
 
 function showDrawer(title, content) {
@@ -1094,7 +1107,7 @@ function showModelDetail(id) {
     ${section(L("费率信息", "Rate information"),detailItem(L("上游费率标注", "Original rate label"),p.raw||L("未提供", "Unreported"))+detailItem(L("读取时间", "Observed at"),p.observedAt?timestamp(p.observedAt,true):L("未知", "Unknown"))+detailItem(L("数据来源", "Source"),L("上游模型配置", "Upstream model configuration"))+detailItem(L("当前状态", "Current state"),p.refreshFailed?L("本次读取未确认", "Latest read unverified"):p.stale?L("已过期", "Stale"):p.status==="unknown"?L("费率未知", "Rate unknown"):L("已同步", "Synced")))}
     ${m.supports_images || m.image_limit ? section(L("图片策略", "Image policy"),detailItem(L("单请求图片护栏", "Image count guard"),m.image_limit?m.image_limit.enabled?`${n(m.image_limit.max_images)} ${L("张（含历史与工具结果）", "images, including history and tool results")}`:L("未启用", "Disabled"):L("上限未知", "Limit unknown"))+(m.image_limit?detailItem(L("超限处理", "Overflow policy"),m.image_limit.enabled?imageOverflowName(m.image_limit.overflow_policy):L("护栏未启用", "Guard disabled"))+detailItem(L("护栏来源", "Guard source"),m.image_limit.source==="config"?L("本地配置", "Local configuration"):L("内置实测 · ", "Empirical default · ")+m.image_limit.observed_on):"")):""}
     ${m.description?`<p class="model-description">${e(m.description)}</p>`:""}
-    <div class="detail-actions sticky-detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}">${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`);
+    <div class="detail-actions sticky-detail-actions"><button class="button" data-action="copy-model" data-model="${e(id)}">${icon("copy")}${e(L("复制完整 ID", "Copy full ID"))}</button><button class="button primary" data-action="try-model" data-model="${e(id)}" ${confirmedFreeModels([m]).length ? "" : `disabled title="${e(L("仅测试已确认免费的模型", "Only confirmed free models can be tested"))}"`}>${icon("chat")}${e(L("测试模型", "Try model"))}</button></div>`);
   $("detailContent").dataset.pricingId = id;
 }
 function showAccountDetail(index) {
@@ -1146,6 +1159,9 @@ function showRequestDetail(key) {
   if (!row) return;
   const images = imageRecordSummary(row), issue = requestIssue(row);
   const hints = {
+    canceled: L("客户端已停止等待或断开连接。这与上游拒绝不同；网关主动等待超时会记录单独错误码。", "The client stopped waiting or disconnected. Gateway timeouts have their own error codes and differ from provider rejections."),
+    timeout: L("检查本次尝试、排队和首段等待耗时。大量历史图片可能需要较长上传与预处理时间；在设置页核对生效预算。", "Inspect attempts, queue and first-output timing. Large image histories may need longer upload and preprocessing; check effective budgets in Settings."),
+    capacity: L("本地等待人数或尝试预算已用尽；这不表示账号被封或额度耗尽。", "The local queue or attempt budget is exhausted. This does not establish an account ban or quota exhaustion."),
     images: L("已明确命中图片数量护栏。检查图片数量与处理策略；仅发送“继续”不会减少 ZCode 携带的历史图片。", "The image count guard rejected this request. Review image counts and overflow policy; sending Continue alone does not reduce history."),
     image_structure: L("图片结构无法可靠匹配，网关未自动清理。检查图片数据与请求结构。", "Images could not be matched reliably. The gateway did not trim them; review image data and request structure."),
     auth: L("检查客户端 API Key、账号登录状态及上游访问权限。", "Review the client API key, account sign-in and upstream permissions."),
@@ -1155,14 +1171,14 @@ function showRequestDetail(key) {
   const section = (title, items, note = "") => `<section class="inspection-section"><h3>${e(title)}</h3><dl class="details-list">${items}</dl>${note ? `<p class="inspection-note">${e(note)}</p>` : ""}</section>`;
   const speed = row.gen_ms > 0 && row.output_tokens ? `${(row.output_tokens / (row.gen_ms / 1000)).toFixed(1)} tok/s` : L("未测量", "Not measured");
   showDrawer(L("调用详情", "Request details"),
-    `<div class="detail-hero"><div class="platform-avatar">${icon("requests")}</div><div><h2>${e(row.model)}</h2><p>${e(timestamp(row.time, true))}</p></div></div><div class="detail-status">${tag(`${row.status} · ${row.ok ? L("成功", "Success") : L("失败", "Failed")}`, row.ok ? "green" : "red")}${regionTag(row.platform)}${tag(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div>
+    `<div class="detail-hero"><div class="platform-avatar">${icon("requests")}</div><div><h2>${e(row.model)}</h2><p>${e(timestamp(row.time, true))}</p></div></div><div class="detail-status">${requestStatusTag(row)}${regionTag(row.platform)}${tag(row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming"))}</div>
     ${row.error ? `<section class="inspection-error"><h3>${e(L("错误详情", "Error details"))}</h3><pre>${e(row.error)}</pre>${issue ? `<p>${e(hints[issue.hint])}</p>` : ""}</section>` : ""}
     <div class="inspection-kpis"><div><span>${e(L("完整耗时", "Total duration"))}</span><strong>${e(duration(row.duration_ms))}</strong></div><div><span>${e(L("输出 Token", "Output tokens"))}</span><strong>${e(tokenAmount(row,"output_tokens",true))}</strong></div><div><span>${e(L("接收速度", "Receive speed"))}</span><strong>${e(speed)}</strong></div></div>
     ${section(L("请求与实际路由", "Request and actual route"), detailItem(L("客户端请求模型", "Requested model"), row.model_requested || row.model, "mono") + detailItem(L("实际模型", "Actual model"), row.model, "mono") + detailItem(L("实际平台", "Actual platform"), row.platform || L("未记录", "Unrecorded"), "mono") + detailItem(L("账号", "Account"), row.account || "—") + detailItem(L("协议", "Protocol"), protocolName(row.protocol)) + detailItem(L("输出方式", "Response mode"), row.stream ? L("流式", "Streaming") : L("非流式", "Non-streaming")))}
     ${section(L("等待与上游尝试", "Waiting and upstream attempts"), detailItem(L("请求编号", "Request ID"), row.request_id || L("未记录", "Unrecorded"), "mono") + detailItem(L("上游尝试次数", "Upstream attempts"), row.request_id ? n(row.attempt_count) : L("未记录", "Unrecorded")) + detailItem(L("排队等待", "Queue wait"), row.request_id ? duration(row.queue_ms || 0) : L("未记录", "Unrecorded")) + (row.attempts || []).map(attempt => detailItem(`#${n(attempt.number)} · ${attempt.platform}`, `${attempt.status || "—"} · ${duration(attempt.duration_ms)}${attempt.error_code ? ` · ${attempt.error_code}` : ""}`, "mono")).join(""))}
     ${section(L("Token 用量", "Token usage"), detailItem(L("输入 Token", "Input tokens"), tokenAmount(row,"input_tokens")) + detailItem(L("输出 Token", "Output tokens"), tokenAmount(row,"output_tokens")) + detailItem(L("思考 Token（含在输出中）", "Reasoning tokens (included in output)"), n(row.reasoning_tokens)) + detailItem(L("缓存读取（含在输入中）", "Cache reads (included in input)"), (row.usage_reported || Object.hasOwn(row, "cached_tokens") ? n(row.cached_tokens) : L("未记录", "Unrecorded"))) + detailItem(L("缓存写入（含在输入中）", "Cache writes (included in input)"), (row.usage_reported || Object.hasOwn(row, "cache_write_tokens") ? n(row.cache_write_tokens) : L("未记录", "Unrecorded"))) + detailItem(L("首段输出等待", "Time to first output"), row.first_output_ms == null ? L("未测量", "Not measured") : duration(row.first_output_ms)))}
     ${section(L("图片与超限策略", "Images and overflow policy"), detailItem(L("本次图片数量", "Request image count"), images.received == null ? L("未记录", "Unrecorded") : `${n(images.received)} ${L("张（含历史与工具结果）", "images, including history and tool results")}`) + detailItem(L("图片数量护栏", "Image count guard"), images.limit == null ? L("未记录或无已知护栏", "Unrecorded or no known guard") : images.limit > 0 ? `${n(images.limit)} ${L("张 / 请求", "images / request")}` : L("已关闭", "Disabled")) + detailItem(L("处理后图片数量", "Prepared image count"), images.forwarded == null ? L("未记录或未转发", "Unrecorded or not forwarded") : `${n(images.forwarded)} ${L("张", "images")}`) + detailItem(L("本次省略的旧图", "Older images omitted"), images.removed ? `${n(images.removed)} ${L("张", "images")}` : row.forwarded_image_count == null ? L("未记录", "Unrecorded") : L("未省略", "None omitted")) + detailItem(L("图片超限处理", "Image overflow handling"), row.image_overflow_policy ? imageOverflowName(row.image_overflow_policy) : L("未记录", "Unrecorded")), images.removed ? L("仅本次转发省略旧图；文字和工具结果保留，ZCode 本地历史未修改。", "Old images were omitted only for this forwarding attempt; text, tool results and local history remain intact.") : "")}
-    <div class="inspection-actions">${row.account ? `<button class="button" data-action="request-account-logs" data-platform="${e(row.platform || "")}" data-label="${e(row.account)}">${icon("requests")}${e(L("此账号的调用", "Requests for this account"))}</button>` : ""}<button class="button" data-action="request-model-logs" data-platform="${e(row.platform || "")}" data-model="${e(row.model)}">${icon("models")}${e(L("此模型的调用", "Requests for this model"))}</button></div>`);
+    <div class="inspection-actions"><button class="button primary" data-action="copy-request-diagnostic" data-key="${e(key)}">${icon("copy")}${e(L("复制诊断摘要", "Copy diagnostic summary"))}</button>${row.account ? `<button class="button" data-action="request-account-logs" data-platform="${e(row.platform || "")}" data-label="${e(row.account)}">${icon("requests")}${e(L("此账号的调用", "Requests for this account"))}</button>` : ""}<button class="button" data-action="request-model-logs" data-platform="${e(row.platform || "")}" data-model="${e(row.model)}">${icon("models")}${e(L("此模型的调用", "Requests for this model"))}</button></div>`);
 }
 
 function modal(title, content) {
@@ -1335,47 +1351,28 @@ async function startLogin(platform, name = "") {
 }
 
 function chatPage() {
-  return `<section class="card chat-card"><div class="chat-toolbar"><div class="toolbar-group">${icon("models")}<select id="chatModel" class="select" aria-label="${e(L("选择模型", "Choose a model"))}"></select><span class="chat-region" id="chatRegion"></span></div><div class="toolbar-group">${iconButton("settings", L("生成参数", "Generation settings"), "chat-settings")}${iconButton("plus", L("新对话", "New conversation"), "clear-chat")}</div></div><div class="chat-messages" id="chatMessages" aria-label="${e(L("对话内容", "Conversation"))}"></div><form class="chat-compose" id="chatForm"><textarea id="chatInput" placeholder="${e(L("输入消息，测试模型…", "Write a message to try this model…"))}" aria-label="${e(L("消息", "Message"))}">${e(s.chat.draft)}</textarea><div class="compose-actions"><span class="compose-hint">${e(L("Enter 发送 · Shift + Enter 换行", "Enter to send · Shift + Enter for a new line"))}</span><div>${button(L("停止", "Stop"), "stop-chat", "danger", "stop").replace("<button ", '<button id="chatStop" ' + (s.chat.controller ? "" : "hidden "))}<button class="button primary" id="chatSend" type="submit" ${s.chat.controller ? "hidden" : ""} ${!s.chat.draft.trim() ? "disabled" : ""}>${icon("send")}${e(L("发送", "Send"))}</button></div></div></form><div class="chat-footer-note">${e(L("测试消耗账号额度，结果计入调用日志。", "Tests use account quota and appear in request logs."))}</div></section>`;
+  return `<section class="card chat-card"><div class="chat-toolbar"><div class="toolbar-group">${icon("models")}<select id="chatModel" class="select" aria-label="${e(L("选择模型", "Choose a model"))}"></select><span class="chat-region" id="chatRegion"></span></div><div class="toolbar-group">${iconButton("settings", L("生成参数", "Generation settings"), "chat-settings")}${iconButton("plus", L("新对话", "New conversation"), "clear-chat")}</div></div><div class="chat-messages" id="chatMessages" aria-label="${e(L("对话内容", "Conversation"))}"></div><form class="chat-compose" id="chatForm"><textarea id="chatInput" placeholder="${e(L("输入消息，测试模型…", "Write a message to try this model…"))}" aria-label="${e(L("消息", "Message"))}">${e(s.chat.draft)}</textarea><div class="compose-actions"><span class="compose-hint">${e(L("Enter 发送 · Shift + Enter 换行", "Enter to send · Shift + Enter for a new line"))}</span><div>${button(L("停止", "Stop"), "stop-chat", "danger", "stop").replace("<button ", '<button id="chatStop" ' + (s.chat.controller ? "" : "hidden "))}<button class="button primary" id="chatSend" type="submit" ${s.chat.controller ? "hidden" : ""} ${!s.chat.draft.trim() ? "disabled" : ""}>${icon("send")}${e(L("发送", "Send"))}</button></div></div></form><div class="chat-footer-note">${e(L("仅测试已确认免费的模型；仍消耗账号额度，结果计入调用日志。", "Only confirmed free models are tested; tests use account quota and appear in request logs."))}</div></section>`;
 }
 function updateChatModels() {
   if (!$("chatModel")) return;
-  const all = models(),
-    ids = all.map(routeId),
-    bareIds = [...new Set(all.map((m) => m.id))];
-  if (
-    !s.chat.model ||
-    (!ids.includes(s.chat.model) && !bareIds.includes(s.chat.model))
-  )
-    s.chat.model = routeId(
-      all.find(
-        (m) => m.platform === "workbuddy-global" && m.id === "gpt-6.1-sol",
-      ) ||
-        all.find((m) => m.platform === "workbuddy-global") ||
-        all[0] || { id: "" },
-    );
-  const html =
-    (s.cache.models?.platforms || platforms())
-      .map(
-        (p) =>
-          `<optgroup label="${e(platformName(p.id))}">${all
-            .filter((m) => m.platform === p.id)
-            .map(
-              (m) =>
-                `<option value="${e(routeId(m))}">${e(routeId(m))}</option>`,
-            )
-            .join("")}</optgroup>`,
-      )
-      .join("") +
-    `<optgroup label="${e(L("自动路由 · 按平台优先级", "Automatic · platform priority"))}">${bareIds.map((id) => `<option value="${e(id)}">${e(id)}</option>`).join("")}</optgroup>`;
+  const all = confirmedFreeModels(models()), ids = all.map(routeId);
+  if (!ids.includes(s.chat.model)) {
+    const preferred = all.find(m => m.platform === "workbuddy-global" && m.id === "deepseek-v4.1-flash") || all.find(m => m.id === "hy3") || all[0];
+    s.chat.model = preferred ? routeId(preferred) : "";
+  }
+  const html = (s.cache.models?.platforms || platforms()).map(p => {
+    const entries = all.filter(m => m.platform === p.id);
+    if (!entries.length) return "";
+    return `<optgroup label="${e(platformName(p.id))}">${entries.map(m => `<option value="${e(routeId(m))}">${e(routeId(m))}</option>`).join("")}</optgroup>`;
+  }).join("") || `<option value="">${e(L("暂无已确认的免费模型", "No confirmed free models"))}</option>`;
   if ($("chatModel").innerHTML !== html) $("chatModel").innerHTML = html;
   $("chatModel").value = s.chat.model;
-  $("chatModel").disabled = !!s.chat.controller;
-  $("chatRegion").textContent = s.chat.model.includes("/")
-    ? regionName(s.chat.model.split("/")[0])
-    : L("自动路由", "Auto route");
+  $("chatModel").disabled = !!s.chat.controller || !all.length;
+  $("chatRegion").textContent = s.chat.model ? regionName(s.chat.model.split("/")[0]) : L("请更新目录", "Refresh catalog");
 }
+
 function welcome() {
-  return `<div class="chat-welcome"><div class="welcome-mark">${icon("bolt")}</div><h2>${e(L("从一次对话开始", "Start with a conversation"))}</h2><p>${e(L("选择国内版或国际版模型，直接验证网关的回复与流式输出。", "Select a regional model to test gateway responses and streaming."))}</p><div class="chat-prompts">${[L("用一句话介绍你自己", "Introduce yourself in one sentence"), L("写一个 Python 快速排序", "Write a Python quicksort")].map((text) => `<button class="button" data-action="chat-prompt" data-value="${e(text)}">${e(text)}</button>`).join("")}</div></div>`;
+  return `<div class="chat-welcome"><div class="welcome-mark">${icon("bolt")}</div><h2>${e(L("从一次对话开始", "Start with a conversation"))}</h2><p>${e(L("选择已确认免费的平台模型，验证网关回复与流式输出。", "Select a confirmed free model to test gateway responses and streaming."))}</p><div class="chat-prompts">${[L("用一句话介绍你自己", "Introduce yourself in one sentence"), L("写一个 Python 快速排序", "Write a Python quicksort")].map((text) => `<button class="button" data-action="chat-prompt" data-value="${e(text)}">${e(text)}</button>`).join("")}</div></div>`;
 }
 function messageHTML(message, index) {
   const assistant = message.role === "assistant";
@@ -1440,11 +1437,14 @@ function syncChatControls() {
   $("chatStop").hidden = !s.chat.controller;
   $("chatSend").disabled = !s.chat.draft.trim() || !s.chat.model;
   $("chatInput").disabled = !!s.chat.controller;
-  $("chatModel").disabled = !!s.chat.controller;
+  $("chatModel").disabled = !!s.chat.controller || !confirmedFreeModels(models()).length;
 }
 async function sendChat(event) {
   event?.preventDefault();
   if (s.chat.controller || !s.chat.draft.trim() || !s.chat.model) return;
+  if (!confirmedFreeModels(models()).some(item => routeId(item) === s.chat.model)) {
+    return toast(L("所选模型当前未确认免费，请先更新模型目录。", "This model is not currently confirmed free; refresh the catalog."), true);
+  }
   const start = performance.now(),
     model = s.chat.model,
     params = { ...s.chat.params };
@@ -1564,6 +1564,7 @@ function chatSettings() {
 function exportRequests() {
   exportCSV(filteredRequests(), [
       "time",
+      "request_id",
       "platform",
       "model_requested",
       "model",
@@ -1571,8 +1572,13 @@ function exportRequests() {
       "protocol",
       "status",
       "duration_ms",
+      "first_output_ms",
+      "attempt_count",
+      "queue_ms",
       "input_tokens",
       "output_tokens",
+      "cached_tokens",
+      "error_code",
       "error",
     ], "requests");
 }
@@ -1660,7 +1666,7 @@ document.addEventListener("click", async (event) => {
         if (!column) return;
         const cumulative=s.usageInsights.heatMode==="cumulative";
         const days=cumulative?usage.calendar.filter(d=>d.date<=column.end):column.days.filter(Boolean);
-        modal(`${cumulative?L("累计至","Through"):column.start+" —"} ${column.end} · UTC`, `<p class="scope-note">${e(cumulative?L("累计范围：当前日历起点至所选日期。", "Cumulative range: calendar start through the selected date."):L("周日到周六，按当前记录汇总。", "Sunday through Saturday, using available records."))}</p><div class="usage-day-rows">${days.filter(d=>d.total>0).map(d=>`<div class="usage-token-row"><div><strong>${e(d.date)}</strong></div><b>${n(d.total)} ${e(L("次调用","requests"))} · ${d.unknown_token_requests && !d.estimated_tokens ? e(L("Token 明细不完整", "Incomplete token details")) : n(d.tokens)+" tokens"}</b></div>`).join("")||`<p class="muted">${e(L("暂无明细", "No details"))}</p>`}</div>`);
+        modal(`${cumulative?L("累计至","Through"):column.start+" —"} ${column.end} · UTC`, `<p class="scope-note">${e(cumulative?L("累计范围：当前日历起点至所选日期。", "Cumulative range: calendar start through the selected date."):L("周日到周六，按当前记录汇总。", "Sunday through Saturday, using available records."))}</p>${days.some(day=>day.estimated_tokens || day.estimated_requests) ? `<p class="scope-note">${e(L("所选范围含历史均摊估算。", "This range includes historical estimates."))}</p>` : ""}<div class="usage-day-rows">${days.filter(d=>d.total>0).map(d=>`<div class="usage-token-row"><div><strong>${e(d.date)}</strong></div><b>${n(d.total)} ${e(L("次调用","requests"))} · ${d.unknown_token_requests && !d.estimated_tokens ? e(L("Token 明细不完整", "Incomplete token details")) : n(d.tokens)+" tokens"}</b></div>`).join("")||`<p class="muted">${e(L("暂无明细", "No details"))}</p>`}</div>`);
         return;
       }
       case "usage-heat-metric":
@@ -1684,7 +1690,7 @@ document.addEventListener("click", async (event) => {
         const usage = buildUsage(s.cache.metrics, s.usageInsights), day = usage.calendar.find((d) => d.date === value);
         if (!day) return;
 
-        modal(`${day.date} · UTC`, `<div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(usageModelLabel(m, L))}</strong><small>${m.total === 0 && m.estimated_tokens > 0 ? e(L("Token 用量", "Token usage")) : `${n(m.total)} ${e(L("次调用", "requests"))}`} · ${m.unknown_token_requests && !m.estimated_tokens ? e(L("Token 明细未留存", "Token details unavailable")) : `${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}`}</small></div><b>${m.unknown_token_requests && !m.estimated_tokens ? "—" : compact(m.tokens)+" tokens"}</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
+        modal(`${day.date} · UTC`, `${day.estimated_tokens || day.estimated_requests ? `<p class="scope-note">${e(L("含历史均摊估算，不能视为当日实测。", "Includes historical estimates; not a measured daily total."))}</p>` : ""}<div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(usageModelLabel(m, L))}</strong><small>${m.total === 0 && m.estimated_tokens > 0 ? e(L("Token 用量", "Token usage")) : `${n(m.total)} ${e(L("次调用", "requests"))}`} · ${m.unknown_token_requests && !m.estimated_tokens ? e(L("Token 明细未留存", "Token details unavailable")) : `${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}`}</small></div><b>${m.unknown_token_requests && !m.estimated_tokens ? "—" : compact(m.tokens)+" tokens"}</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
         return;
       }
       case "usage-methodology":
@@ -1733,7 +1739,14 @@ document.addEventListener("click", async (event) => {
       case "account-requests":
         return openRequestFilters({ platform, account: accountKey({ platform, account: label }) });
       case "inspect-failures":
-        return openRequestFilters({ status: "failed" });
+        return openRequestFilters({ status: "errors" });
+      case "request-preset":
+        return openRequestFilters({ status: target.dataset.status || "all", range: target.dataset.range || "all" });
+      case "copy-request-diagnostic": {
+        const row = recentRequests().find(item => requestKey(item) === key);
+        if (row) return copy(requestDiagnostic(row, s.cache.status?.version || ""));
+        return toast(L("该记录已不在当前样本中，请刷新列表。", "This record has left the sample; refresh the list."), true);
+      }
       case "reset-request-filters":
         return openRequestFilters({});
       case "attention-accounts":
@@ -1784,6 +1797,8 @@ document.addEventListener("click", async (event) => {
       case "model-detail":
         return showModelDetail(model);
       case "try-model":
+        if (!confirmedFreeModels(models()).some(item => routeId(item) === model))
+          return toast(L("仅支持测试当前已确认免费的平台模型。", "Only currently confirmed free platform models can be tested."), true);
         if (s.chat.controller)
           return toast(
             L(
@@ -2135,7 +2150,7 @@ async function refreshLive(force=false) {
   }
 }
 function liveUI() {
-  return {e,L,n,compact,timestamp,stale:!!s.live.data&&Date.now()-s.live.receivedAt>5000};
+  return {e,L,n,compact,timestamp,duration,countdown,stale:!!s.live.data&&Date.now()-s.live.receivedAt>5000};
 }
 setInterval(()=>{
   if(s.page==="analytics"&&!document.hidden&&!$("modal").open&&!$("detailDialog").open&&liveUI().stale){
@@ -2191,5 +2206,9 @@ refresh(["accounts", "config"]);
 
 // Preserve the inspector's disclosure state across data refreshes and filters.
 document.addEventListener("toggle", (event) => {
+  if (event.target.id === "usageCalendarDetails" && event.target.isConnected && s.usageInsights.calendarExpanded !== event.target.open) {
+    s.usageInsights.calendarExpanded = event.target.open;
+    draw();
+  }
   if (event.target.id === "lifetimeDetails" && event.target.isConnected) s.analytics.expanded = event.target.open;
 }, true);

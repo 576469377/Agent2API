@@ -25,6 +25,10 @@ jobs:
           node --test scripts/test-console-*.mjs
       - name: 请求诊断隐私、单次转发与流式测试
         run: python3 -m unittest discover -s scripts -p 'test_diagnose_*.py'
+      - name: 文档链接、锚点与代码块
+        run: |
+          python3 scripts/check-docs.py
+          python3 -m unittest discover -s scripts -p test_check_docs.py
 
   secret-check:
     name: credential guard

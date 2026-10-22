@@ -791,8 +791,9 @@ type configResponse struct {
 }
 
 type platformSanitize struct {
-	ID       string `json:"id"`
-	Sanitize bool   `json:"sanitize"`
+	ID               string `json:"id"`
+	Sanitize         bool   `json:"sanitize"`
+	SupportsSanitize bool   `json:"supports_sanitize"`
 }
 
 func (a *App) apiConfig(w http.ResponseWriter, r *http.Request) {
@@ -829,6 +830,7 @@ func (a *App) buildConfigResponse() configResponse {
 		ps := platformSanitize{ID: rt.ID, Sanitize: rt.Cfg.Sanitize}
 		if c, ok := rt.Adapter.(adapter.Configurable); ok {
 			ps.Sanitize = c.Sanitize()
+			ps.SupportsSanitize = true
 		}
 		out.Platforms = append(out.Platforms, ps)
 	}

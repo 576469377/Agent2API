@@ -1,4 +1,4 @@
-.PHONY: help build run test test-race vet fmt check cover cover-html tidy lint hooks clean
+.PHONY: help build run test test-race vet fmt check docs-check cover cover-html tidy lint hooks clean
 
 # 默认目标：显示帮助
 .DEFAULT_GOAL := help
@@ -30,7 +30,10 @@ vet: ## 静态检查
 fmt: ## 格式化
 	gofmt -w .
 
-check: fmt vet test ## 提交前自查：格式化 + 静态检查 + 测试
+check: fmt vet test docs-check ## 提交前自查：格式化 + 静态检查 + 测试 + 文档
+
+docs-check: ## 离线检查文档路径、标题锚点和代码块（需要 Python 3.9+）
+	python3 scripts/check-docs.py
 
 cover: ## 显示覆盖率（按包）
 	go test ./... -cover

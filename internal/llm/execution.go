@@ -11,6 +11,7 @@ import (
 
 type executionKey struct{}
 type attemptAccountKey struct{}
+type attemptIndexKey struct{}
 
 type Attempt struct {
 	Number     int    `json:"number"`
@@ -72,6 +73,23 @@ func (e *Execution) StartRouting(timeout time.Duration) {
 }
 
 func (e *Execution) SetPhase(phase string) { e.mu.Lock(); e.phase = phase; e.mu.Unlock() }
+
+// SetAttemptPhase 忽略已完成或旧尝试的迟到回调，避免双向流上传结束时覆盖接收状态。
+func SetAttemptPhase(ctx context.Context, phase string) {
+	e := ExecutionFrom(ctx)
+	index, ok := ctx.Value(attemptIndexKey{}).(int)
+	if e == nil || !ok || index < 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if index != len(e.attempts)-1 || e.attempts[index].Status != 0 || e.attempts[index].ErrorCode != "" {
+		return
+	}
+	if e.phase == "connecting" || e.phase == "uploading" || e.phase == "waiting_headers" {
+		e.phase = phase
+	}
+}
 
 func (e *Execution) Remaining() time.Duration {
 	e.mu.Lock()
@@ -153,6 +171,7 @@ func BeginAttempt(ctx context.Context, platform string, headerTimeout time.Durat
 	}
 	started := time.Now()
 	child, cancel := context.WithCancel(ctx)
+	child = context.WithValue(child, attemptIndexKey{}, index)
 	var timer *time.Timer
 	expired := make(chan struct{})
 	if headerTimeout > 0 {

@@ -96,14 +96,14 @@ test("heatmap daily, weekly and cumulative keep natural-week alignment and actua
  const currentWeek=heatmapColumns(calendar.slice(-2),"weekly").at(-1);
  assert.equal(currentWeek.cells.filter(c=>c.level>0&&c.coverage!=="blank").length,7);
  assert.equal(currentWeek.cells.at(-1).day,null); // Bar rows are not future dates.
- const html=usageView(fixture,{...state,heatMode:"weekly"},ui);
+ const html=usageView(fixture,{...state,heatMode:"weekly",calendarExpanded:true},ui);
  assert.ok(html.includes("每日"));assert.ok(html.includes("每周"));assert.ok(html.includes("累计"));assert.ok(html.includes('data-action="usage-week"'));
 });
 test("recovered activity is visible but missing token records never become a false zero curve",()=>{
  const metrics={usage_history:{timezone:"UTC",tracking_since:"2026-10-15",days:[{date:"2026-10-11",models:[{...row("p","m",0,5),unknown_token_requests:5}]}]}};
  const usage=buildUsage(metrics,state);assert.equal(usage.activeDays,1);assert.equal(usage.unknown_token_requests,5);
  assert.equal(curveSeries(usage,"tokens")[0].values[2],null);assert.equal(curveSeries(usage,"total")[0].values[2],5);
- const html=usageView(metrics,state,ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 明细未留存"));
+ const html=usageView(metrics,{...state,calendarExpanded:true},ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 明细未留存"));
  const unrecorded={usage_history:{...metrics.usage_history,days:[{date:"2026-10-11",models:[{...row("","m",0,5),unknown_token_requests:5}]}]}};
  assert.equal(buildUsage(unrecorded,{...state,platform:"unknown"}).total,5);
 });

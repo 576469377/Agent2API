@@ -1,5 +1,7 @@
 # 用量统计：ZCode 参考与实现决策
 
+本文保留当时的研究或设计记录，含日期与版本边界；其中的计划、模型数量和协议结论不自动代表当前状态。日常使用以[文档导航](../README.md)中的当前指南为准，最新实施情况见[全仓审查](../reviews/2026-10-23-console-and-repository-review.md)。
+
 ## 参考版本
 
 调研日期：2026-10-15。ZCode 固定版本 [`aac4755`](https://github.com/zai-org/ZCode/tree/aac4755666d09fdcd70272fcf063c077a639015f)。阅读公开代码，仅参考交互与统计口径，本项目使用原有 Go 指标与原生 SVG / CSS 独立实现。

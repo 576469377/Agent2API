@@ -1,0 +1,55 @@
+/* Focused monitoring surfaces, using the shared light/dark theme tokens. */
+.recent-health { margin-bottom: 18px; overflow: hidden; }
+.health-sample-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 6px 12px; }
+.health-sample-item { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 12px 18px; background: none; border: 0; border-right: 1px solid var(--border); text-align: left; border-radius: 0; }
+.health-sample-item:last-child { border-right: 0; }
+.health-sample-item > span { color: var(--muted); font-size: 12px; }
+.health-sample-item strong { font-size: 26px; font-weight: 550; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+.health-sample-item small { color: var(--faint); font-size: var(--font-small); }
+button.health-sample-item:hover { background: var(--surface-alt); }
+.health-sample-item.has-errors strong { color: var(--red); }
+.footer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.footer-links a { color: var(--muted); }
+.footer-links a:hover { color: var(--accent); }
+.usage-data-note { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin: -8px 0 20px; padding: 9px 12px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-small); color: var(--muted); }
+.usage-data-note > div { display: flex; align-items: center; gap: 8px; }
+.usage-data-note .status-dot { background: var(--muted); flex: none; }
+.usage-data-note.contains-estimates .status-dot { background: #c88b36; }
+.usage-calendar { margin-top: 16px; margin-bottom: 18px; }
+.usage-calendar > summary { display: flex; justify-content: space-between; align-items: center; gap: 20px; list-style: none; padding: 15px 20px; cursor: pointer; }
+.usage-calendar > summary::-webkit-details-marker { display: none; }
+.usage-calendar > summary > span:first-child { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.usage-calendar > summary strong { font-size: 13px; font-weight: 550; }
+.usage-calendar > summary small, .usage-calendar > summary > span:last-child { color: var(--muted); font-size: var(--font-small); }
+.usage-calendar > summary > span:last-child { display: flex; align-items: center; gap: 8px; }
+.usage-calendar > summary .icon { width: 15px; height: 15px; transition: transform .15s; }
+.usage-calendar[open] > summary .icon { transform: rotate(90deg); }
+.usage-calendar-body { border-top: 1px solid var(--border); }
+.usage-heat-cell.estimated { border-style: dashed; border-color: color-mix(in srgb, var(--text) 55%, transparent); }
+.usage-live-phases { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 0 20px 15px; }
+.live-phase-badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; color: var(--muted); font-size: var(--font-small); }
+.live-phase-badge.receiving { color: var(--text); }
+.live-phase-badge .status-dot { background: var(--muted); }
+.live-phase-badge.receiving .status-dot { background: #36b989; }
+.live-request-list > div.live-request-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; padding: 12px 0; }
+.live-request-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.live-request-status { color: var(--muted); font-size: var(--font-small); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.live-request-output { display: flex; align-items: flex-end; flex-direction: column; gap: 3px; }
+.live-request-output > small { font-variant-numeric: tabular-nums; }
+.live-request-status .live-elapsed { color: var(--text); font-variant-numeric: tabular-nums; }
+.gateway-policy .details-list { margin-bottom: 16px; }
+@media (max-width: 640px) {
+  .health-sample-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 3px 8px; }
+  .health-sample-item { padding: 12px 15px; }
+  .health-sample-item:nth-child(2) { border-right: 0; }
+  .health-sample-item:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .health-sample-item strong { font-size: 23px; }
+  .footer-links { gap: 10px; }
+  .usage-data-note { align-items: flex-start; }
+  .usage-calendar > summary { padding: 15px; gap: 10px; }
+  .usage-calendar > summary > span:last-child { font-size: 0; }
+  .usage-live-phases { padding: 0 18px 14px; }
+  .live-request-list > div.live-request-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .live-request-output { align-items: flex-start; flex-direction: row; gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .usage-calendar > summary .icon { transition: none; } }

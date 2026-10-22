@@ -97,7 +97,7 @@ func (a *Adapter) request(ctx context.Context, method, path string, body []byte)
 			return nil, err
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, a.cfg.BaseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(adapter.TraceRequest(ctx), method, a.cfg.BaseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, finish(0, err)
 	}

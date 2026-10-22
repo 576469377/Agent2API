@@ -235,7 +235,7 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 		return nil, err
 	}
 	reader, writer := io.Pipe()
-	httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", strings.TrimRight(target, "/")+"/agent.v1.AgentService/Run", reader)
+	httpReq, err := http.NewRequestWithContext(adapter.TraceRequest(attemptCtx), "POST", strings.TrimRight(target, "/")+"/agent.v1.AgentService/Run", reader)
 	if err != nil {
 		cancel()
 		reader.Close()

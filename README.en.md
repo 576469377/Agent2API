@@ -31,7 +31,7 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 
 | Platform ID | Authentication | Scope and limits |
 |---|---|---|
-| `workbuddy` | China desktop login or console device authorization | Account pools; model availability and credit rates follow the catalogue, paid requests remain possible |
+| `workbuddy` | China desktop login or console device authorization | Account pools; client setup and model tests select only currently confirmed free models |
 | `workbuddy-global` | International desktop login or console device authorization | Independent region and pool; encrypted desktop credentials verified on Windows |
 | `openrouter` | Your own `OPENROUTER_API_KEY` | Live free catalogue; paid and unknown-price models rejected; no WorkBuddy pool |
 | `cursor` | Personal Free desktop login under the same OS user | Only `cursor/composer-2.5`; entitlement checks before each generation; no images or sampling parameters |
@@ -114,6 +114,8 @@ Overview, request logs, usage analytics, accounts, platforms, models, playground
 
 The UI is embedded in the gateway; no frontend build is required. A standalone console can load updated assets **without restarting a gateway in use or changing client endpoints**. See the [console guide](docs/console.md). Ordinary pages use local resources; math loads KaTeX on demand and falls back to source text offline.
 
+Request logs separate recent samples from lifetime failures, distinguish client cancellations, and expose first-output timing, cache fractions and a content-free diagnostic summary. Live stages distinguish upload, response waiting and output receipt. Historical estimates are visible, and the yearly calendar is rendered only when expanded. Model tests validate current free pricing and concrete platform routes before sending. Raw WorkBuddy API requests still follow account permissions; this UI policy is not a gateway-wide free-model restriction.
+
 ## Documentation
 
 Detailed guides are currently in Chinese, with copyable commands, field names and examples.
@@ -126,9 +128,12 @@ Detailed guides are currently in Chinese, with copyable commands, field names an
 | Configure regions, prefixes, aliases and fallback | [Configuration](docs/configuration.md) |
 | Manage accounts, cooldowns and concurrency | [Accounts](docs/accounts.md) |
 | Use or update the UI | [Console](docs/console.md) |
+| Upgrade, roll back and preserve history | [Operations](docs/operations.md) |
+| Understand tokens, caching, P95 and estimates | [Metrics and data scope](docs/metrics.md) |
 | Inspect endpoints, auth and request examples | [API](docs/api.md) |
 | Diagnose keys, models, quota and login | [Troubleshooting](docs/troubleshooting.md) |
-| Understand or contribute to the code | [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md) |
+| Understand or contribute to the code | [Repository guide](docs/development.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md) |
+| Review the research, findings and tradeoffs | [Console and repository review](docs/reviews/2026-10-23-console-and-repository-review.md) |
 
 The [documentation index](docs/README.md) separates historical designs from protocol research and dated verification reports.
 
@@ -169,6 +174,7 @@ go test ./...
 go vet ./...
 node --test scripts/test-console-*.mjs
 python -m unittest discover -s scripts -p 'test_*.py'
+python scripts/check-docs.py
 ```
 
 Tests use offline fixtures and mock services rather than consuming real model quota. Frontend tests need Node.js; ZCode and diagnostic tooling need Python 3.9+. Ordinary gateway builds need neither runtime; Cursor credential reading on macOS / Linux requires Python 3. See [Contributing](CONTRIBUTING.md) for race detection and development workflows.
