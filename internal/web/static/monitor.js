@@ -1,5 +1,5 @@
 // Metrics derived from the gateway's bounded request sample, never full history.
-export const requestKey = (row) => JSON.stringify([
+export const requestKey = (row) => row.request_id || JSON.stringify([
   row.time, row.platform || "", row.model, row.account || "",
   row.protocol, row.duration_ms,
 ]);
@@ -20,7 +20,7 @@ export function filterRequests(rows, filters = {}, now = Date.now()) {
     (!filters.account || filters.account === "all" || (filters.account.startsWith("label:") ? (row.account || "") === filters.account.slice(6) : accountKey(row) === filters.account)) &&
     (!filters.model || filters.model === "all" || row.model === filters.model) &&
     (since === -Infinity || new Date(row.time).getTime() >= since) &&
-    `${row.model} ${row.model_requested || ""} ${row.platform || ""} ${row.account || ""} ${row.error || ""} ${row.status}`.toLowerCase().includes(query)
+    `${row.request_id || ""} ${row.model} ${row.model_requested || ""} ${row.platform || ""} ${row.account || ""} ${row.error || ""} ${row.status}`.toLowerCase().includes(query)
   ).sort((a, b) => {
     const difference = filters.sort === "latency" ? (b.duration_ms || 0) - (a.duration_ms || 0)
       : filters.sort === "tokens" ? ((b.input_tokens || 0) + (b.output_tokens || 0)) - ((a.input_tokens || 0) + (a.output_tokens || 0))

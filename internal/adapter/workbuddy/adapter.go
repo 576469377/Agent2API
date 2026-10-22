@@ -34,7 +34,7 @@ type Config struct {
 	// 否则上游审核会拦截大量请求。
 	Sanitize bool
 
-	RequestTimeout     time.Duration // 非流式请求的 ctx 超时
+	RequestTimeout     time.Duration // 等待上游建立响应的超时，不截断已接受的流
 	StreamIdleTimeout  time.Duration // 流式空闲超时（看门狗）
 	StreamTotalTimeout time.Duration // 流式总时长上限
 	ModelCacheTTL      time.Duration
@@ -329,13 +329,13 @@ func (a *Adapter) dial(ctx context.Context, body upstreamRequest, conversation c
 	headers := a.auth.BuildHeaders(headerModeFull)
 	conversation.apply(headers)
 
-	resp, err := a.cli.openStream(streamCtx, chatCompletionsPath, body, headers)
+	resp, err := a.openChatAttempt(streamCtx, chatCompletionsPath, body, headers)
 	// Older international deployments expose the same protocol under /console.
 	// Only route absence permits fallback; semantic failures must not be replayed.
 	if a.cfg.Platform == GlobalPlatform && err != nil {
 		var f *llm.Failure
 		if errors.As(err, &f) && (f.Code == "http_404" || f.Code == "http_405") {
-			resp, err = a.cli.openStream(streamCtx, "/console/chat/completions", body, headers)
+			resp, err = a.openChatAttempt(streamCtx, "/console/chat/completions", body, headers)
 		}
 	}
 	if err != nil {

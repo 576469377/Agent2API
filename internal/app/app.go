@@ -275,9 +275,15 @@ func (a *App) anthropicMessages(w http.ResponseWriter, r *http.Request) {
 // serve 是三协议共用的唯一编排函数。
 func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	start := time.Now()
+	execution := llm.NewExecution(a.cfg.Gateway.MaxAttempts())
+	r = r.WithContext(llm.WithExecution(r.Context(), execution))
+	w.Header().Set("X-Request-ID", execution.Snapshot().RequestID)
 	liveID := a.metrics.BeginLive(proto.Name(), start)
+	a.metrics.AttachExecution(liveID, execution)
 	rec := &obs.Record{LiveID: liveID, Time: start, Protocol: proto.Name(), Status: 200, OK: true}
 	defer func() {
+		trace := execution.Snapshot()
+		rec.RequestID, rec.AttemptCount, rec.QueueMs, rec.Attempts = trace.RequestID, trace.AttemptCount, trace.QueueMs, trace.Attempts
 		rec.DurationMs = time.Since(start).Milliseconds()
 		a.metrics.Record(*rec)
 	}()
@@ -317,6 +323,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		return
 	}
 	imageCount := countWireImages(body, proto.Name())
+	execution.StartRouting(a.cfg.Gateway.RoutingTimeout())
 	req.InputImageCount = &imageCount
 	rec.ImageCount = &imageCount
 	defer func() {
@@ -324,8 +331,9 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		if rec.ForwardedImageCount != nil {
 			forwarded = fmt.Sprint(*rec.ForwardedImageCount)
 		}
-		a.logger.Printf("protocol=%s platform=%s model=%s stream=%v images=%d images_forwarded=%s images_removed=%d image_policy=%s dur_ms=%d ok=%v status=%d",
-			proto.Name(), rec.Platform, rec.Model, rec.Stream, imageCount, forwarded, rec.RemovedImageCount, rec.ImageOverflowPolicy, time.Since(start).Milliseconds(), rec.OK, rec.Status)
+		trace := execution.Snapshot()
+		a.logger.Printf("request_id=%s protocol=%s platform=%s model=%s stream=%v images=%d images_forwarded=%s images_removed=%d image_policy=%s attempts=%d queue_ms=%d dur_ms=%d ok=%v status=%d",
+			trace.RequestID, proto.Name(), rec.Platform, rec.Model, rec.Stream, imageCount, forwarded, rec.RemovedImageCount, rec.ImageOverflowPolicy, trace.AttemptCount, trace.QueueMs, time.Since(start).Milliseconds(), rec.OK, rec.Status)
 	}()
 	// 会话亲和的路由键：同一会话的多轮请求粘住同一账号。
 	// 请求头优先（客户端显式声明），其次 body 里的稳定字段，详见 affinity.go。
@@ -356,6 +364,7 @@ func (a *App) writeFinal(w http.ResponseWriter, r *http.Request, proto Protocol,
 	defer cancel()
 
 	stream, rt, err := a.openRoutedStream(ctx, req, platformHint, rec)
+	writeExecutionHeaders(w, ctx)
 	a.setRouteRecord(rec, rt)
 	writeImageCleanupHeaders(w, rec)
 	if err != nil {
@@ -405,6 +414,7 @@ func (a *App) recordWriteFailure(rec *obs.Record) {
 		rec.OK = false
 		rec.Status = 499
 		rec.Error = "client_write_failed: 响应写回客户端失败"
+		rec.ErrorCode = "client_write_failed"
 	}
 }
 
@@ -421,6 +431,7 @@ func (a *App) fail(rec *obs.Record, err error) *llm.Failure {
 	rec.OK = false
 	rec.Status = f.HTTPStatus()
 	rec.Error = f.Error()
+	rec.ErrorCode = f.Code
 	return f
 }
 
@@ -431,6 +442,7 @@ func (a *App) fail(rec *obs.Record, err error) *llm.Failure {
 // platformHint 非空时优先路由到该平台（来自模型别名），否则按模型名路由。
 func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol, req llm.RequestMessages, rec *obs.Record, platformHint string) {
 	stream, rt, err := a.openRoutedStream(r.Context(), req, platformHint, rec)
+	writeExecutionHeaders(w, r.Context())
 	a.setRouteRecord(rec, rt)
 	writeImageCleanupHeaders(w, rec)
 	if err != nil {

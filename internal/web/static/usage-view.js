@@ -1,5 +1,15 @@
 import { buildUsage, curveSeries, curvePath, lifetimeUsage, heatmapColumns, liveGeneration } from "./usage.js";
 
+export function liveRequestStatus(row, L, now) {
+  const labels = {
+    reading: L("正在读取请求", "Reading request"), routing: L("正在选择服务", "Selecting service"),
+    queued: L("排队等待", "Queued"), connecting: L("正在连接上游", "Connecting"),
+    waiting_output: L("等待首段输出", "Awaiting first output"),
+  };
+  if (labels[row.phase]) return labels[row.phase] + (row.phase === "queued" && row.queue_ms > 0 ? ` · ${(row.queue_ms / 1000).toFixed(1)}s` : "");
+  return !row.last_output_at ? L("等待首段输出", "Awaiting first output") : now - Date.parse(row.last_output_at) >= 3000 ? L("等待后续输出", "Awaiting more output") : L("正在接收", "Receiving");
+}
+
 export function usageModelLabel(model, L) {
   if (model.key === "other") return L("其他模型", "Other models");
   const name = ["(unattributed)", "(unknown)"].includes(model.model) ? L("未记录模型", "Unrecorded model") : model.model || L("未记录模型", "Unrecorded model");
@@ -124,6 +134,6 @@ export function liveUsageView(data,error,points,ui) {
     <div><span>${e(calibrated?L("接收速度 · 估算", "Receive speed · estimated"):L("接收速度", "Receive speed"))}</span><strong>${calibrated?"≈ ":""}${speed.toFixed(1)}<small>${calibrated?"tokens/s":L("字符/s", "chars/s")}</small></strong></div>
     <div><span>${e(L("上次测得速度", "Last measured rate"))}</span><strong>${live.lastSpeed==null?"—":live.lastSpeed.toFixed(1)}<small>tokens/s</small></strong><small>${live.lastCompleted?e(timestamp(live.lastCompleted.time)):e(L("暂无数据", "No data"))}</small></div>
     <div class="live-sparkline-wrap">${graph}<small>${e(L("近 30 秒 · 字符/s", "Last 30 seconds · chars/s"))}</small></div>
-  </div>${live.active.length?`<details id="liveRequestDetails" class="live-request-details"><summary id="liveRequestToggle">${e(L(`${n(live.active.length)} 个活跃请求`, `${n(live.active.length)} active requests`))}<span>${e(L("查看明细", "View details"))}</span></summary><div class="live-request-list">${live.active.map(row=>`<div><span class="status-dot"></span><span class="live-model" title="${e(`${row.platform}/${row.model}`)}">${e(row.model?`${row.platform||L("路由中", "Routing")}/${row.model}`:L("请求解析中", "Reading request"))}</span><span>${n(row.output_characters)} ${e(L("字符", "characters"))}</span><strong>${row.estimated_output_tokens==null?e(L("Token 待结算", "Tokens pending")):"≈ "+n(row.estimated_output_tokens)+" tokens"}</strong><small>${e(!row.last_output_at?L("等待首段输出", "Awaiting first output"):live.sampledAt-Date.parse(row.last_output_at)>=3000?L("等待后续输出", "Awaiting more output"):L("正在接收", "Receiving"))}</small></div>`).join("")}</div></details>`:""}
+  </div>${live.active.length?`<details id="liveRequestDetails" class="live-request-details"><summary id="liveRequestToggle">${e(L(`${n(live.active.length)} 个活跃请求`, `${n(live.active.length)} active requests`))}<span>${e(L("查看明细", "View details"))}</span></summary><div class="live-request-list">${live.active.map(row=>`<div><span class="status-dot"></span><span class="live-model" title="${e(`${row.platform}/${row.model}`)}">${e(row.model?`${row.platform||L("路由中", "Routing")}/${row.model}`:L("请求解析中", "Reading request"))}</span><span>${n(row.output_characters)} ${e(L("字符", "characters"))}</span><strong>${row.estimated_output_tokens==null?e(L("Token 待结算", "Tokens pending")):"≈ "+n(row.estimated_output_tokens)+" tokens"}</strong><small>${e(liveRequestStatus(row,L,live.sampledAt))}${row.attempt_count>1?` · ${n(row.attempt_count)} ${e(L("次尝试", "attempts"))}`:""}</small></div>`).join("")}</div></details>`:""}
   <div class="usage-live-footer"><span>${e(live.active.length?L("实时更新", "Live updates"):L("暂无进行中的请求", "No active requests"))}</span><span>${e(L("更新 ", "Updated "))}${e(timestamp(data.sampled_at))}</span></div>`;
 }

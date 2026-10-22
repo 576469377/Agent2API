@@ -33,6 +33,10 @@
 
 ## 提示缓存与用量
 
+生成接口返回 `X-Request-ID`；建流完成或失败时另带 `X-Upstream-Attempts` 和 `X-Queue-Ms`。请求详情中的 `request_id`、`attempt_count`、`queue_ms`、`attempts` 与响应对应，历史记录缺失字段表示当时未采集。每次尝试只保留平台、账号摘要、状态、错误码和等待响应耗时；不记录凭证、原始会话键或消息正文。总调用量仍按一次客户端请求计数，不将内部尝试累加为多次调用。
+
+`/api/live` 的 `phase` 区分 `reading`、`routing`、`queued`、`connecting`、`waiting_output` 和 `streaming`；它描述网关观测阶段，不代表模型内部计算状态。流中途返回的错误会保留实际错误码并计为失败；已经开始的响应不自动重放。
+
 网关不缓存模型的完整回答。提示缓存由实际服务商管理，重复请求仍会发送给上游；是否命中应查看返回用量，不能只比较耗时。
 
 - Chat Completions：输入缓存位于 `usage.prompt_tokens_details.cached_tokens`，写入数为同一对象的 `cache_write_tokens`；思考输出位于 `completion_tokens_details.reasoning_tokens`。

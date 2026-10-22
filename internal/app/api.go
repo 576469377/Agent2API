@@ -779,9 +779,10 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 // ───────────────────────── 配置 ─────────────────────────
 
 type configResponse struct {
-	Listen   string `json:"listen"`
-	Auth     bool   `json:"auth_enabled"`
-	Sanitize bool   `json:"sanitize"`
+	Gateway  config.GatewayConfig `json:"gateway"`
+	Listen   string               `json:"listen"`
+	Auth     bool                 `json:"auth_enabled"`
+	Sanitize bool                 `json:"sanitize"`
 	Upstream struct {
 		Platform           string `json:"platform"`
 		BaseURL            string `json:"base_url"`
@@ -812,6 +813,7 @@ func (a *App) apiConfig(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) buildConfigResponse() configResponse {
 	var out configResponse
+	out.Gateway = config.GatewayConfig{MaxUpstreamAttempts: a.cfg.Gateway.MaxAttempts(), RoutingTimeoutSec: int(a.cfg.Gateway.RoutingTimeout() / time.Second), QueueTimeoutSec: int(a.cfg.Gateway.QueueTimeout() / time.Second), MaxQueuedRequests: a.cfg.Gateway.MaxQueued()}
 	def := a.hub.DefaultPlatform()
 	out.Listen = a.cfg.Addr()
 	out.Auth = a.cfg.Auth.APIKey != ""
@@ -927,9 +929,13 @@ func (a *App) updateConfig(w http.ResponseWriter, r *http.Request) {
 // ───────────────────────── 工具 ─────────────────────────
 
 func writeJSON(w http.ResponseWriter, v any) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, "序列化失败", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		http.Error(w, "序列化失败", http.StatusInternalServerError)
-	}
+	// 写出失败通常是控制台已关闭或取消请求；响应开始后不能再补写 500。
+	_, _ = w.Write(append(raw, '\n'))
 }

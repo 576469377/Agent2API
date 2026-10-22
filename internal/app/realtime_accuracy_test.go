@@ -67,6 +67,19 @@ func TestPrematureUpstreamEOFIsAFailureForBothResponseModes(t *testing.T) {
 	}
 }
 
+func TestMidStreamFailureRetainsOriginalErrorCode(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		a := newTestApp(t, &fakeAdapter{events: []llm.ResponseEvent{{Type: llm.EventStart}, {Type: llm.EventTextDelta, Delta: "partial"}, {Type: llm.EventError, Error: &llm.Failure{Code: "provider_interrupted", Message: "upstream interrupted", UpstreamFault: true}}}})
+		body := fmt.Sprintf(`{"model":"m","stream":%t,"messages":[{"role":"user","content":"test"}]}`, stream)
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+		snapshot := a.metrics.Snapshot()
+		if snapshot.OK != 0 || snapshot.Failed != 1 || snapshot.InFlight != 0 || snapshot.Recent[0].ErrorCode != "provider_interrupted" || strings.Contains(snapshot.Recent[0].Error, "upstream_incomplete") {
+			t.Fatal("mid-stream failure was overwritten or counted as successful")
+		}
+	}
+}
+
 func TestLiveOneShotToolArgumentsAreCountedExactlyOnce(t *testing.T) {
 	for _, split := range []bool{false, true} {
 		m := obs.New()

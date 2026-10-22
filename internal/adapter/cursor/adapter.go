@@ -229,13 +229,18 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 		}
 	}
 	streamCtx, cancel := context.WithTimeout(ctx, a.cfg.StreamTotalTimeout)
+	attemptCtx, finish, err := llm.BeginAttempt(streamCtx, Platform, a.cfg.RequestTimeout)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	reader, writer := io.Pipe()
-	httpReq, err := http.NewRequestWithContext(streamCtx, "POST", strings.TrimRight(target, "/")+"/agent.v1.AgentService/Run", reader)
+	httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", strings.TrimRight(target, "/")+"/agent.v1.AgentService/Run", reader)
 	if err != nil {
 		cancel()
 		reader.Close()
 		writer.Close()
-		return nil, err
+		return nil, finish(0, err)
 	}
 	httpReq.Header = headers(c)
 	httpReq.Header.Set("Content-Type", "application/connect+json")
@@ -243,7 +248,15 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 	initial := make(chan error, 1)
 	go func() { initial <- writeFrame(writer, map[string]any{"runRequest": payload}) }()
 	resp, err := a.client.Do(httpReq)
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	err = finish(status, err)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		cancel()
 		reader.Close()
 		writer.Close()
@@ -252,7 +265,9 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 	cleanup := func() { cancel(); resp.Body.Close(); reader.Close(); writer.Close() }
 	if resp.StatusCode != 200 {
 		cleanup()
-		return nil, httpFailure(resp.StatusCode)
+		failure := httpFailure(resp.StatusCode)
+		llm.NoteAttemptFailure(ctx, failure)
+		return nil, failure
 	}
 	if resp.ProtoMajor != 2 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/connect+json") {
 		cleanup()

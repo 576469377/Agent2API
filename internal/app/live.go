@@ -30,6 +30,10 @@ func (s *observedStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
 		return event, err
 	}
 	var characters int64
+	if event.Type == llm.EventError && event.Error != nil {
+		llm.NoteAttemptFailure(ctx, event.Error)
+		return event, event.Error
+	}
 	switch event.Type {
 	case llm.EventTextDelta, llm.EventThinkingDelta, llm.EventToolCallDelta:
 		characters = int64(utf8.RuneCountInString(event.Delta))

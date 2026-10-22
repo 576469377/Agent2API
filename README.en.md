@@ -65,6 +65,7 @@ Open **[http://127.0.0.1:8787](http://127.0.0.1:8787)**. Confirm the platform an
 - Without a desktop login, open Accounts → Add account and choose China or Global; the `login -region cn/global` command also works.
 - International encrypted desktop credentials are verified on Windows. Their macOS / Linux path has not yet been verified end to end; see the [integration report](docs/research/04-WorkBuddy国际版接入.md).
 - International chat requests include the required conversation headers and preserve a stable conversation ID across turns. This fixes `11128 / request illegal` when the same account still works in the official client; the error alone does not establish an account ban. See [troubleshooting](docs/troubleshooting.md).
+- Requests share an attempt budget and routing deadline across accounts and platforms. Explicit account concurrency limits use a bounded queue; the console shows live phases, queue time and individual attempts. See [configuration](docs/configuration.md#请求预算和等待队列gateway) and the [stability review](docs/reviews/2026-10-23-gateway-stability-review.md).
 
 The detailed [quick-start guide](docs/quickstart.md) is in Chinese; commands and flags work in either language.
 

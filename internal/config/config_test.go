@@ -28,6 +28,28 @@ func TestDefaultValues(t *testing.T) {
 	}
 }
 
+func TestGatewayLimitsDefaultsAndValidation(t *testing.T) {
+	g := GatewayConfig{}
+	if g.MaxAttempts() != 6 || g.RoutingTimeout().Seconds() != 120 || g.QueueTimeout().Seconds() != 30 || g.MaxQueued() != 128 {
+		t.Fatal("unsafe zero-value scheduling defaults")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	for _, body := range []string{`{"gateway":{"max_upstream_attempts":-1}}`, `{"gateway":{"max_upstream_attempts":65}}`, `{"gateway":{"routing_timeout_sec":86401}}`, `{"gateway":{"max_queued_requests":-1}}`} {
+		os.WriteFile(path, []byte(body), 0600)
+		if _, err := Load(path); err == nil {
+			t.Fatalf("accepted invalid limits: %s", body)
+		}
+	}
+	os.WriteFile(path, []byte(`{"gateway":{"max_upstream_attempts":3,"routing_timeout_sec":45,"queue_timeout_sec":5,"max_queued_requests":8}}`), 0600)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Gateway.MaxAttempts() != 3 || cfg.Gateway.RoutingTimeout().Seconds() != 45 || cfg.Gateway.QueueTimeout().Seconds() != 5 || cfg.Gateway.MaxQueued() != 8 || cfg.Upstream.MaxConcurrencyPerAccount != 0 {
+		t.Fatal("limits did not load or changed unlimited concurrency")
+	}
+}
+
 func TestTransportBodyLimitConfiguration(t *testing.T) {
 	if got := (ServerConfig{}).MaxBodyBytes(); got != 256<<20 {
 		t.Fatalf("zero-value transport limit=%d", got)

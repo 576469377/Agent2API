@@ -7,6 +7,7 @@ package obs
 
 import (
 	"encoding/json"
+	"github.com/576469377/Agent2API/internal/llm"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,23 +30,28 @@ const seriesWindow = 30
 
 // Record 是一次请求的观测记录。
 type Record struct {
-	LiveID           uint64    `json:"-"`
-	OutputCharacters int64     `json:"output_characters,omitempty"`
-	FirstOutputMs    *int64    `json:"first_output_ms,omitempty"`
-	UsageReported    bool      `json:"usage_reported,omitempty"`
-	Time             time.Time `json:"time"`
-	Protocol         string    `json:"protocol"`
-	Model            string    `json:"model"`
-	Stream           bool      `json:"stream"`
-	OK               bool      `json:"ok"`
-	Status           int       `json:"status"`
-	DurationMs       int64     `json:"duration_ms"`
-	InputTokens      int64     `json:"input_tokens,omitempty"`
-	OutputTokens     int64     `json:"output_tokens,omitempty"`
-	ReasoningTokens  int64     `json:"reasoning_tokens,omitempty"`
-	CachedTokens     int64     `json:"cached_tokens,omitempty"`
-	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
-	Error            string    `json:"error,omitempty"`
+	RequestID        string        `json:"request_id,omitempty"`
+	AttemptCount     int           `json:"attempt_count,omitempty"`
+	QueueMs          int64         `json:"queue_ms,omitempty"`
+	Attempts         []llm.Attempt `json:"attempts,omitempty"`
+	LiveID           uint64        `json:"-"`
+	OutputCharacters int64         `json:"output_characters,omitempty"`
+	FirstOutputMs    *int64        `json:"first_output_ms,omitempty"`
+	UsageReported    bool          `json:"usage_reported,omitempty"`
+	Time             time.Time     `json:"time"`
+	Protocol         string        `json:"protocol"`
+	Model            string        `json:"model"`
+	Stream           bool          `json:"stream"`
+	OK               bool          `json:"ok"`
+	Status           int           `json:"status"`
+	DurationMs       int64         `json:"duration_ms"`
+	InputTokens      int64         `json:"input_tokens,omitempty"`
+	OutputTokens     int64         `json:"output_tokens,omitempty"`
+	ReasoningTokens  int64         `json:"reasoning_tokens,omitempty"`
+	CachedTokens     int64         `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int64         `json:"cache_write_tokens,omitempty"`
+	Error            string        `json:"error,omitempty"`
+	ErrorCode        string        `json:"error_code,omitempty"`
 	// Pointers distinguish newly measured zero from legacy records with no count.
 	ImageCount          *int   `json:"image_count,omitempty"`
 	MaxImages           *int   `json:"max_images,omitempty"` // Effective guard; 0 means explicitly disabled.

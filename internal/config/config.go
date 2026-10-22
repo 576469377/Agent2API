@@ -15,11 +15,44 @@ type Config struct {
 	Auth     AuthConfig     `json:"auth"`
 	Log      LogConfig      `json:"log"`
 	Models   ModelsConfig   `json:"models"`
+	Gateway  GatewayConfig  `json:"gateway,omitempty"`
 	// MetricsFile 是指标落盘路径；空字符串表示不持久化（重启即清零）。
 	// 配置为绝对或相对路径均可；相对路径相对进程工作目录解析。
 	MetricsFile               string   `json:"metrics_file,omitempty"`
 	MetricsHistoryImports     []string `json:"metrics_history_imports,omitempty"`
 	MetricsHistoryLogTimezone string   `json:"metrics_history_log_timezone,omitempty"`
+}
+
+type GatewayConfig struct {
+	MaxUpstreamAttempts int `json:"max_upstream_attempts,omitempty"`
+	RoutingTimeoutSec   int `json:"routing_timeout_sec,omitempty"`
+	QueueTimeoutSec     int `json:"queue_timeout_sec,omitempty"`
+	MaxQueuedRequests   int `json:"max_queued_requests,omitempty"`
+}
+
+func (g GatewayConfig) MaxAttempts() int {
+	if g.MaxUpstreamAttempts <= 0 {
+		return 6
+	}
+	return g.MaxUpstreamAttempts
+}
+func (g GatewayConfig) RoutingTimeout() time.Duration {
+	if g.RoutingTimeoutSec <= 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(g.RoutingTimeoutSec) * time.Second
+}
+func (g GatewayConfig) QueueTimeout() time.Duration {
+	if g.QueueTimeoutSec <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(g.QueueTimeoutSec) * time.Second
+}
+func (g GatewayConfig) MaxQueued() int {
+	if g.MaxQueuedRequests <= 0 {
+		return 128
+	}
+	return g.MaxQueuedRequests
 }
 
 // ModelsConfig 是模型层的配置（别名与路由）。
@@ -291,6 +324,9 @@ func Load(path string) (Config, error) {
 	if err := cfg.Models.validateImageLimits(); err != nil {
 		return cfg, err
 	}
+	if cfg.Gateway.MaxUpstreamAttempts < 0 || cfg.Gateway.MaxUpstreamAttempts > 64 || cfg.Gateway.RoutingTimeoutSec < 0 || cfg.Gateway.RoutingTimeoutSec > 86400 || cfg.Gateway.QueueTimeoutSec < 0 || cfg.Gateway.QueueTimeoutSec > 86400 || cfg.Gateway.MaxQueuedRequests < 0 || cfg.Gateway.MaxQueuedRequests > 100000 {
+		return cfg, fmt.Errorf("gateway 调度参数超出允许范围：尝试数 0..64，超时 0..86400 秒，等待数 0..100000；0 使用默认值")
+	}
 	cfg.applyEnv()
 	return cfg, nil
 }
@@ -338,7 +374,7 @@ func (c Config) StreamTotalTimeout() time.Duration {
 	return time.Duration(c.Upstream.StreamTotalTimeoutSec) * time.Second
 }
 
-// RequestTimeout 返回非流式请求超时。
+// RequestTimeout 返回上游响应等待及非流式请求总超时。
 func (c Config) RequestTimeout() time.Duration {
 	if c.Upstream.RequestTimeoutSec <= 0 {
 		return 60 * time.Second

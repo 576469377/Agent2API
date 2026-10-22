@@ -24,6 +24,12 @@
     "image_overflow_policies": {},
     "aliases": {}
   },
+  "gateway": {
+    "max_upstream_attempts": 6,
+    "routing_timeout_sec": 120,
+    "queue_timeout_sec": 30,
+    "max_queued_requests": 128
+  },
   "auth": {
     "api_key": ""
   },

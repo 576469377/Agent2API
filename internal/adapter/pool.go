@@ -88,7 +88,10 @@ type Pool struct {
 	// 反复换号重试、整体变慢。并发上限是「把请求排在账号前」的背压，
 	// 让每个账号按自己能承受的节奏被使用——与 sub2api 的 per-account
 	// concurrency limit 同一思路。
-	maxConc int
+	maxConc            int
+	changed            chan struct{}
+	queued, queueLimit int
+	queueTimeout       time.Duration
 }
 
 type poolAccount struct {
@@ -173,7 +176,7 @@ type AccountStatus struct {
 // NewPool 创建号池。name 是平台标识（账号必须同平台，模型目录才可互换）。
 // logf 可为 nil。
 func NewPool(name string, logf func(string, ...any)) *Pool {
-	return &Pool{name: name, logf: logf, affinity: newAffinityTable()}
+	return &Pool{name: name, logf: logf, affinity: newAffinityTable(), changed: make(chan struct{}), queueLimit: 128, queueTimeout: 30 * time.Second}
 }
 
 // Add 向号池注册一个账号。label 用于日志与控制台展示（如凭证文件名）。
@@ -188,6 +191,7 @@ func (p *Pool) Add(label string, adp Adapter) {
 		acc.sem = make(chan struct{}, p.maxConc)
 	}
 	p.accounts = append(p.accounts, acc)
+	p.notifyLocked()
 }
 
 // SetMaxConcurrencyPerAccount 设置每账号并发上限（0 = 不限）。
@@ -202,6 +206,7 @@ func (p *Pool) SetMaxConcurrencyPerAccount(n int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.maxConc = n
+	p.notifyLocked()
 	for _, acc := range p.accounts {
 		if n > 0 {
 			acc.sem = make(chan struct{}, n)
@@ -382,32 +387,27 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		now := time.Now()
-		p.mu.Lock()
-		idx := boundIdx
-		var acc *poolAccount
-		if idx >= 0 && p.accounts[idx].available(now, req.Model) && p.accounts[idx].hasCapacity() {
-			acc = p.accounts[idx]
-		} else {
-			idx, acc = p.pickByHealthLocked(now, req.Model, tried)
-		}
+		idx, acc, release, reserveErr := p.reserve(ctx, req.Model, tried, boundIdx)
 		boundIdx = -1
-		p.mu.Unlock()
+		if reserveErr != nil {
+			return nil, reserveErr
+		}
 		if acc == nil {
 			break // 没有未试过且可用的账号了
 		}
 		tried[idx] = true
 
-		// 并发槽位：账号在途请求达到上限时在这里排队（受 ctx 约束）。
-		// 选号阶段已优先挑「有余量」的账号，所以只有全部账号都满员时才会真正等待。
-		if err := acc.acquireSlot(ctx); err != nil {
-			return nil, err
-		}
 		if err := ctx.Err(); err != nil {
-			acc.releaseSlot()
+			release()
 			return nil, err
 		}
-		s, err := acc.adp.Stream(ctx, req)
+		identity := acc.label
+		if account, ok := acc.adp.(interface{ AccountUID() string }); ok && account.AccountUID() != "" {
+			identity = account.AccountUID()
+		}
+		attemptCtx := llm.WithAttemptAccount(ctx, p.name, identity)
+		now := time.Now()
+		s, err := acc.adp.Stream(attemptCtx, req)
 		if err == nil {
 			// 首帧探针：把「HTTP 200 但流内首发即报错」纳入换号窗口。
 			// 这是 HTTP 状态层拒绝与流内失败之间的真实缺口——没有它，
@@ -424,14 +424,18 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 				// 带上账号标签：app 层据此把请求归因到具体账号，
 				// 控制台才能回答「每个账号用了多少额度」。
 				// withSlot 让槽位在流的整个生命周期内保持占用。
-				return &labeledStream{ResponseStream: acc.withSlot(bs), label: acc.label}, nil
+				return &labeledStream{ResponseStream: &slotStream{ResponseStream: bs, release: release}, label: acc.label}, nil
 			}
 			_ = closeStream(s)
 			err = probeErr
+			llm.NoteAttemptFailure(ctx, err)
 		}
 		// 本次尝试结束（不管成功与否都已换号或返回），归还槽位。
-		acc.releaseSlot()
+		release()
 		lastErr = err
+		if llm.Wrap(err).Local {
+			return nil, err
+		}
 		// 会话亲和解绑：绑定的账号失败了，旧绑定已无意义
 		//（下次请求会按健康度重新选择并重建绑定）。
 		if sk != "" {
@@ -449,6 +453,8 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 
 		f := llm.Wrap(err)
 		switch {
+		case f.Local:
+			return nil, err
 		case f.QuotaExhausted, f.RateLimited:
 			// 限流 / 额度耗尽的处理原则：**只在拿到上游明确重置时刻时才记冷却**，
 			// 拿不到就只降健康度、换下一个账号——绝不自己发明一个时长把账号锁住。
@@ -608,7 +614,7 @@ func (a *poolAccount) hasCapacity() bool {
 	if a.sem == nil {
 		return true
 	}
-	return len(a.sem) < cap(a.sem)
+	return atomic.LoadInt32(&a.inFlight) < int32(cap(a.sem))
 }
 
 // acquireSlot 占用一个并发槽位；账号不限并发时立即返回。
@@ -1143,6 +1149,7 @@ type PoolController interface {
 func (p *Pool) SetAccountEnabled(label string, enabled bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.notifyLocked()
 	for _, acc := range p.accounts {
 		if acc.label != label {
 			continue
@@ -1168,6 +1175,7 @@ func (p *Pool) SetAccountEnabled(label string, enabled bool) error {
 func (p *Pool) ResetAccountCooldown(label string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.notifyLocked()
 	for _, acc := range p.accounts {
 		if acc.label != label {
 			continue
@@ -1190,6 +1198,7 @@ func (p *Pool) ResetAccountCooldown(label string) error {
 func (p *Pool) AccountReauthenticated(label string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.notifyLocked()
 	for _, acc := range p.accounts {
 		if acc.label == label && acc.state == stateBlocked && acc.reason == reasonUnauthorized {
 			acc.state = stateReady

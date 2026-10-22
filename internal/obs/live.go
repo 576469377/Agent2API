@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"github.com/576469377/Agent2API/internal/llm"
 	"sort"
 	"time"
 )
@@ -37,6 +38,7 @@ func (m *Metrics) lastMinuteRPMLocked(now time.Time) int64 {
 }
 
 type liveRequest struct {
+	Execution                        *llm.Execution
 	ID                               uint64
 	Protocol, Platform, Model        string
 	Started, FirstOutput, LastOutput time.Time
@@ -49,6 +51,10 @@ type TokenCalibration struct {
 	Samples    int64 `json:"samples"`
 }
 type LiveRequest struct {
+	RequestID                string     `json:"request_id,omitempty"`
+	Phase                    string     `json:"phase,omitempty"`
+	AttemptCount             int        `json:"attempt_count,omitempty"`
+	QueueMs                  int64      `json:"queue_ms,omitempty"`
 	ID                       uint64     `json:"id"`
 	Protocol                 string     `json:"protocol"`
 	Platform                 string     `json:"platform"`
@@ -91,6 +97,13 @@ func (m *Metrics) RouteLive(id uint64, platform, model string) {
 		request.Model = model
 	}
 }
+func (m *Metrics) AttachExecution(id uint64, execution *llm.Execution) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if request := m.live[id]; request != nil {
+		request.Execution = execution
+	}
+}
 func (m *Metrics) ObserveLive(id uint64, characters int64, now time.Time) {
 	if characters <= 0 {
 		return
@@ -100,6 +113,9 @@ func (m *Metrics) ObserveLive(id uint64, characters int64, now time.Time) {
 	request := m.live[id]
 	if request == nil {
 		return
+	}
+	if request.Execution != nil {
+		request.Execution.SetPhase("streaming")
 	}
 	request.Characters += characters
 	request.LastOutput = now
@@ -119,6 +135,10 @@ func (m *Metrics) liveSnapshotAt(now time.Time) LiveSnapshot {
 	out := LiveSnapshot{SampledAt: now, InFlight: m.inFlight.Load(), Active: []LiveRequest{}}
 	for _, request := range m.live {
 		row := LiveRequest{ID: request.ID, Platform: request.Platform, Model: request.Model, Protocol: request.Protocol, StartedAt: request.Started, OutputCharacters: request.Characters}
+		if request.Execution != nil {
+			execution := request.Execution.Snapshot()
+			row.RequestID, row.Phase, row.AttemptCount, row.QueueMs = execution.RequestID, execution.Phase, execution.AttemptCount, execution.QueueMs
+		}
 		if !request.LastOutput.IsZero() {
 			stamp := request.LastOutput
 			row.LastOutputAt = &stamp

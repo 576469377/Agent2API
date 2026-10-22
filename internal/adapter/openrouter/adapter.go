@@ -89,9 +89,17 @@ func (a *Adapter) Describe() adapter.Description {
 }
 
 func (a *Adapter) request(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	finish := func(_ int, err error) error { return err }
+	if method == http.MethodPost && path == "/chat/completions" {
+		var err error
+		ctx, finish, err = llm.BeginAttempt(ctx, Platform, a.cfg.RequestTimeout)
+		if err != nil {
+			return nil, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, a.cfg.BaseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, finish(0, err)
 	}
 	if key := a.key(); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -99,7 +107,15 @@ func (a *Adapter) request(ctx context.Context, method, path string, body []byte)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-OpenRouter-Title", "Agent2API")
 	resp, err := a.client.Do(req)
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	err = finish(status, err)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		return nil, llm.Wrap(err)
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -121,6 +137,7 @@ func (a *Adapter) request(ctx context.Context, method, path string, body []byte)
 	} else if until, err := http.ParseTime(resp.Header.Get("Retry-After")); err == nil {
 		f.RetryAfterSeconds = max(0, int(time.Until(until).Seconds())+1)
 	}
+	llm.NoteAttemptFailure(ctx, f)
 	return nil, f
 }
 

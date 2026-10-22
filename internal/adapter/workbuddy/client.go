@@ -442,7 +442,7 @@ func (c *httpClient) openStream(ctx context.Context, path string, body any, head
 		return nil, llm.Wrap(&llm.Failure{Code: "upstream_unreachable", Message: "连接上游失败: " + err.Error(), Cause: err, UpstreamFault: true})
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		resp.Body.Close()
 		return nil, httpError(resp.StatusCode, raw, resp.Header.Get("Retry-After"))
 	}

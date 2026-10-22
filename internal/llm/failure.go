@@ -22,6 +22,8 @@ type Failure struct {
 	// UpstreamFault 表示责任在上游：传输断裂、内部故障伪装成可修正的 code。
 	// 它的语义压过 Code —— 否则会把上游的锅甩给调用方、把传输断裂当成限流去冷却。
 	UpstreamFault bool
+	// Local 表示网关自身的容量或尝试预算不足，不应降低上游账号健康度。
+	Local bool
 
 	// RetryAfterSeconds 是上游建议的重试等待秒数。
 	RetryAfterSeconds int
@@ -112,6 +114,9 @@ func (f *Failure) classify() {
 		f.ClientFixable = true
 		return
 	}
+	if f.Local {
+		return
+	}
 	if f.Cause != nil {
 		var netErr net.Error
 		if errors.As(f.Cause, &netErr) && netErr.Timeout() {
@@ -155,6 +160,8 @@ func (f *Failure) HTTPStatus() int {
 	switch {
 	case f.Canceled:
 		return 499 // 客户端断开
+	case f.Local:
+		return 503
 	case f.Timeout:
 		return 504
 	case f.Unauthorized:
