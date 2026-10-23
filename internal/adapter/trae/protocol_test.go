@@ -176,6 +176,21 @@ func TestStreamIdleAndCancellationCloseRead(t *testing.T) {
 	}
 }
 
+func TestStreamImmediateIdlePublishesTimerBeforeCallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for i := 0; i < 32; i++ {
+		r, w := io.Pipe()
+		s := newStream(r, func() {}, 0, "m")
+		_, err := s.Recv(ctx)
+		s.Close()
+		w.Close()
+		if err == nil || llm.Wrap(err).Code != "trae_stream_idle" {
+			t.Fatal("immediate idle did not close the initialized stream", err)
+		}
+	}
+}
+
 func TestFreeQuotaRejectsPaidUnknownTrialAndExhaustion(t *testing.T) {
 	raw := fixture(t, "trae-free-quota.json")
 	now := time.Now()

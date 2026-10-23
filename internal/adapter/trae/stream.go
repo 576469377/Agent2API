@@ -41,7 +41,13 @@ func newStream(body io.ReadCloser, cancel context.CancelFunc, idle time.Duration
 	s := &stream{body: body, cancel: cancel, idleTimeout: idle, model: model, tools: map[int]*toolState{}}
 	s.scanner = bufio.NewScanner(body)
 	s.scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	s.idle = time.AfterFunc(idle, func() { s.timedOut.Store(true); s.Close() })
+	initialized := make(chan struct{})
+	s.idle = time.AfterFunc(idle, func() {
+		<-initialized // Publish the timer before Close can read or stop it.
+		s.timedOut.Store(true)
+		s.Close()
+	})
+	close(initialized)
 	return s
 }
 func (s *stream) Close() error {
