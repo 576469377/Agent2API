@@ -164,7 +164,13 @@ func TestWorkBuddyBackgroundCatchesUpDueCheckin(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		cancel()
+		// The claim handler signals before the worker persists its confirmed
+		// result. Drain that operation before TempDir removes the state file.
+		a.checkins.op.Lock()
+		a.checkins.op.Unlock()
+	}()
 	a.StartBackground(ctx)
 	select {
 	case <-claimed:
