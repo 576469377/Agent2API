@@ -22,6 +22,47 @@ export async function loadResources(keys, { request, success, failure, settled }
   }));
 }
 
+// One active read per resource. Explicit refreshes supersede older reads;
+// identity checks also protect against transports which settle after abort.
+export function createResourceLoader(handlers) {
+  const pending = new Map();
+  const run = (key, options) => {
+    const previous = pending.get(key);
+    if (previous && !options.replace) return previous.promise;
+    previous?.controller.abort();
+    const entry = { controller: new AbortController() };
+    pending.set(key, entry);
+    handlers.started?.(key);
+    const current = () => pending.get(key) === entry;
+    entry.promise = (async () => {
+      try {
+        const data = await (options.request || handlers.request)(key, entry.controller.signal);
+        if (current()) await (options.success || handlers.success)(key, data);
+      } catch (error) {
+        if (current()) (options.failure || handlers.failure)(key, error);
+      } finally {
+        if (current()) {
+          pending.delete(key);
+          handlers.settled(key);
+        }
+      }
+    })();
+    return entry.promise;
+  };
+  return {
+    load(keys, options = {}) {
+      return Promise.allSettled([...new Set(keys)].map(key => run(key, options)));
+    },
+    cancel() {
+      for (const [key, entry] of pending) {
+        pending.delete(key);
+        entry.controller.abort();
+        handlers.settled(key);
+      }
+    },
+  };
+}
+
 // Model cooldowns belong to a platform/account pair, independent of credit rate.
 export function modelAvailability(model, accounts, receivedAt, now = Date.now()) {
   const matching = (accounts || []).filter(a => a.platform === model.platform && a.state !== "disabled");

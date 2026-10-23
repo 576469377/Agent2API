@@ -142,7 +142,7 @@ func TestGlobalLoginAndRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.auth.Refresh(); err != nil {
+	if err := a.auth.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := loadCredentialFile(p)

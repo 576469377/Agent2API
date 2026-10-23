@@ -194,7 +194,7 @@ func runServer(args []string) {
 	// 有更可读的呈现，重复一行带时间戳前缀的日志只会干扰阅读。
 
 	application := app.New(cfg, hub, logger)
-	application.StartMetricsPersistence(30 * time.Second)
+	application.StartMetricsPersistence(backgroundCtx, 30*time.Second)
 	application.StartPlatformBackground(backgroundCtx)
 	requests := newRequestDrain(application.Handler())
 	srv := &http.Server{

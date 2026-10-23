@@ -99,24 +99,6 @@ func New(cfg config.Config, hub *Hub, logger *log.Logger) *App {
 	return a
 }
 
-// StartMetricsPersistence 启动后台周期落盘，避免进程意外退出时丢失统计。
-// metricsFile 为空（未配置持久化）时直接返回，不启动任何协程。
-func (a *App) StartMetricsPersistence(interval time.Duration) {
-	if a.metricsFile == "" {
-		return
-	}
-	go func() {
-		if interval <= 0 {
-			interval = 30 * time.Second
-		}
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for range t.C {
-			a.saveMetrics()
-		}
-	}()
-}
-
 // PersistMetricsNow 立即把指标落盘，供关闭流程在退出前调用。
 func (a *App) PersistMetricsNow() {
 	a.saveMetrics()

@@ -1,7 +1,9 @@
 package obs
 
 import (
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -46,6 +48,45 @@ func BenchmarkSnapshotYearHistory(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		m.Snapshot()
+	}
+}
+
+func BenchmarkSaveYearHistory(b *testing.B) {
+	m := benchmarkHistory()
+	path := filepath.Join(b.TempDir(), "metrics.json")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := m.Save(path); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEncodeYearHistory(b *testing.B) {
+	m := benchmarkHistory()
+	m.mu.Lock()
+	history := m.copyHistoryLocked()
+	m.mu.Unlock()
+	sortHistory(&history)
+	p := persisted{UsageHistory: &history}
+	for _, name := range []string{"indented", "compact"} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			var raw []byte
+			for i := 0; i < b.N; i++ {
+				var err error
+				if name == "indented" {
+					raw, err = json.MarshalIndent(p, "", "  ")
+				} else {
+					raw, err = json.Marshal(p)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(len(raw)), "bytes/snapshot")
+		})
 	}
 }
 

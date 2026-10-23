@@ -36,6 +36,7 @@ func (p *Pool) reserve(ctx context.Context, model string, tried map[int]bool, bo
 	var stopWaiting func()
 	var timer *time.Timer
 	var timeout <-chan time.Time
+	var deadline time.Time
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -109,6 +110,7 @@ func (p *Pool) reserve(ctx context.Context, model string, tried map[int]bool, bo
 			p.queued++
 			queued = true
 			stopWaiting = llm.BeginQueue(ctx)
+			deadline = now.Add(wait)
 			timer = time.NewTimer(wait)
 			timeout = timer.C
 		}
@@ -116,12 +118,31 @@ func (p *Pool) reserve(ctx context.Context, model string, tried map[int]bool, bo
 			p.changed = make(chan struct{})
 		}
 		changed := p.changed
+		// An idle account can become usable when its known cooldown expires,
+		// even if no active stream releases a slot. Reuse the queue timer for
+		// that wake-up while retaining the original queue deadline.
+		wakeAt := deadline
+		for i, candidate := range p.accounts {
+			if tried[i] || !candidate.hasCapacity() || candidate.state == stateDisabled || candidate.state == stateBlocked {
+				continue
+			}
+			readyAt := candidate.cooldownUntil
+			if modelUntil := candidate.modelCooldown[modelKey(model)]; modelUntil.After(readyAt) {
+				readyAt = modelUntil
+			}
+			if readyAt.After(now) && readyAt.Before(wakeAt) {
+				wakeAt = readyAt
+			}
+		}
+		timer.Reset(time.Until(wakeAt))
 		p.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return -1, nil, nil, ctx.Err()
 		case <-timeout:
-			return -1, nil, nil, &llm.Failure{Code: "queue_timeout", Message: "等待可用账号超时，请稍后重试", Local: true, RetryAfterSeconds: 1}
+			if !time.Now().Before(deadline) {
+				return -1, nil, nil, &llm.Failure{Code: "queue_timeout", Message: "等待可用账号超时，请稍后重试", Local: true, RetryAfterSeconds: 1}
+			}
 		case <-changed:
 		}
 	}

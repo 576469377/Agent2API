@@ -80,12 +80,12 @@ func (c *modelCache) set(models []adapter.ModelInfo) {
 
 // fetchModels 从 /v3/config 拉取模型清单。
 func (a *Adapter) fetchModels(ctx context.Context) ([]adapter.ModelInfo, error) {
-	if err := a.auth.EnsureValid(); err != nil {
+	if err := a.auth.EnsureValid(ctx); err != nil {
 		return nil, err
 	}
 	models, err := a.ReadModelCatalog(ctx)
 	if isUnauthorized(err) {
-		if refreshErr := a.auth.Refresh(); refreshErr != nil {
+		if refreshErr := a.auth.Refresh(ctx); refreshErr != nil {
 			return nil, refreshErr
 		}
 		return a.ReadModelCatalog(ctx)

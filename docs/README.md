@@ -62,7 +62,7 @@
 
 ## 调研与历史记录
 
-[最新目录与客户端审查](reviews/2026-10-24-catalog-and-client-review.md)记录跨平台刷新隔离、缓存失效、客户端同步竞争和连接收尾。[前一轮项目优化审查](reviews/2026-10-24-project-optimization-review.md)记录协议兼容、阻塞取消、指标与前端性能、静态缓存、跨平台验证及外部源码对照。[控制台与文档审查](reviews/2026-10-23-console-and-repository-review.md)记录设计与文档调整；[网关稳定性审查](reviews/2026-10-23-gateway-stability-review.md)记录请求预算、队列和大请求超时修正。
+[最新深入调研](reviews/2026-10-24-deep-runtime-review.md)对照认证、网关调度、指标和成熟控制台源码，记录并发刷新、冷却唤醒、统计恢复与浏览器旧响应问题，附可复现基准。[目录与客户端审查](reviews/2026-10-24-catalog-and-client-review.md)记录跨平台刷新隔离、缓存失效、客户端同步竞争和连接收尾。[前一轮项目优化审查](reviews/2026-10-24-project-optimization-review.md)记录协议兼容、阻塞取消、指标与前端性能、静态缓存、跨平台验证及外部源码对照。[控制台与文档审查](reviews/2026-10-23-console-and-repository-review.md)记录设计与文档调整；[网关稳定性审查](reviews/2026-10-23-gateway-stability-review.md)记录请求预算、队列和大请求超时修正。
 
 - [调研索引](research/README.md)：协议、ZCode、WorkBuddy 国际版和 Cursor 的证据与日期边界。
 - [设计索引](design/README.md)：历史方案、视觉规范和当时的取舍。

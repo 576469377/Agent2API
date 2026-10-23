@@ -8,8 +8,7 @@ import (
 // 1 小时 + 滑动续期能覆盖绝大多数会话，又不至于让废弃绑定长期占内存。
 const affinityTTL = time.Hour
 
-// affinityMaxKeys 是绑定表容量上限（LRU 语义由时间戳淘汰近似实现）。
-// 单用户本地网关远用不满；设上限只为防御异常客户端制造海量 key。
+// affinityMaxKeys 限制新会话占用；已有会话始终可以续期和更新账号。
 const affinityMaxKeys = 4096
 
 type affinityEntry struct {
@@ -46,8 +45,8 @@ func (t *affinityTable) get(key string) (string, bool) {
 // set 记录绑定。容量满时先清过期，仍满则放弃本次绑定（亲和是优化，
 // 不值得为之做完整的 LRU 链表）。
 func (t *affinityTable) set(key, label string) {
-	if len(t.m) >= affinityMaxKeys {
-		now := time.Now()
+	now := time.Now()
+	if _, exists := t.m[key]; !exists && len(t.m) >= affinityMaxKeys {
 		for k, e := range t.m {
 			if now.After(e.expiresAt) {
 				delete(t.m, k)
@@ -57,7 +56,7 @@ func (t *affinityTable) set(key, label string) {
 			return
 		}
 	}
-	t.m[key] = affinityEntry{label: label, expiresAt: time.Now().Add(affinityTTL)}
+	t.m[key] = affinityEntry{label: label, expiresAt: now.Add(affinityTTL)}
 }
 
 // delete 移除绑定（绑定账号不可用时调用——旧绑定已无意义）。

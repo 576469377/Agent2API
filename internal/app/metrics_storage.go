@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -23,7 +24,9 @@ type MetricsStorage struct {
 }
 type metricsStorage struct {
 	sync.RWMutex
-	state MetricsStorage
+	state     MetricsStorage
+	startOnce sync.Once
+	done      chan struct{}
 }
 
 // Only the two documented default names in the same directory are eligible.
@@ -90,8 +93,11 @@ func loadMetricsStorage(metrics *obs.Metrics, path string, logger *log.Logger) (
 }
 
 func loadMetricsRecovery(metrics *obs.Metrics, path string) string {
-	if err := metrics.Load(path); err == nil {
-		return path
+	_, statErr := os.Stat(path)
+	if statErr == nil {
+		if err := metrics.Load(path); err == nil {
+			return path
+		}
 	}
 	// If a previous recovery was also damaged, reuse the newest valid recovery
 	// created by this gateway, rather than starting another empty file each boot.
@@ -108,7 +114,43 @@ func loadMetricsRecovery(metrics *obs.Metrics, path string) string {
 			return candidate
 		}
 	}
+	if os.IsNotExist(statErr) {
+		return path
+	}
 	return path + "-" + time.Now().UTC().Format("20060102T150405.000000000")
+}
+
+// StartMetricsPersistence owns one worker for the application's lifetime.
+// Cancellation stops future passes; shutdown can still call PersistMetricsNow
+// after request accounting completes. The result closes when the worker exits.
+func (a *App) StartMetricsPersistence(ctx context.Context, interval time.Duration) <-chan struct{} {
+	a.metricsStorage.startOnce.Do(func() {
+		a.metricsStorage.done = make(chan struct{})
+		if a.metricsFile == "" || ctx.Err() != nil {
+			close(a.metricsStorage.done)
+			return
+		}
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		go func() {
+			defer close(a.metricsStorage.done)
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if ctx.Err() != nil {
+						return
+					}
+					a.saveMetrics()
+				}
+			}
+		}()
+	})
+	return a.metricsStorage.done
 }
 
 func (a *App) metricsStorageSnapshot() MetricsStorage {

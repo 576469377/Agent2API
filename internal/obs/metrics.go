@@ -8,6 +8,7 @@ package obs
 import (
 	"cmp"
 	"encoding/json"
+	"fmt"
 	"github.com/576469377/Agent2API/internal/llm"
 	"os"
 	"path/filepath"
@@ -564,7 +565,7 @@ func (m *Metrics) Save(path string) error {
 	m.mu.Unlock()
 
 	sortHistory(&history)
-	b, err := json.MarshalIndent(p, "", "  ")
+	b, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
@@ -596,9 +597,12 @@ func (m *Metrics) Load(path string) error {
 		}
 		return err
 	}
-	var p persisted
+	var p *persisted
 	if err := json.Unmarshal(b, &p); err != nil {
 		return err
+	}
+	if p == nil {
+		return fmt.Errorf("metrics snapshot must be a JSON object")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

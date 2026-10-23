@@ -142,6 +142,9 @@ func (a *Adapter) AccountUID() string {
 	return a.auth.Credential().UID
 }
 
+// EnsureValid participates in the gateway's periodic credential keepalive.
+func (a *Adapter) EnsureValid(ctx context.Context) error { return a.auth.EnsureValid(ctx) }
+
 // ReplaceCredential installs a newly authorized session for this same account.
 // Auth serializes it with refreshes and preserves the existing credential file.
 func (a *Adapter) ReplaceCredential(cred *Credential) error {
@@ -209,7 +212,10 @@ const retryMaxBackoff = 4 * time.Second
 // 否则会把已生成的半截内容变成两份。可重试的只有传输错误与 5xx/429；
 // 4xx 语义拒绝（参数错、鉴权错）重试没有意义，直接失败。
 func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.ResponseStream, error) {
-	if err := a.auth.EnsureValid(); err != nil {
+	if err := a.auth.EnsureValid(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		a.logf("凭证刷新失败: %v", err)
 		// 刷新失败不阻断请求：旧 token 可能仍有效。
 	}
@@ -256,7 +262,10 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 			}
 			refreshedOnAttempt = true
 			a.logf("收到 401，尝试刷新 token 后重试")
-			if refreshErr := a.auth.Refresh(); refreshErr != nil {
+			if refreshErr := a.auth.Refresh(ctx); refreshErr != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				a.logf("刷新 token 失败: %v", refreshErr)
 				return nil, err
 			}

@@ -195,16 +195,25 @@ type Auth struct {
 	mu   sync.Mutex
 	cred *Credential
 	cli  *httpClient
+	// Serialize credential commits and file replacement without blocking readers.
+	commitMu sync.Mutex
 	// CredentialPath 非空时，刷新成功后回写磁盘。
 	credentialPath string
-	// refreshing 表示一次刷新正在进行（两段式刷新的中间态）。
-	// 刷新的网络 I/O 在锁外执行，否则上游变慢时（最长 20s）
-	// 同账号的所有并发请求都会阻塞在 BuildHeaders 的锁上。
-	refreshing bool
+	refreshing     *credentialRefresh
+}
+
+type credentialRefresh struct {
+	base    *Credential
+	ctx     context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
+	waiters int
+	err     error // Published by closing done.
 }
 
 func newAuth(cli *httpClient, cred *Credential, path string) *Auth {
-	return &Auth{cli: cli, cred: cred, credentialPath: path}
+	snapshot := *cred
+	return &Auth{cli: cli, cred: &snapshot, credentialPath: path}
 }
 
 // CredentialPath 返回凭证文件路径（供控制台展示与「重新登录写回哪个文件」）。
@@ -222,21 +231,29 @@ func (a *Auth) Credential() Credential {
 }
 
 func (a *Auth) replaceCredential(cred *Credential) error {
+	a.commitMu.Lock()
+	defer a.commitMu.Unlock()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if cred == nil || cred.UID == "" || cred.UID != a.cred.UID || cred.AccessToken == "" || globalDomain(cred.Domain) != globalDomain(a.cred.Domain) {
+		a.mu.Unlock()
 		return &llm.Failure{Code: "credential_identity_mismatch", Message: "新登录态与当前账号或区域不匹配", ClientFixable: true}
 	}
 	previous := a.cred
+	a.mu.Unlock()
 	next := *cred
 	if previous.MachineID != "" {
 		next.MachineID = previous.MachineID
 	}
-	a.cred = &next
-	if err := a.persistLocked(); err != nil {
-		a.cred = previous
+	if err := a.persistCredential(&next); err != nil {
 		return &llm.Failure{Code: "credential_write_failed", Message: "新登录态保存失败，原登录态已保留", Cause: err}
 	}
+	a.mu.Lock()
+	a.cred = &next
+	if call := a.refreshing; call != nil {
+		call.cancel()
+		a.refreshing = nil
+	}
+	a.mu.Unlock()
 	return nil
 }
 
@@ -255,47 +272,110 @@ func (c *Credential) expiresSoon() bool {
 	return c.ExpiresAt < time.Now().UnixMilli()+60_000
 }
 
-// EnsureValid 保证凭证有效，必要时刷新一次。
-// EnsureValid 保证凭证有效，必要时刷新一次。
-//
-// 两段式：锁内只做「检查过期 → 抢占刷新权」，网络 I/O 与磁盘写回在锁外。
-// 否则刷新最长占锁 20 秒（上游变慢时），同账号的所有并发请求都会
-// 阻塞在 BuildHeaders 上。已刷新失败的并发请求拿到的错误与直接刷新一致。
-func (a *Auth) EnsureValid() error {
-	a.mu.Lock()
-	if !a.cred.expiresSoon() {
+// EnsureValid shares one refresh per account. An unexpired token remains usable
+// during a proactive refresh; expired-token callers wait for that result.
+func (a *Auth) EnsureValid(ctx context.Context) error { return a.refresh(ctx, false) }
+
+// Refresh forces a refresh, joining an existing rotation when one is in flight.
+func (a *Auth) Refresh(ctx context.Context) error { return a.refresh(ctx, true) }
+
+func (a *Auth) refresh(ctx context.Context, force bool) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.mu.Lock()
+		if !force && !a.cred.expiresSoon() {
+			a.mu.Unlock()
+			return nil
+		}
+		call := a.refreshing
+		if call != nil && !force && a.cred.ExpiresAt > time.Now().UnixMilli() {
+			a.mu.Unlock()
+			return nil
+		}
+		if call != nil && call.ctx.Err() != nil {
+			a.mu.Unlock()
+			// A cancelled request may still be finishing a token rotation. Wait
+			// for its response before starting another exchange with that token.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-call.done:
+				if call.err == nil {
+					return nil
+				}
+				continue
+			}
+		}
+		if call == nil {
+			shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+			call = &credentialRefresh{base: a.cred, ctx: shared, cancel: cancel, done: make(chan struct{})}
+			a.refreshing = call
+			go a.runRefresh(call)
+		}
+		call.waiters++
 		a.mu.Unlock()
-		return nil
+		return a.waitRefresh(ctx, call)
 	}
-	if a.refreshing {
-		// 别的 goroutine 正在刷新：不排队等（会阻塞请求路径），
-		// 用当前凭证继续——旧 token 大概率仍有效；真失效了下次再刷。
-		a.mu.Unlock()
-		return nil
-	}
-	a.refreshing = true
-	a.mu.Unlock()
+}
+
+func (a *Auth) waitRefresh(ctx context.Context, call *credentialRefresh) error {
 	defer func() {
 		a.mu.Lock()
-		a.refreshing = false
+		call.waiters--
+		if call.waiters == 0 && a.refreshing == call {
+			call.cancel()
+		}
 		a.mu.Unlock()
 	}()
-
-	return a.Refresh()
-}
-
-// Refresh 强制刷新 token。
-func (a *Auth) Refresh() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.refreshLocked()
-}
-
-func (a *Auth) refreshLocked() error {
-	if a.cred.RefreshToken == "" {
-		return &llm.Failure{Code: "no_refresh_token", Message: "凭证缺少 refreshToken，无法刷新，请重新登录", ClientFixable: true}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-call.done:
+		return call.err
 	}
-	headers := a.cli.authHeaders(a.cred, headerModeRefresh)
+}
+
+func (a *Auth) runRefresh(call *credentialRefresh) {
+	defer call.cancel()
+	next, err := a.refreshToken(call.ctx, *call.base)
+	a.commitMu.Lock()
+	defer a.commitMu.Unlock()
+	a.mu.Lock()
+	publish := false
+	switch {
+	case a.cred != call.base:
+		// A completed login supersedes both success and failure of the old session.
+		err = nil
+	case a.refreshing != call:
+		err = context.Canceled
+	case err == nil:
+		// A successful server-side rotation must be saved even if its last
+		// waiter cancelled while the complete HTTP response was arriving.
+		a.cred = &next
+		publish = true
+	}
+	a.mu.Unlock()
+	if publish {
+		if saveErr := a.persistCredential(&next); saveErr != nil {
+			err = &llm.Failure{Code: "credential_write_failed", Message: "刷新成功但凭证保存失败: " + saveErr.Error(), Cause: saveErr}
+		}
+	}
+	a.mu.Lock()
+	call.err = err
+	if a.refreshing == call {
+		a.refreshing = nil
+	}
+	close(call.done)
+	a.mu.Unlock()
+}
+
+func (a *Auth) refreshToken(ctx context.Context, cred Credential) (Credential, error) {
+	if cred.RefreshToken == "" {
+		return cred, &llm.Failure{Code: "no_refresh_token", Message: "凭证缺少 refreshToken，无法刷新，请重新登录", ClientFixable: true}
+	}
+	headers := a.cli.authHeaders(&cred, headerModeRefresh)
 	headers.Set("X-Auth-Refresh-Source", "plugin")
 
 	var resp struct {
@@ -303,45 +383,40 @@ func (a *Auth) refreshLocked() error {
 		Msg  string          `json:"msg"`
 		Data json.RawMessage `json:"data"`
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	if err := a.cli.doJSON(ctx, http.MethodPost, tokenRefreshPath, nil, headers, &resp); err != nil {
-		return err
+		return cred, err
 	}
 	if resp.Code != 0 {
-		return &llm.Failure{Code: fmt.Sprintf("upstream_%d", resp.Code), Message: "刷新 token 失败: " + resp.Msg}
+		return cred, &llm.Failure{Code: fmt.Sprintf("upstream_%d", resp.Code), Message: "刷新 token 失败: " + resp.Msg}
 	}
 	tok, err := unwrapToken(resp.Data)
 	if err != nil {
-		return err
+		return cred, err
 	}
 	if tok.AccessToken == "" {
-		return &llm.Failure{Code: "refresh_empty", Message: "刷新响应中没有 accessToken"}
+		return cred, &llm.Failure{Code: "refresh_empty", Message: "刷新响应中没有 accessToken"}
 	}
-	a.cred.AccessToken = tok.AccessToken
+	cred.AccessToken = tok.AccessToken
 	if tok.RefreshToken != "" {
-		a.cred.RefreshToken = tok.RefreshToken
+		cred.RefreshToken = tok.RefreshToken
 	}
 	if tok.ExpiresAt > 0 {
-		a.cred.ExpiresAt = tok.ExpiresAt
+		cred.ExpiresAt = tok.ExpiresAt
 	} else if tok.ExpiresIn > 0 {
-		a.cred.ExpiresAt = time.Now().UnixMilli() + tok.ExpiresIn*1000
+		cred.ExpiresAt = time.Now().UnixMilli() + tok.ExpiresIn*1000
 	}
 	if tok.Domain != "" {
-		a.cred.Domain = tok.Domain
+		cred.Domain = tok.Domain
 	}
 	if tok.TokenType != "" {
-		a.cred.TokenType = tok.TokenType
+		cred.TokenType = tok.TokenType
 	}
 	if tok.RefreshExpiresAt > 0 {
-		a.cred.RefreshExpAt = tok.RefreshExpiresAt
+		cred.RefreshExpAt = tok.RefreshExpiresAt
 	} else if tok.RefreshExpiresIn > 0 {
-		a.cred.RefreshExpAt = time.Now().UnixMilli() + tok.RefreshExpiresIn*1000
+		cred.RefreshExpAt = time.Now().UnixMilli() + tok.RefreshExpiresIn*1000
 	}
-	if err := a.persistLocked(); err != nil {
-		return &llm.Failure{Code: "credential_write_failed", Message: "刷新成功但凭证保存失败: " + err.Error(), Cause: err}
-	}
-	return nil
+	return cred, nil
 }
 
 // tokenPayload 是刷新/登录返回的 token 结构。
@@ -383,12 +458,12 @@ func unwrapToken(raw json.RawMessage) (tokenPayload, error) {
 	return tok, nil
 }
 
-// persistLocked 把刷新后的凭证回写磁盘（尽力而为，失败不影响内存态）。
-func (a *Auth) persistLocked() error {
-	return a.persistLockedUsing(localCredentialKey)
+// Callers hold commitMu while saving an immutable credential snapshot.
+func (a *Auth) persistCredential(cred *Credential) error {
+	return a.persistCredentialUsing(cred, localCredentialKey)
 }
 
-func (a *Auth) persistLockedUsing(keyReader func(bool) ([]byte, error)) error {
+func (a *Auth) persistCredentialUsing(cred *Credential, keyReader func(bool) ([]byte, error)) error {
 	if a.credentialPath == "" {
 		return nil
 	}
@@ -416,7 +491,7 @@ func (a *Auth) persistLockedUsing(keyReader func(bool) ([]byte, error)) error {
 				return fmt.Errorf("不支持的凭证加密格式")
 			}
 			if key == nil {
-				key, err = keyReader(globalDomain(a.cred.Domain))
+				key, err = keyReader(globalDomain(cred.Domain))
 				if err != nil {
 					return err
 				}
@@ -431,15 +506,15 @@ func (a *Auth) persistLockedUsing(keyReader func(bool) ([]byte, error)) error {
 		}
 		return nil
 	}
-	for field, value := range map[string]string{"accessToken": a.cred.AccessToken, "refreshToken": a.cred.RefreshToken} {
+	for field, value := range map[string]string{"accessToken": cred.AccessToken, "refreshToken": cred.RefreshToken} {
 		if err := setString(authObj, field, value); err != nil {
 			return err
 		}
 	}
-	authObj["expiresAt"] = a.cred.ExpiresAt
-	authObj["domain"] = a.cred.Domain
-	authObj["tokenType"] = a.cred.TokenType
-	authObj["refreshExpiresAt"] = a.cred.RefreshExpAt
+	authObj["expiresAt"] = cred.ExpiresAt
+	authObj["domain"] = cred.Domain
+	authObj["tokenType"] = cred.TokenType
+	authObj["refreshExpiresAt"] = cred.RefreshExpAt
 	authObj["lastRefreshTime"] = time.Now().UnixMilli()
 	if !flat {
 		doc["auth"] = authObj
@@ -447,14 +522,14 @@ func (a *Auth) persistLockedUsing(keyReader func(bool) ([]byte, error)) error {
 		if account == nil {
 			account = map[string]any{}
 		}
-		for field, value := range map[string]string{"uid": a.cred.UID, "nickname": a.cred.Nickname, "enterpriseId": a.cred.EnterpriseID, "departmentInfo": a.cred.DepartmentInfo} {
+		for field, value := range map[string]string{"uid": cred.UID, "nickname": cred.Nickname, "enterpriseId": cred.EnterpriseID, "departmentInfo": cred.DepartmentInfo} {
 			if err := setString(account, field, value); err != nil {
 				return err
 			}
 		}
 		doc["account"] = account
 	}
-	doc["machineId"] = a.cred.MachineID
+	doc["machineId"] = cred.MachineID
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err

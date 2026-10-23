@@ -1,6 +1,69 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, modelAvailability, loadResources, pageSnapshotTime } from "../internal/web/static/resources.js";
+import { refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, modelAvailability, loadResources, createResourceLoader, pageSnapshotTime } from "../internal/web/static/resources.js";
+
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+
+test("resource reads are shared while a manual refresh supersedes stale results and errors", async () => {
+  const old = deferred(), fresh = deferred(), calls = [], shown = [], failed = [], settled = [];
+  const loader = createResourceLoader({
+    request: (key, signal) => { calls.push({ key, signal }); return calls.length === 1 ? old.promise : fresh.promise; },
+    success: (key, value) => shown.push([key, value]), failure: (key, error) => failed.push([key, error]), settled: key => settled.push(key),
+  });
+  const first = loader.load(["models"]), duplicate = loader.load(["models", "models"]);
+  assert.equal(calls.length, 1);
+  const replacement = loader.load(["models"], { replace: true });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].signal.aborted, true);
+  fresh.resolve({ revision: 2, status: "paid" });
+  await replacement;
+  old.resolve({ revision: 1, status: "free" });
+  await Promise.all([first, duplicate]);
+  assert.deepEqual(shown, [["models", { revision: 2, status: "paid" }]]);
+  assert.deepEqual(settled, ["models"]);
+  assert.deepEqual(failed, []);
+});
+
+test("canceling old authorization does not publish a late 401 or clear the new request's busy state", async () => {
+  const old = deferred(), fresh = deferred(), failed = [], settled = [], signals = [];
+  let calls = 0;
+  const loader = createResourceLoader({
+    request: (_, signal) => { signals.push(signal); return calls++ ? fresh.promise : old.promise; },
+    success: () => {}, failure: (_, error) => failed.push(error), settled: key => settled.push(key),
+  });
+  const first = loader.load(["accounts"]);
+  loader.cancel();
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(settled, ["accounts"]);
+  const second = loader.load(["accounts"]);
+  old.reject(Object.assign(new Error("obsolete key"), { status: 401 }));
+  await first;
+  assert.deepEqual(failed, []);
+  assert.deepEqual(settled, ["accounts"]);
+  fresh.resolve({ revision: 2 });
+  await second;
+  assert.deepEqual(settled, ["accounts", "accounts"]);
+});
+
+test("fresh rate verification uses the same resource slot and independent resources finish immediately", async () => {
+  const old = deferred(), fresh = deferred(), shown = [], errors = [];
+  const loader = createResourceLoader({
+    request: key => key === "models" ? old.promise : Promise.resolve({ total: 42 }),
+    success: (key, data) => shown.push([key, data]), failure: (_, error) => errors.push(error), settled: () => {},
+  });
+  const original = loader.load(["models", "metrics"]);
+  const verified = loader.load(["models"], { replace: true, request: () => fresh.promise, success: (key, data) => shown.push([key, { ...data, verified: true }]) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(shown, [["metrics", { total: 42 }]]);
+  old.reject(new Error("old request canceled"));
+  await original;
+  assert.deepEqual(errors, []);
+  fresh.resolve({ revision: 2 });
+  await verified;
+  assert.deepEqual(shown[1], ["models", { revision: 2, verified: true }]);
+  await loader.load(["metrics"], { replace: true, request: async () => { throw new Error("current failure"); } });
+  assert.equal(errors[0].message, "current failure");
+});
 
 test("Matrix refresh and retry include account states; background polling refreshes the displayed matrix", () => {
   assert.deepEqual(refreshResources("models", true), ["models", "accounts", "matrix"]);

@@ -16,7 +16,7 @@ import { renderClientSetup, clientModelHasBudget, selectedClientPlatforms, clien
 import { renderAccountBenefits, renderCheckinOverview, accountBenefitEndpoint } from "./account-benefits.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage, requestOutcome } from "./monitor.js";
 import { mergePricingSnapshot, modelPricing, pricingCategory, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
-import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
+import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, createResourceLoader, modelAvailability } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 import { cachedUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
 import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageDayView, usageWeekView } from "./usage-view.js";
@@ -269,7 +269,7 @@ async function copy(value) {
 function authHeaders() {
   return s.key ? { Authorization: `Bearer ${s.key}` } : {};
 }
-async function api(path, body, extraHeaders = {}) {
+async function api(path, body, extraHeaders = {}, signal) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -278,11 +278,10 @@ async function api(path, body, extraHeaders = {}) {
       ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
     cache: "no-store",
   });
   if (!response.ok) {
-    if (response.status === 401) s.authRequired = true;
     const error = new Error(await responseError(response, s.lang));
     error.status = response.status;
     throw error;
@@ -316,50 +315,63 @@ function renderResources() {
   $("refreshButton").classList.toggle("refreshing", s.busy.size > 0 || s.rateSync.busy);
   chrome();
   draw();
-  if (s.page === "analytics") refreshLive(!s.live.data);
+  if (s.page === "analytics" && !s.live.busy) refreshLive(!s.live.data);
 }
-async function readResource(key, fresh = false) {
-  const data = await api(endpoints[key] + (key === "models" && fresh ? "?refresh=1" : ""));
+async function readResource(key, fresh = false, signal) {
+  const data = await api(endpoints[key] + (key === "models" && fresh ? "?refresh=1" : ""), undefined, {}, signal);
   if (key === "models" && Array.isArray(data.models) && data.models.length > 0 && data.models.every(m => !Object.hasOwn(m, "pricing"))) {
     try {
-      const snapshot = await fetch("/static/_model-pricing.json", { cache: "no-store", signal: AbortSignal.timeout(3000) });
+      const snapshot = await fetch("/static/_model-pricing.json", { cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) });
       if (snapshot.ok) { data.models = mergePricingSnapshot(data.models, await snapshot.json()); data.pricing_snapshot = true; }
     } catch {}
   }
   return data;
 }
+const resourceLoader = createResourceLoader({
+  request: (key, signal) => readResource(key, false, signal),
+  started: key => s.busy.add(key),
+  success: (key, data) => publishResource(key, data),
+  failure: (key, error) => { s.errors[key] = error; },
+  settled: key => { s.busy.delete(key); renderResources(); },
+});
 async function syncRates(manual = false) {
   if (s.rateSync.busy || !rateRefreshDue(s.rateSync.lastAttempt, Date.now(), manual)) return;
-  s.rateSync.busy = true;
-  s.rateSync.lastAttempt = Date.now();
+  const rateSync = s.rateSync;
+  rateSync.busy = true;
+  rateSync.lastAttempt = Date.now();
   try {
-    const result = await api("/api/config", { refresh_models: true });
-    if (!(result.applied?.refresh_models > 0)) throw new Error(L("当前后端不支持费率更新。", "This backend does not support rate updates."));
-    publishResource("models", await readResource("models", true), true);
-  } catch (error) {
-    s.errors.models = error;
-    s.rateSync.error = error.message;
-    if (s.cache.models) s.cache.models = { ...s.cache.models, models: models().map(m => ({ ...m, pricing_sync_failed: true })) };
+    await resourceLoader.load(["models"], {
+      replace: true,
+      request: async (_, signal) => {
+        const result = await api("/api/config", { refresh_models: true }, {}, signal);
+        if (!(result.applied?.refresh_models > 0)) throw new Error(L("当前后端不支持费率更新。", "This backend does not support rate updates."));
+        return readResource("models", true, signal);
+      },
+      success: (key, data) => publishResource(key, data, true),
+      failure: (key, error) => {
+        s.errors[key] = error;
+        s.rateSync.error = error.message;
+        if (s.cache.models) s.cache.models = { ...s.cache.models, models: models().map(m => ({ ...m, pricing_sync_failed: true })) };
+      },
+    });
   } finally {
     // 费率检查会使适配器缓存失效，完成后同步连接状态，避免保留检查中的旧快照。
-    if (!s.authRequired) await refresh(["accounts", "platforms"]);
-    s.rateSync.busy = false;
-    renderResources();
+    if (s.rateSync === rateSync) {
+      if (!s.authRequired) await refresh(["accounts", "platforms"], false, true);
+      if (s.rateSync === rateSync) {
+        rateSync.busy = false;
+        renderResources();
+      }
+    }
   }
 }
-async function refresh(keys = currentResources(), manual = false) {
+async function refresh(keys = currentResources(), manual = false, replace = manual) {
   const checkRates = rateRefreshDue(s.rateSync.lastAttempt, Date.now(), manual);
   if (checkRates) keys = [...keys, "models"];
-  const needed = [...new Set(["status", ...keys])].filter(key => !s.busy.has(key) && !(key === "models" && s.rateSync.busy));
+  const needed = [...new Set(["status", ...keys])].filter(key => !(key === "models" && s.rateSync.busy));
   if (!needed.length) return;
   s.lastPoll = Date.now();
-  needed.forEach(key => s.busy.add(key));
-  await loadResources(needed, {
-    request: key => readResource(key),
-    success: (key, data) => publishResource(key, data),
-    failure: (key, error) => { s.errors[key] = error; },
-    settled: key => { s.busy.delete(key); renderResources(); },
-  });
+  await resourceLoader.load(needed, { replace });
   if (checkRates && !s.busy.has("models")) await syncRates(manual);
 }
 
@@ -461,6 +473,7 @@ function renderPricingNotice() {
 function navigate() {
   const page = location.hash.slice(1);
   s.page = Object.hasOwn(names, page) ? page : "overview";
+  if (s.page !== "analytics") liveLoader.cancel();
   $("sidebar").classList.remove("open");
   $("menuButton").setAttribute("aria-expanded", "false");
   chrome();
@@ -468,6 +481,7 @@ function navigate() {
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
   refresh(currentResources());
+  if (s.page === "analytics") refreshLive(true);
 }
 function draw(force = false) {
   if (s.page === "chat" && !force && $("chatMessages")) {
@@ -722,7 +736,7 @@ async function syncZCode() {
   draw();
   try {
     s.zcodeSync.result = await api("/api/clients/zcode", {}, { "X-Agent2API-Local-Action": "zcode-sync" });
-    await refresh(["zcode", "models", "accounts", "platforms"]);
+    await refresh(["zcode", "models", "accounts", "platforms"], false, true);
   } catch (error) {
     s.zcodeSync.error = error.message;
   } finally {
@@ -747,7 +761,7 @@ async function syncClient(client) {
     throw error;
   } finally {
     state.busy = false;
-    await refresh([client, "models", "accounts", "platforms"]);
+    await refresh([client, "models", "accounts", "platforms"], false, true);
     draw();
   }
 }
@@ -1335,7 +1349,11 @@ async function saveAuth(event) {
   s.key = newKey;
   $("authSave").disabled = true;
   try {
-    s.cache.status = await api("/api/status");
+    const status = await api("/api/status");
+    s.rateSync = { ...s.rateSync, busy: false, lastAttempt: 0 };
+    liveLoader.cancel();
+    resourceLoader.cancel();
+    publishResource("status", status);
     s.authRequired = false;
     save("agent2api_key", newKey);
     $("modal").close();
@@ -1343,7 +1361,7 @@ async function saveAuth(event) {
     toast(L("连接已验证", "Connection verified"));
     await refresh([
       ...new Set([...pageKeys[s.page], "models", "accounts", "config"]),
-    ]);
+    ], false, true);
     await syncRates(true);
   } catch (error) {
     s.key = old;
@@ -1367,21 +1385,21 @@ async function checkinAction(claim, target) {
     await api(accountBenefitEndpoint("checkin",target.dataset,!claim), claim ? { action: "claim" } : undefined);
     toast(L("签到状态已更新", "Check-in status updated"));
   } catch (error) { toast(error.message, true); }
-  finally { await refresh(["accounts"]); if (reopen && $("detailDialog").open) { const index = accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label); if(index>=0) showAccountDetail(index); } if (target.isConnected) target.disabled = false; }
+  finally { await refresh(["accounts"], false, true); if (reopen && $("detailDialog").open) { const index = accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label); if(index>=0) showAccountDetail(index); } if (target.isConnected) target.disabled = false; }
 }
 async function refreshAccountBenefits(target) {
   const reopen = !!target.closest("#detailDialog");
   target.disabled = true;
   try { await api(accountBenefitEndpoint("benefits",target.dataset,true)); toast(L("积分与额度已更新", "Credits and allowances updated")); }
   catch (error) { toast(error.message,true); }
-  finally { await refresh(["accounts"]); if(reopen && $("detailDialog").open) {const index=accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label);if(index>=0)showAccountDetail(index);} if(target.isConnected) target.disabled=false; }
+  finally { await refresh(["accounts"], false, true); if(reopen && $("detailDialog").open) {const index=accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label);if(index>=0)showAccountDetail(index);} if(target.isConnected) target.disabled=false; }
 }
 async function saveCheckinSettings(form) {
   const submit = form.querySelector('[type="submit"]'), status = $("checkinConfigStatus"), data = new FormData(form);
   submit.disabled = true;
   try {
     await api(accountBenefitEndpoint("checkin",form.dataset), { action: "configure", enabled: data.has("enabled"), time: data.get("time") });
-    $("modal").close(); await refresh(["accounts"]); toast(L("自动签到设置已保存", "Automatic check-in settings saved"));
+    $("modal").close(); await refresh(["accounts"], false, true); toast(L("自动签到设置已保存", "Automatic check-in settings saved"));
   } catch (error) { status.textContent = error.message; status.className = "login-status negative"; }
   finally { submit.disabled = false; }
 }
@@ -1435,10 +1453,10 @@ async function connectPlatform(platform, action, key = "") {
       status.className = "login-status positive";
       status.textContent = L(`连接已确认，可用模型 ${result.model_count} 个。`, `Connection verified; ${result.model_count} models available.`);
     }
-    await refresh(["accounts", "models", "platforms"]);
+    await refresh(["accounts", "models", "platforms"], false, true);
   } catch (error) {
     if (form.isConnected) { status.className = "login-status negative"; status.textContent = error.message; }
-    await refresh(["accounts", "platforms"]);
+    await refresh(["accounts", "platforms"], false, true);
   } finally {
     key = "";
     const field = form.querySelector('[name="apiKey"]');
@@ -1510,9 +1528,9 @@ async function startLogin(platform, name = "", provider = "google") {
           $("loginStatus").className = "login-status negative";
         }
       }
-      await refresh(["models", "platforms"]);
+      await refresh(["models", "platforms"], false, true);
     }
-    await refresh(["accounts"]);
+    await refresh(["accounts"], false, true);
     setTimeout(() => {
       if (alive()) refresh(["accounts"]);
     }, 11000);
@@ -1616,6 +1634,7 @@ async function sendChat(event) {
   }
   const start = performance.now(),
     model = s.chat.model,
+    requestKey = s.key,
     params = { ...s.chat.params };
   s.chat.messages.push({ role: "user", content: s.chat.draft.trim() });
   s.chat.draft = "";
@@ -1667,7 +1686,7 @@ async function sendChat(event) {
       signal: controller.signal,
     });
     if (!response.ok) {
-      if (response.status === 401) s.authRequired = true;
+      if (response.status === 401 && requestKey === s.key) s.authRequired = true;
       throw new Error(await responseError(response, s.lang));
     }
     let completed = false;
@@ -2093,7 +2112,7 @@ document.addEventListener("click", async (event) => {
           { label },
         );
         $("detailDialog").close();
-        await refresh(["accounts"]);
+        await refresh(["accounts"], false, true);
         toast(L("账号状态已更新", "Account state updated"));
         return;
       case "copy-login":
@@ -2239,7 +2258,7 @@ document.addEventListener("change", async (event) => {
         `/api/config?platform=${encodeURIComponent(target.dataset.sanitize)}`,
         { sanitize: target.checked },
       );
-      await refresh(["config"]);
+      await refresh(["config"], false, true);
       toast(L("兼容设置已更新", "Setting updated"));
     } catch (error) {
       target.checked = !target.checked;
@@ -2341,29 +2360,39 @@ $("refreshButton").addEventListener("click", () => {refresh(currentResources(), 
 $("copyEndpoint").addEventListener("click", () => copy(`${gatewayURL()}/v1`));
 window.addEventListener("hashchange", navigate);
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden) liveLoader.cancel();
   if (!document.hidden) {
     chrome();
     draw();
     refresh(s.page === "chat" ? ["status"] : currentResources());
   }
 });
+const liveLoader = createResourceLoader({
+  request: (_, signal) => api("/api/live", undefined, {}, signal),
+  started: () => { s.live.busy = true; },
+  success: (_, data) => {
+    s.live.data = data;
+    s.live.points = sampleLive(s.live.points, data);
+    s.live.error = "";
+    s.live.receivedAt = Date.now();
+  },
+  failure: (_, error) => { s.live.error = error.status === 404 ? L("实时监控需要新版后端。", "Live monitoring requires an updated backend.") : L("实时监控暂时无法更新：", "Live monitoring unavailable: ") + error.message; },
+  settled: () => { s.live.busy = false; renderLive(); },
+});
 async function refreshLive(force=false) {
-  if(s.page!=="analytics"||s.live.busy||document.hidden||$("modal").open||$("detailDialog").open||(!force&&!s.refreshEvery))return;
+  if(s.page!=="analytics"||(!force&&s.live.busy)||document.hidden||$("modal").open||$("detailDialog").open||(!force&&!s.refreshEvery))return;
   if(!force&&Date.now()-s.live.lastAttempt<(s.live.error?5000:900))return;
-  s.live.busy=true;s.live.lastAttempt=Date.now();
-  try {
-    const data=await api("/api/live");s.live.data=data;s.live.points=sampleLive(s.live.points,data);s.live.error="";s.live.receivedAt=Date.now();
-  }catch(error){s.live.error=error.status===404?L("实时监控需要新版后端。", "Live monitoring requires an updated backend."):L("实时监控暂时无法更新：", "Live monitoring unavailable: ")+error.message;}
-  finally {
-    s.live.busy = false;
-    const body = $("liveUsageBody");
-    if (body) {
-      const expanded = $("liveRequestDetails")?.open;
-      const focused = document.activeElement?.id === "liveRequestToggle";
-      body.innerHTML = liveUsageView(s.live.data,s.live.error,s.live.points,liveUI());
-      if ($("liveRequestDetails")) $("liveRequestDetails").open = !!expanded;
-      if (focused) $("liveRequestToggle")?.focus({preventScroll:true});
-    }
+  s.live.lastAttempt=Date.now();
+  await liveLoader.load(["live"], { replace: force });
+}
+function renderLive() {
+  const body = $("liveUsageBody");
+  if (body) {
+    const expanded = $("liveRequestDetails")?.open;
+    const focused = document.activeElement?.id === "liveRequestToggle";
+    body.innerHTML = liveUsageView(s.live.data,s.live.error,s.live.points,liveUI());
+    if ($("liveRequestDetails")) $("liveRequestDetails").open = !!expanded;
+    if (focused) $("liveRequestToggle")?.focus({preventScroll:true});
   }
 }
 function liveUI() {

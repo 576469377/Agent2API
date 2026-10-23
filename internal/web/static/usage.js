@@ -1,4 +1,5 @@
 import { allocateHistory } from "./usage-allocation.js";
+import { hasTokenUsage } from "./monitor.js";
 // UTC calendar aggregates, separate from the latest-200 request log.
 export const DAY = 86400000;
 export const palette = ["#438ff4", "#2a9c75", "#9b78ec", "#cf7a3c", "#d95e7b", "#288da8", "#a3822c", "#798cae"];
@@ -19,7 +20,8 @@ function sourceHistory(metrics, now) {
     if (!Number.isFinite(ms)) continue;
     const date = dateKey(ms), rows = days.get(date) || [];
     rows.push({ platform: r.platform || "", model: r.model || "", total: 1,
-      ok: r.ok ? 1 : 0, failed: r.ok ? 0 : 1, input_tokens: r.input_tokens, output_tokens: r.output_tokens, duration_sum: r.duration_ms });
+      ok: r.ok ? 1 : 0, failed: r.ok ? 0 : 1, input_tokens: r.input_tokens, output_tokens: r.output_tokens,
+      unknown_token_requests: hasTokenUsage(r) ? 0 : 1, duration_sum: r.duration_ms });
     days.set(date, rows);
   }
   return { timezone: "UTC", tracking_since: new Date(now).toISOString(), legacy_requests: metrics?.total || 0,
@@ -96,7 +98,14 @@ export function cachedUsage(metrics, options = {}) {
 }
 
 // Top models plus an explicit remainder keep the curve totals accountable.
+const curveSnapshots = new WeakMap();
 export function curveSeries(usage, metric = "tokens", hidden = new Set()) {
+  let cached = curveSnapshots.get(usage);
+  if (!cached) { cached = new Map(); curveSnapshots.set(usage, cached); }
+  if (!cached.has(metric)) cached.set(metric, buildCurveSeries(usage, metric));
+  return cached.get(metric).map(model => ({ ...model, hidden: hidden.has(model.key) }));
+}
+function buildCurveSeries(usage, metric) {
   const ranked = [...usage.models].sort((a, b) => b[metric] - a[metric] || a.key.localeCompare(b.key));
   const top = ranked.slice(0, 6), tail = new Set(ranked.slice(6).map((m) => m.key));
   const models = [...top, ...(tail.size ? [{ key: "other", model: "other", platform: "", color: "#8493a7" }] : [])];
@@ -107,7 +116,7 @@ export function curveSeries(usage, metric = "tokens", hidden = new Set()) {
       const missingTokens = rows.some(row => row.unknown_token_requests > 0);
       return { value: day.coverage === "unknown" || metric === "tokens" && value === 0 && missingTokens ? null : value, missingTokens };
     });
-    return { ...model, hidden: hidden.has(model.key), values: points.map(point => point.value), missingTokens: points.map(point => point.missingTokens) };
+    return { ...model, values: points.map(point => point.value), missingTokens: points.map(point => point.missingTokens) };
   });
 }
 // Monotone cubic interpolation: no negative/overshooting invented peaks.

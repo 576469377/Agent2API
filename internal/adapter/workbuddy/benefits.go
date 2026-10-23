@@ -15,7 +15,10 @@ func (a *Adapter) AccountBenefits() adapter.AccountBenefits {
 	return a.benefits.Snapshot(a.AccountUID())
 }
 func (a *Adapter) benefitRequest(ctx context.Context, path string, out any) error {
-	if err := a.auth.EnsureValid(); err != nil {
+	if err := a.auth.EnsureValid(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("WorkBuddy 登录状态需要更新")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

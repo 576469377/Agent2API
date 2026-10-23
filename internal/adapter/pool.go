@@ -701,45 +701,24 @@ func (a *poolAccount) markFailure() {
 // 随机源使用 math/rand/v2；选号不要求密码学强度。
 // 调用方必须持有 p.mu。
 func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]bool) (int, *poolAccount) {
-	n := len(p.accounts)
-	if n == 0 {
-		return -1, nil
-	}
-	// 收集候选与权重（权重下限保证「很差但可用」的账号仍有机会）。
-	type cand struct {
-		idx    int
-		acc    *poolAccount
-		weight float64
-	}
-	cands := make([]cand, 0, n)
+	// 在锁内直接扫描权重，不为每次选号构建两份候选切片。
+	// 有空闲账号时只在空闲集合抽样；全部满载时由 reserve 排队。
+	total, freeTotal := 0.0, 0.0
 	for i, acc := range p.accounts {
 		if tried[i] || !acc.available(now, model) {
 			continue
 		}
-		w := acc.healthScore()
-		if w < 0.05 {
-			w = 0.05 // 下限：不被完全饿死，否则永远拿不到新样本
+		weight := max(acc.healthScore(), 0.05)
+		total += weight
+		if acc.hasCapacity() {
+			freeTotal += weight
 		}
-		cands = append(cands, cand{idx: i, acc: acc, weight: w})
 	}
-	if len(cands) == 0 {
+	if total == 0 {
 		return -1, nil
 	}
-	// 有余量的账号优先：并发已满的账号不该再被选中，除非所有候选都满了
-	//（那时选中即会等待槽位——是排队，不是失败，见 acquireSlot）。
-	// 先过滤再算权重总和，保证加权随机只在真正的候选集上做。
-	free := make([]cand, 0, len(cands))
-	for _, c := range cands {
-		if c.acc.hasCapacity() {
-			free = append(free, c)
-		}
-	}
-	if len(free) > 0 {
-		cands = free
-	}
-	total := 0.0
-	for _, c := range cands {
-		total += c.weight
+	if freeTotal > 0 {
+		total = freeTotal
 	}
 	// 加权随机。
 	//
@@ -747,14 +726,18 @@ func (p *Pool) pickByHealthLocked(now time.Time, model string, tried map[int]boo
 	// 精度约 1 微秒，同一微秒内的连续调用会读到完全相同的值——高并发下
 	// 等于确定性选择，所有请求砸向同一个账号（实测 hits=[0 6]）。
 	r := rand.Float64() * total
-	acc := 0.0
-	for _, c := range cands {
-		acc += c.weight
-		if r <= acc {
-			return c.idx, c.acc
+	last, cumulative := -1, 0.0
+	for i, acc := range p.accounts {
+		if tried[i] || !acc.available(now, model) || (freeTotal > 0 && !acc.hasCapacity()) {
+			continue
+		}
+		last = i
+		cumulative += max(acc.healthScore(), 0.05)
+		if r <= cumulative {
+			return i, acc
 		}
 	}
-	return cands[len(cands)-1].idx, cands[len(cands)-1].acc
+	return last, p.accounts[last]
 }
 
 // upstreamCooldown 返回上游明确给出的冷却时长；上游没说（RetryAfterSeconds<=0）

@@ -198,3 +198,40 @@ func TestChangingConcurrencyKeepsExistingLeasesCounted(t *testing.T) {
 		t.Fatal("old semaphore lease leaked after reconfiguration")
 	}
 }
+
+func TestQueuedRequestWakesWhenAnotherAccountCooldownExpires(t *testing.T) {
+	p := queueTestPool(t)
+	_, _, release, err := p.reserve(context.Background(), "m", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	p.cooldownModel(p.accounts[1], "m", time.Hour, "test reset")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		stream, err := p.Stream(ctx, llm.RequestMessages{Model: "m"})
+		if err == nil {
+			if AccountOf(stream) != "second" {
+				err = errors.New("used the still-full account")
+			}
+			closeStream(stream)
+		}
+		done <- err
+	}()
+	waitForQueued(t, p, 1)
+	// Publish a nearby known reset after the caller has entered the queue.
+	p.mu.Lock()
+	p.accounts[1].modelCooldown["m"] = time.Now().Add(40 * time.Millisecond)
+	p.notifyLocked()
+	p.mu.Unlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("idle account recovered but request still timed out: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queue did not notice the cooldown expiring without another release")
+	}
+}

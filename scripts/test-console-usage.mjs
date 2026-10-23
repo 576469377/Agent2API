@@ -40,6 +40,25 @@ test("calendar totals use durable days, preserve regional identity and never use
  assert.equal(usage.days[2].tokens,0);assert.equal(usage.activeDays,1);
  assert.equal(usage.peak.date,"2026-10-10");
 });
+
+test("curve points are reused across hovers and visibility changes without sharing new snapshots or metrics",()=>{
+ const usage=buildUsage(fixture,state), first=curveSeries(usage,"tokens");
+ const hidden=new Set([first[0].key]), changed=curveSeries(usage,"tokens",hidden);
+ assert.equal(changed[0].hidden,true);assert.equal(first[0].hidden,false);
+ assert.equal(changed[0].values,first[0].values);
+ assert.equal(changed[0].missingTokens,first[0].missingTokens);
+ hidden.clear();
+ assert.equal(curveSeries(usage,"tokens",hidden)[0].hidden,false);
+ const calls=curveSeries(usage,"total");
+ assert.equal(calls.reduce((sum,m)=>sum+m.values.reduce((n,v)=>n+(v||0),0),0),usage.total);
+ assert.notEqual(calls[0].values,first[0].values);
+ const updated=structuredClone(fixture);
+ updated.usage_history.days.at(-1).models[0].input_tokens=500;
+ const newer=buildUsage(updated,state), newerCurves=curveSeries(newer,"tokens");
+ assert.equal(newerCurves.reduce((sum,m)=>sum+m.values.reduce((n,v)=>n+(v||0),0),0),newer.tokens);
+ assert.notEqual(newerCurves[0].values,first[0].values);
+ assert.equal(first.reduce((sum,m)=>sum+m.values.reduce((n,v)=>n+(v||0),0),0),usage.tokens);
+});
 test("missing legacy dates are unknown rather than zero; a partial sample is explicitly identified",()=>{
  const usage=buildUsage(fixture,{...state,range:"30"});
  assert.equal(usage.days.length,30);
@@ -50,6 +69,18 @@ test("missing legacy dates are unknown rather than zero; a partial sample is exp
  assert.equal(legacy.tokens,12);assert.equal(legacy.preview,true);
  assert.equal(legacy.days.at(-1).coverage,"partial");
  assert.equal(legacy.days.at(-2).coverage,"unknown");
+});
+
+test("legacy request previews keep missing usage distinct from an explicitly reported zero",()=>{
+ const metrics={total:2,recent:[
+  {time:new Date(now).toISOString(),platform:"kiro",model:"unknown",ok:true},
+  {time:new Date(now).toISOString(),platform:"workbuddy",model:"zero",ok:true,usage_reported:true},
+ ]};
+ const usage=buildUsage(metrics,{...state,allocation:{enabled:false}}),curves=curveSeries(usage);
+ assert.equal(usage.unknown_token_requests,1);
+ assert.equal(curves.find(model=>model.platform==="kiro").values.at(-1),null);
+ assert.equal(curves.find(model=>model.platform==="workbuddy").values.at(-1),0);
+ assert.equal(usage.total,2);assert.equal(usage.tokens,0);
 });
 test("top curves include the remainder and preserve all daily usage with stable model colors",()=>{
  const models=Array.from({length:9},(_,i)=>row("p","m"+i,(i+1)*10));

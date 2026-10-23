@@ -140,3 +140,52 @@ func TestDamagedRecoveryDoesNotLoseTheNextValidRecovery(t *testing.T) {
 		t.Fatal("second restart lost recovery data")
 	}
 }
+
+func TestMissingBaseRecoveryStillLoadsNewestValidRecovery(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "metrics.json")
+	if err := os.WriteFile(primary, []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	logger := log.New(io.Discard, "", 0)
+	first := primary + ".recovery-20260101T000000.000000000"
+	latest := primary + ".recovery-20260102T000000.000000000"
+	m := obs.New()
+	m.Record(obs.Record{Time: time.Now(), Model: "old", OK: true, InputTokens: 3})
+	if err := m.Save(first); err != nil {
+		t.Fatal(err)
+	}
+	m.Record(obs.Record{Time: time.Now(), Model: "new", OK: true, InputTokens: 7})
+	if err := m.Save(latest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(primary+".recovery-20260103T000000.000000000", []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored := obs.New()
+	chosen, storage := loadMetricsStorage(restored, primary, logger)
+	s := restored.Snapshot()
+	if chosen != latest || storage.state.LoadedFrom != latest || s.Total != 2 || s.InputTokens != 10 {
+		t.Fatalf("missing base recovery hid valid historical usage: path=%s total=%d tokens=%d", chosen, s.Total, s.InputTokens)
+	}
+}
+
+func TestNullMetricsUsesRecoveryWithoutReplacingSource(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "metrics.json")
+	if err := os.WriteFile(primary, []byte("null"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	logger := log.New(io.Discard, "", 0)
+	m := obs.New()
+	m.Record(obs.Record{Time: time.Now(), Model: "kept", OK: true, InputTokens: 20})
+	if err := m.Save(primary + ".recovery"); err != nil {
+		t.Fatal(err)
+	}
+	restored := obs.New()
+	chosen, storage := loadMetricsStorage(restored, primary, logger)
+	if chosen != primary+".recovery" || storage.state.Status != "recovery" || restored.Snapshot().InputTokens != 20 {
+		t.Fatal("JSON null was accepted as an empty snapshot instead of loading recovery")
+	}
+	if raw, err := os.ReadFile(primary); err != nil || string(raw) != "null" {
+		t.Fatal("unreadable source changed")
+	}
+}

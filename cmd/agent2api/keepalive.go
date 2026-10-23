@@ -15,7 +15,7 @@ import (
 // 才发现 refreshToken 也可能已经过期 —— 用户看到的是「这个号怎么突然失效了」，
 // 而它本可以在后台悄悄保持可用。
 //
-// 机制：每 keepaliveInterval 遍历所有账号调 EnsureValid()。
+// 机制：每 keepaliveInterval 遍历所有账号调 EnsureValid(ctx)。
 // EnsureValid 内部只在「即将过期」时才真正刷新，不会白打上游；
 // 且自带锁，与并发请求安全共存。
 
@@ -25,33 +25,39 @@ const keepaliveInterval = 15 * time.Minute
 
 // startKeepalive 启动保活 goroutine。
 func startKeepalive(ctx context.Context, hub *app.Hub, logger *log.Logger) {
-	go runPeriodic(ctx, keepaliveInterval, func() { refreshExpiring(hub, logger) })
+	go runPeriodic(ctx, keepaliveInterval, func() { refreshExpiring(ctx, hub, logger) })
 }
 
 // refreshExpiring 让所有「凭证即将过期」的账号刷新一次。
-func refreshExpiring(hub *app.Hub, logger *log.Logger) {
+func refreshExpiring(ctx context.Context, hub *app.Hub, logger *log.Logger) {
 	for _, rt := range hub.Platforms() {
 		pool := rt.Pool
 		if pool == nil {
 			continue
 		}
 		for _, st := range pool.Statuses() {
+			if ctx.Err() != nil {
+				return
+			}
 			if st.Adapter == nil {
 				continue
 			}
 			// 用可选接口：只有能自查凭证有效性的适配器才参与保活。
 			v, ok := st.Adapter.(interface {
-				EnsureValid() error
+				EnsureValid(context.Context) error
 			})
 			if !ok {
 				continue
 			}
-			if err := v.EnsureValid(); err != nil {
-				// 刷新失败不阻断：凭证可能仍可用（旧 token 未必失效）。
-				logger.Printf("保活刷新失败（账号 %s，不影响使用）: %v", st.Label, err)
+			if err := v.EnsureValid(ctx); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				// 单个账号失败后继续检查其余账号。
+				logger.Printf("凭证保活检查失败（账号 %s）: %v", st.Label, err)
 				continue
 			}
-			logger.Printf("已保活刷新凭证: %s", st.Label)
+			logger.Printf("凭证保活检查完成: %s", st.Label)
 		}
 	}
 }

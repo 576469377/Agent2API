@@ -109,7 +109,7 @@ func TestReloginPersistencePreservesEncryptedTokensAndAccountFields(t *testing.T
 		reads++
 		return bytes.Clone(key), nil
 	}
-	if err := auth.persistLockedUsing(reader); err != nil {
+	if err := auth.persistCredentialUsing(cred, reader); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := os.ReadFile(path)
