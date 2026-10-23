@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,72 @@ import (
 
 	"github.com/576469377/Agent2API/internal/obs"
 )
+
+func TestShutdownTimeoutCancelsAndPersistsTheFinalRequest(t *testing.T) {
+	metrics := obs.New()
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		id := metrics.BeginLive("test", now)
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+		<-release // Simulate the request's final accounting during cancellation.
+		metrics.Record(obs.Record{LiveID: id, Time: now, ErrorCode: "client_cancelled", InputTokens: 7, OutputTokens: 11})
+	})}
+	requests := newRequestDrain(server.Handler)
+	server.Handler = requests
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close(); close(release) })
+	go server.Serve(listener)
+	go func() {
+		if response, err := http.Get("http://" + listener.Addr().String()); err == nil {
+			response.Body.Close()
+		}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	saved := make(chan int64, 1)
+	go func() {
+		done <- shutdownAndPersist(ctx, server, requests, func() { saved <- metrics.Snapshot().Total })
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown timeout did not cancel the active request")
+	}
+	select {
+	case total := <-saved:
+		t.Fatalf("persisted before the cancelled request finished accounting: %d", total)
+	default:
+	}
+	release <- struct{}{}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("shutdown = %v, want original deadline error", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not complete after request accounting")
+	}
+	if total := <-saved; total != 1 {
+		t.Fatalf("final cancelled request missing: %d", total)
+	}
+	if snapshot := metrics.Snapshot(); snapshot.InputTokens != 7 || snapshot.OutputTokens != 11 {
+		t.Fatalf("partial tokens lost on shutdown: %+v", snapshot)
+	}
+}
 
 func TestShutdownPersistsTheRequestWhichFinishesDuringDrain(t *testing.T) {
 	metrics := obs.New()
@@ -25,6 +92,8 @@ func TestShutdownPersistsTheRequestWhichFinishesDuringDrain(t *testing.T) {
 		metrics.Record(obs.Record{LiveID: id, Time: now, OK: true, InputTokens: 2, OutputTokens: 3})
 		io.WriteString(w, "OK")
 	})}
+	requests := newRequestDrain(server.Handler)
+	server.Handler = requests
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +121,7 @@ func TestShutdownPersistsTheRequestWhichFinishesDuringDrain(t *testing.T) {
 	shutdownDone := make(chan error, 1)
 	saved := make(chan int64, 1)
 	go func() {
-		shutdownDone <- shutdownAndPersist(ctx, server, func() {
+		shutdownDone <- shutdownAndPersist(ctx, server, requests, func() {
 			saved <- metrics.Snapshot().Total
 			if err := metrics.Save(path); err != nil {
 				t.Error(err)

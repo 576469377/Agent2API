@@ -71,7 +71,7 @@ type Hub struct {
 	catalog        map[string][]adapter.ModelInfo
 	catalogStatus  map[string]CatalogStatus
 	catalogChecked time.Time
-	catalogFlight  chan struct{}
+	catalogFlights map[string]*catalogRefresh
 	// aliases 是模型别名表（见 aliases.go）：请求模型名 → 实际路由目标。
 	// 装配期由 SetAliases 装载，运行期只读。
 	aliases map[string]aliasTarget
@@ -89,11 +89,12 @@ func NewHub(runtimes []*PlatformRuntime, logger *log.Logger) (*Hub, error) {
 		logger = log.New(io.Discard, "", 0)
 	}
 	h := &Hub{
-		platforms:     map[string]*PlatformRuntime{},
-		index:         map[string]string{},
-		catalog:       map[string][]adapter.ModelInfo{},
-		catalogStatus: map[string]CatalogStatus{},
-		logger:        logger,
+		platforms:      map[string]*PlatformRuntime{},
+		index:          map[string]string{},
+		catalog:        map[string][]adapter.ModelInfo{},
+		catalogStatus:  map[string]CatalogStatus{},
+		catalogFlights: map[string]*catalogRefresh{},
+		logger:         logger,
 	}
 	for _, rt := range runtimes {
 		if rt == nil || rt.ID == "" || rt.Adapter == nil {
@@ -104,25 +105,6 @@ func NewHub(runtimes []*PlatformRuntime, logger *log.Logger) (*Hub, error) {
 		}
 		h.platforms[rt.ID] = rt
 		h.order = append(h.order, rt.ID)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		models, err := rt.Adapter.ListModels(ctx)
-		cancel()
-		if err != nil {
-			h.catalogStatus[rt.ID] = CatalogStatus{Platform: rt.ID, Status: "error", Error: err.Error()}
-			h.logger.Printf("平台 %s 模型枚举失败（不影响启动，稍后可刷新）: %v", rt.ID, err)
-			continue
-		}
-		h.catalog[rt.ID] = models
-		stamp := time.Now().UTC()
-		h.catalogStatus[rt.ID] = CatalogStatus{Platform: rt.ID, Status: "ready", ModelCount: len(models), UpdatedAt: &stamp}
-		for _, m := range models {
-			if owner, exists := h.index[m.ID]; exists {
-				h.logger.Printf("模型 %s 同时存在于 %s 与 %s，路由到先配置的 %s", m.ID, owner, rt.ID, owner)
-				continue
-			}
-			h.index[m.ID] = rt.ID
-		}
 	}
 	if len(h.platforms) == 0 {
 		return nil, &llm.Failure{
@@ -130,7 +112,17 @@ func NewHub(runtimes []*PlatformRuntime, logger *log.Logger) (*Hub, error) {
 			Message: "没有任何可用平台。请检查配置里的 upstream.platforms（或单平台字段）",
 		}
 	}
-	h.catalogChecked = time.Now()
+	// All configured platforms share one startup budget, so a slow catalogue
+	// does not delay discovery of every platform after it.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_ = h.refreshCatalog(ctx)
+	statuses, _ := h.CatalogStatuses()
+	for _, status := range statuses {
+		if status.Status == "error" {
+			h.logger.Printf("平台 %s 模型枚举失败（不影响启动，稍后可刷新）: %s", status.Platform, status.Error)
+		}
+	}
 	return h, nil
 }
 

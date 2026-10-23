@@ -2,11 +2,17 @@ package kiro
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
 	"time"
 )
+
+type rpcWriteFunc func([]byte) (int, error)
+
+func (f rpcWriteFunc) Write(p []byte) (int, error) { return f(p) }
+func (f rpcWriteFunc) Close() error                { return nil }
 
 func TestRPCCallCancellationInterruptsBlockedWrite(t *testing.T) {
 	reader, writer := io.Pipe()
@@ -102,5 +108,78 @@ func TestRPCCompletedWriteDetachesCancellation(t *testing.T) {
 	}
 	if connection.Err() != nil {
 		t.Fatal("a completed write left its cancellation hook attached")
+	}
+}
+
+func TestRPCUnreadableOutputTerminatesProcessAndPendingCalls(t *testing.T) {
+	for _, mode := range []string{"oversized", "closed"} {
+		t.Run(mode, func(t *testing.T) {
+			a := mockAdapter(t)
+			t.Setenv("AGENT2API_KIRO_OUTPUT_FAILURE", mode)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			c, err := startRPC(ctx, a.cfg.CLIPath, t.TempDir(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { cancel(); c.close() }()
+			result := make(chan error, 1)
+			go func() { result <- c.call(ctx, "initialize", map[string]any{}, nil) }()
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("RPC with an unreadable response channel succeeded")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("unreadable CLI output left an RPC waiting for the session timeout")
+			}
+			select {
+			case <-c.done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("CLI remained alive after its response channel stopped")
+			}
+			if ctx.Err() != nil {
+				t.Fatal("RPC only stopped when the caller timeout expired")
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if len(c.pending) != 0 {
+				t.Fatalf("closed CLI retained %d pending calls", len(c.pending))
+			}
+		})
+	}
+}
+
+func TestRPCPreservesReplyReceivedBeforeOutputCloses(t *testing.T) {
+	for _, state := range []string{"cancelled", "finished"} {
+		t.Run(state, func(t *testing.T) {
+			connection, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c := &rpcClient{ctx: connection, cancel: cancel, writeGate: make(chan struct{}, 1), pending: map[string]chan rpcReply{}, done: make(chan struct{})}
+			c.in = rpcWriteFunc(func(p []byte) (int, error) {
+				var request rpcFrame
+				if err := json.Unmarshal(p, &request); err != nil {
+					return 0, err
+				}
+				c.mu.Lock()
+				ch := c.pending[string(request.ID)]
+				delete(c.pending, string(request.ID))
+				c.mu.Unlock()
+				ch <- rpcReply{Result: json.RawMessage(`{"answer":"complete"}`)}
+				if state == "cancelled" {
+					cancel()
+				} else {
+					close(c.done)
+				}
+				return len(p), nil
+			})
+			var reply struct{ Answer string }
+			if err := c.call(context.Background(), "session/prompt", nil, &reply); err != nil {
+				t.Fatalf("complete reply lost on output closure: %v", err)
+			}
+			if reply.Answer != "complete" {
+				t.Fatalf("reply = %+v", reply)
+			}
+		})
 	}
 }

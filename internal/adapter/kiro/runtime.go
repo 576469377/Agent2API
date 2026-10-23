@@ -146,6 +146,10 @@ func startRPC(ctx context.Context, exe, cwd string, onNotify func(rpcFrame)) (*r
 				ch <- rpcReply{f.Result, e}
 			}
 		}
+		// EOF and scanner failures both end the only response channel. The CLI
+		// may still be waiting for stdin (or blocked writing an oversized frame),
+		// so terminate it before waiting instead of retaining the whole session.
+		c.cancel()
 		_ = c.cmd.Wait()
 		c.mu.Lock()
 		for key, ch := range c.pending {
@@ -213,25 +217,34 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 		}
 		return upstreamFailure("kiro_rpc_write", "Kiro CLI 连接不可写")
 	}
+	var reply rpcReply
 	select {
-	case r := <-ch:
-		if r.Err != nil {
-			return r.Err
-		}
-		if out != nil && json.Unmarshal(r.Result, out) != nil {
-			return upstreamFailure("kiro_rpc_invalid", "Kiro CLI 返回了无效的数据")
-		}
-		return nil
+	case reply = <-ch:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.ctx.Done():
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
+		select {
+		case reply = <-ch: // A complete reply may precede the final EOF.
+		default:
+			return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
+		}
 	case <-c.done:
-		return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
+		select {
+		case reply = <-ch:
+		default:
+			return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
+		}
 	}
+	if reply.Err != nil {
+		return reply.Err
+	}
+	if out != nil && json.Unmarshal(reply.Result, out) != nil {
+		return upstreamFailure("kiro_rpc_invalid", "Kiro CLI 返回了无效的数据")
+	}
+	return nil
 }
 func (c *rpcClient) close() {
 	c.closeOnce.Do(func() {

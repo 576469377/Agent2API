@@ -104,7 +104,7 @@ export async function responseError(response, language = "en") {
   }
 }
 
-// Reader handles split UTF-8 characters, CRLF split across network chunks,
+// Reader handles split UTF-8 characters, LF/CR/CRLF split across network chunks,
 // multi-line data and usage-only events. Cancel releases the stream on [DONE].
 export async function* readEvents(body) {
   if (!body) throw new Error("The server returned no response stream.");
@@ -112,9 +112,9 @@ export async function* readEvents(body) {
     decoder = new TextDecoder();
   let buffer = "",
     data = [],
+    skipLF = false,
     completed = false;
   function parseLine(line) {
-    if (line.endsWith("\r")) line = line.slice(0, -1);
     if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
     if (line !== "" || !data.length) return null;
     const raw = data.join("\n");
@@ -129,10 +129,17 @@ export async function* readEvents(body) {
     while (!completed) {
       const { value, done } = await reader.read();
       buffer += decoder.decode(value, { stream: !done });
+      if (skipLF && buffer.length) {
+        if (buffer[0] === "\n") buffer = buffer.slice(1);
+        skipLF = false;
+      }
       let newline;
-      while ((newline = buffer.indexOf("\n")) !== -1) {
+      while ((newline = buffer.search(/[\r\n]/)) !== -1) {
+        // CR completes the line immediately; skip a following LF if it arrives
+        // in the next chunk instead of waiting to publish the completed event.
+        skipLF = buffer[newline] === "\r" && newline === buffer.length - 1;
         const event = parseLine(buffer.slice(0, newline));
-        buffer = buffer.slice(newline + 1);
+        buffer = buffer.slice(newline + (buffer[newline] === "\r" && buffer[newline + 1] === "\n" ? 2 : 1));
         if (event) yield event;
         if (completed) return;
       }

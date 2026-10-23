@@ -20,6 +20,8 @@ type stream struct {
 	cancel           context.CancelFunc
 	idle             *time.Timer
 	idleTimeout      time.Duration
+	idleMu           sync.Mutex
+	closed           bool
 	timedOut         atomic.Bool
 	closeOnce        sync.Once
 	pending          []llm.ResponseEvent
@@ -52,7 +54,14 @@ func newStream(body io.ReadCloser, cancel context.CancelFunc, idle time.Duration
 }
 func (s *stream) Close() error {
 	var err error
-	s.closeOnce.Do(func() { s.idle.Stop(); s.cancel(); err = s.body.Close() })
+	s.closeOnce.Do(func() {
+		s.idleMu.Lock()
+		s.closed = true
+		s.idle.Stop()
+		s.idleMu.Unlock()
+		s.cancel()
+		err = s.body.Close()
+	})
 	return err
 }
 func (s *stream) AccountLabel() string { return "网页 Free 账号" }
@@ -97,7 +106,11 @@ func (s *stream) frame() (string, []byte, error) {
 	event := ""
 	lines := []string{}
 	for s.scanner.Scan() {
-		s.idle.Reset(s.idleTimeout)
+		s.idleMu.Lock()
+		if !s.closed {
+			s.idle.Reset(s.idleTimeout)
+		}
+		s.idleMu.Unlock()
 		line := strings.TrimSuffix(s.scanner.Text(), "\r")
 		if line == "" {
 			if len(lines) > 0 {

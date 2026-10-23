@@ -65,6 +65,36 @@ test("SSE: parses final EOF frame and rejects malformed JSON", async () => {
       void event;
   }, SyntaxError);
 });
+test("SSE: CR-only delimiters and a trailing CR dispatch every final frame", async () => {
+  for (const source of ['data: {"usage":{"completion_tokens":2}}\n\r', 'data: {"choices":[]}\r\rdata: [DONE]\r\r']) {
+    const bytes = new TextEncoder().encode(source);
+    const stream = new ReadableStream({ start(controller) {
+      for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    }});
+    const events = [];
+    for await (const event of readEvents(stream)) events.push(event);
+    assert.deepEqual(events, source.includes('[DONE]') ? [{ choices: [] }, { done: true }] : [{ usage: { completion_tokens: 2 } }]);
+    assert.equal(stream.locked, false);
+  }
+});
+test("SSE: a CR-terminated DONE cancels without waiting for another network chunk", async () => {
+  let controller, cancelled = false;
+  const stream = new ReadableStream({
+    start(value) { controller = value; controller.enqueue(new TextEncoder().encode('data: [DONE]\r\r')); },
+    cancel() { cancelled = true; },
+  });
+  const events = [];
+  const reading = (async () => { for await (const event of readEvents(stream)) events.push(event); })();
+  await new Promise(resolve => setImmediate(resolve));
+  try {
+    assert.equal(cancelled, true);
+    assert.deepEqual(events, [{ done: true }]);
+  } finally {
+    if (!cancelled) controller.close();
+    await reading;
+  }
+});
 test("Markdown: render code and lists without executing HTML or unsafe URLs", () => {
   const rendered = markdown(
     "<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n\n```html\n<script>alert(1)</script>\n```\n\n- **one**\n- two\n\n[docs](https://example.com)",

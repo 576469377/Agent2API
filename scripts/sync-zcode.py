@@ -68,6 +68,22 @@ def read_source(path):
 
 
 def write_config(path, document, source, dry_run=False):
+    # Share the console writer's lock so the CLI and web sync cannot publish
+    # candidates based on the same source at the same time.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".agent2api.lock")
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        raise ValueError("ZCode config is already being synchronized; retry after the current sync finishes") from None
+    try:
+        return _write_config(path, document, source, dry_run)
+    finally:
+        os.close(descriptor)
+        lock.unlink()
+
+
+def _write_config(path, document, source, dry_run):
     """Do not overwrite an intervening edit or rewrite an unchanged document."""
     def check_source():
         if read_source(path) != source:
@@ -76,7 +92,6 @@ def write_config(path, document, source, dry_run=False):
     check_source()
     if not dry_run and source is not None and json.loads(source.decode("utf-8-sig")) == document:
         return None, None
-    path.parent.mkdir(parents=True, exist_ok=True)
     output = path.with_name(path.name + ".candidate") if dry_run else path
     temporary = None
     backup = None
@@ -96,7 +111,11 @@ def write_config(path, document, source, dry_run=False):
             backup = path.with_name(path.name + ".bak-" + stamp)
             shutil.copy2(path, backup)
         check_source()
-        os.replace(temporary, output)
+        if source is None and not dry_run:
+            # Publish a first configuration only if the target is still absent.
+            os.link(temporary, output)
+        else:
+            os.replace(temporary, output)
         return output, backup
     finally:
         if temporary is not None:
@@ -205,7 +224,7 @@ def main():
     allowed = {
         model.get("routing_id") or model["id"] for model in models
         if confirmed_free(model)
-        and model.get("context_tokens", 0) > 0 and model.get("max_output_tokens", 0) > 0
+        and model.get("context_tokens", 0) > 0 and output_limit(model) > 0
     }
     if not allowed:
         raise ValueError("No confirmed free models with published limits; refresh the gateway catalogue before syncing; no changes made")

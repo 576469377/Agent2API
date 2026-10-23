@@ -70,6 +70,14 @@ func mockCLI() {
 		if json.Unmarshal(scan.Bytes(), &f) != nil {
 			continue
 		}
+		switch os.Getenv("AGENT2API_KIRO_OUTPUT_FAILURE") {
+		case "oversized":
+			os.Stdout.WriteString(strings.Repeat("x", 8*1024*1024+1) + "\n")
+			continue
+		case "closed":
+			os.Stdout.Close()
+			continue
+		}
 		reply := func(result any) {
 			send(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(f.ID), "result": result})
 		}

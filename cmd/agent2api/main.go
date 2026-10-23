@@ -196,9 +196,10 @@ func runServer(args []string) {
 	application := app.New(cfg, hub, logger)
 	application.StartMetricsPersistence(30 * time.Second)
 	application.StartPlatformBackground(backgroundCtx)
+	requests := newRequestDrain(application.Handler())
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
-		Handler:           application.Handler(),
+		Handler:           requests,
 		ReadHeaderTimeout: 30 * time.Second,
 		ReadTimeout:       time.Duration(cfg.Server.ReadTimeoutSec) * time.Second,
 		// 不设 WriteTimeout：流式响应可能持续数十分钟。
@@ -221,17 +222,10 @@ func runServer(args []string) {
 	logger.Printf("正在关闭...")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := shutdownAndPersist(ctx, srv, application.PersistMetricsNow); err != nil {
+	if err := shutdownAndPersist(ctx, srv, requests, application.PersistMetricsNow); err != nil {
 		logger.Printf("关闭超时: %v", err)
 	}
 	logger.Printf("已停止")
-}
-
-// Final counters must include requests which finish while Shutdown is draining.
-func shutdownAndPersist(ctx context.Context, srv *http.Server, persist func()) error {
-	err := srv.Shutdown(ctx)
-	persist()
-	return err
 }
 
 // baseURL 生成对外展示的访问地址。

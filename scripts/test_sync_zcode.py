@@ -19,6 +19,36 @@ spec.loader.exec_module(sync)
 
 
 class ConfigWriteSafetyTest(unittest.TestCase):
+    def test_console_sync_lock_is_respected_and_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            source = b'{"old":true}'
+            path.write_bytes(source)
+            lock = path.with_name(path.name + '.agent2api.lock')
+            lock.write_bytes(b'console-writer')
+            with self.assertRaisesRegex(ValueError, 'already being synchronized'):
+                sync.write_config(path, {'new': True}, source)
+            self.assertEqual(path.read_bytes(), source)
+            self.assertEqual(lock.read_bytes(), b'console-writer')
+            self.assertEqual(set(path.parent.iterdir()), {path, lock})
+
+    def test_first_publish_does_not_replace_a_concurrently_created_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'provider.json'
+            calls = 0
+            def read_before_creation(target):
+                nonlocal calls
+                self.assertEqual(target, path)
+                calls += 1
+                if calls == 3:
+                    path.write_bytes(b'{"client_created":true}')
+                return None
+            with mock.patch.object(sync, 'read_source', side_effect=read_before_creation):
+                with self.assertRaises(FileExistsError):
+                    sync.write_config(path, {'new': True}, None)
+            self.assertEqual(path.read_bytes(), b'{"client_created":true}')
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
     def test_unchanged_json_preserves_bytes_mtime_and_creates_no_backup(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'provider.json'
@@ -185,6 +215,35 @@ class SyncPreservationTest(unittest.TestCase):
 
 
 class FreeOnlySyncTest(unittest.TestCase):
+    def test_kiro_without_published_output_limit_syncs_and_preserves_preferences(self):
+        model = self.trae_model()
+        model.update(id='kiro-auto', routing_id='kiro/kiro-auto', platform='kiro', max_output_tokens=0,
+                     supports_thinking=False)
+        model['pricing']['source'] = 'kiro_cli_catalog'
+        model['access']['source'] = 'kiro_cli_free_plan'
+        self.models.append(model)
+        result = self.run_sync('--models', model['routing_id'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        rule = next(r for r in cfg['modelConfigRules']['manualProviderModelRules'] if r['modelId'] == model['routing_id'])
+        self.assertEqual(rule['config']['optionSpecs']['maxOutputTokens'], {'max': 8192})
+        self.assertEqual(rule['config']['optionSpecs']['reasoningLevel'], {'values': ['disabled'], 'map': '{}'})
+        rule['config']['enabled'] = False
+        rule['config']['optionSpecs']['maxOutputTokens']['max'] = 512
+        self.doc['config'] = cfg
+        self.save()
+        result = self.run_sync('--models', 'free')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        retained = next(r for r in cfg['modelConfigRules']['manualProviderModelRules'] if r['modelId'] == model['routing_id'])
+        self.assertFalse(retained['config']['enabled'])
+        self.assertEqual(retained['config']['optionSpecs']['maxOutputTokens'], {'max': 512})
+        original = self.path.read_bytes()
+        result = self.run_sync('--models', 'free')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b'Unchanged:', result.stdout)
+        self.assertEqual(self.path.read_bytes(), original)
+
     def test_kiro_preserves_real_credit_rates_and_unknown_output_metadata(self):
         model = self.trae_model()
         model.update(platform='kiro', max_output_tokens=0, supports_thinking=False)

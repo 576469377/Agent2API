@@ -191,10 +191,7 @@ func (a *App) verifyClientCatalog(ctx context.Context, platforms []string) error
 			return fmt.Errorf("平台 %s 免费目录刷新失败，客户端配置已保留", p)
 		}
 	}
-	statuses, refreshing := a.hub.CatalogStatuses()
-	if refreshing {
-		return fmt.Errorf("模型目录仍在更新，请稍后重试")
-	}
+	statuses, _ := a.hub.CatalogStatuses()
 	for _, status := range statuses {
 		if wanted[status.Platform] && status.Status != "ready" {
 			return fmt.Errorf("平台 %s 免费目录验证失败，客户端配置已保留", status.Platform)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -14,6 +15,11 @@ type CatalogStatus struct {
 	ModelCount int        `json:"model_count"`
 	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 	Error      string     `json:"error,omitempty"`
+}
+
+type catalogRefresh struct {
+	done chan struct{}
+	err  error
 }
 
 // CachedModels serves management views without performing upstream I/O.
@@ -48,13 +54,16 @@ func (h *Hub) CatalogStatuses() ([]CatalogStatus, bool) {
 		status.ModelCount = len(h.catalog[pid])
 		out = append(out, status)
 	}
-	return out, h.catalogFlight != nil
+	return out, len(h.catalogFlights) != 0
 }
 
 func (h *Hub) RefreshCatalogIfDue() {
-	h.mu.RLock()
-	due := h.catalogFlight == nil && time.Since(h.catalogChecked) >= time.Minute
-	h.mu.RUnlock()
+	h.mu.Lock()
+	due := time.Since(h.catalogChecked) >= time.Minute
+	if due {
+		h.catalogChecked = time.Now()
+	}
+	h.mu.Unlock()
 	if due {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -81,72 +90,96 @@ func (h *Hub) RefreshAllPlatforms(ctx context.Context) error {
 }
 
 func (h *Hub) refreshCatalogFor(ctx context.Context, only string, fresh bool) error {
-	h.mu.Lock()
-	if flight := h.catalogFlight; flight != nil {
-		h.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if only != "" {
+		rt := h.Platform(only)
+		if rt == nil {
+			return fmt.Errorf("平台 %s 未配置", only)
+		}
+		return h.refreshPlatformCatalog(ctx, rt, fresh)
+	}
+	runtimes := h.Platforms()
+	results := make(chan struct{}, len(runtimes))
+	for _, rt := range runtimes {
+		go func(rt *PlatformRuntime) {
+			_ = h.refreshPlatformCatalog(ctx, rt, fresh)
+			results <- struct{}{}
+		}(rt)
+	}
+	for range runtimes {
 		select {
-		case <-flight:
-			if fresh {
-				return h.refreshCatalogFor(ctx, only, fresh)
-			}
-			return nil
+		case <-results:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-	flight := make(chan struct{})
-	h.catalogFlight = flight
+	h.mu.Lock()
+	h.catalogChecked = time.Now()
 	h.mu.Unlock()
-	type result struct {
-		platform string
-		models   []adapter.ModelInfo
-		err      error
-	}
-	runtimes := h.Platforms()
-	results := make(chan result, len(runtimes))
-	pending := map[string]bool{}
-	for _, rt := range runtimes {
-		if only != "" && rt.ID != only {
-			continue
+	return ctx.Err()
+}
+
+func (h *Hub) refreshPlatformCatalog(ctx context.Context, rt *PlatformRuntime, fresh bool) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if fresh {
-			if c, ok := rt.Adapter.(interface{ InvalidateModels() }); ok {
-				c.InvalidateModels()
-			}
+		h.mu.Lock()
+		previous := h.catalogFlights[rt.ID]
+		if previous == nil {
+			break // Keep the lock until this platform's flight is reserved.
 		}
-		pending[rt.ID] = true
-		go func(rt *PlatformRuntime) {
-			models, err := rt.Adapter.ListModels(ctx)
-			results <- result{rt.ID, models, err}
-		}(rt)
-	}
-	updates := make(map[string]result, len(runtimes))
-	for len(pending) > 0 {
+		h.mu.Unlock()
 		select {
-		case row := <-results:
-			updates[row.platform] = row
-			delete(pending, row.platform)
 		case <-ctx.Done():
-			for pid := range pending {
-				updates[pid] = result{platform: pid, err: ctx.Err()}
+			return ctx.Err()
+		case <-previous.done:
+			if !fresh {
+				return previous.err
 			}
-			clear(pending)
 		}
+	}
+	flight := &catalogRefresh{done: make(chan struct{})}
+	h.catalogFlights[rt.ID] = flight
+	h.mu.Unlock()
+
+	if fresh {
+		if c, ok := rt.Adapter.(interface{ InvalidateModels() }); ok {
+			c.InvalidateModels()
+		}
+	}
+	type result struct {
+		models []adapter.ModelInfo
+		err    error
+	}
+	results := make(chan result, 1)
+	go func() {
+		models, err := rt.Adapter.ListModels(ctx)
+		results <- result{models, err}
+	}()
+	var row result
+	select {
+	case row = <-results:
+		if row.err == nil {
+			row.err = ctx.Err()
+		}
+	case <-ctx.Done():
+		row.err = ctx.Err()
 	}
 	stamp := time.Now().UTC()
 	h.mu.Lock()
-	for pid, row := range updates {
-		status := h.catalogStatus[pid]
-		status.Platform = pid
-		if row.err != nil {
-			status.Status, status.Error = "error", row.err.Error()
-		} else {
-			h.catalog[pid] = row.models
-			status.Status, status.Error, status.UpdatedAt = "ready", "", &stamp
-		}
-		status.ModelCount = len(h.catalog[pid])
-		h.catalogStatus[pid] = status
+	status := h.catalogStatus[rt.ID]
+	status.Platform = rt.ID
+	if row.err != nil {
+		status.Status, status.Error = "error", row.err.Error()
+	} else {
+		h.catalog[rt.ID] = row.models
+		status.Status, status.Error, status.UpdatedAt = "ready", "", &stamp
 	}
+	status.ModelCount = len(h.catalog[rt.ID])
+	h.catalogStatus[rt.ID] = status
 	h.index = map[string]string{}
 	for _, pid := range h.order {
 		for _, model := range h.catalog[pid] {
@@ -155,12 +188,9 @@ func (h *Hub) refreshCatalogFor(ctx context.Context, only string, fresh bool) er
 			}
 		}
 	}
-	h.catalogChecked = time.Now()
-	h.catalogFlight = nil
-	close(flight)
+	flight.err = row.err
+	delete(h.catalogFlights, rt.ID)
+	close(flight.done)
 	h.mu.Unlock()
-	if only != "" {
-		return updates[only].err
-	}
-	return ctx.Err()
+	return row.err
 }

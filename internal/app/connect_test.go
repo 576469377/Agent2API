@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/config"
@@ -168,27 +170,92 @@ func TestTargetedRefreshRetainsOtherProvidersAndReturnsTargetFailure(t *testing.
 	}
 }
 
+type gatedSetupFixture struct {
+	fakeAdapter
+	calls, invalidations atomic.Int32
+	entered              chan struct{}
+	release              <-chan struct{}
+}
+
+func (f *gatedSetupFixture) ListModels(ctx context.Context) ([]adapter.ModelInfo, error) {
+	if f.calls.Add(1) == 2 {
+		close(f.entered)
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return []adapter.ModelInfo{{ID: "old-model"}}, nil
+	}
+	return []adapter.ModelInfo{{ID: "fresh-model"}}, nil
+}
+
+func (f *gatedSetupFixture) InvalidateModels() { f.invalidations.Add(1) }
+
+// Done is evaluated as a select is entered. Both old requests remain gated,
+// so the only three selects are the full-refresh collector and its two waiters.
+type catalogWaitContext struct {
+	context.Context
+	selects chan struct{}
+}
+
+func (c catalogWaitContext) Done() <-chan struct{} {
+	select {
+	case c.selects <- struct{}{}:
+	default:
+	}
+	return c.Context.Done()
+}
+
 func TestExplicitCatalogRefreshInvalidatesBothProvidersAfterPreviousFlight(t *testing.T) {
-	one, other := &setupFixture{}, &setupFixture{}
+	gate := make(chan struct{})
+	one := &gatedSetupFixture{entered: make(chan struct{}), release: gate}
+	other := &gatedSetupFixture{entered: make(chan struct{}), release: gate}
 	h, err := NewHub([]*PlatformRuntime{{ID: "cursor", Adapter: one}, {ID: "workbuddy", Adapter: other}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 模拟已经返回旧快照、尚在发布目录的后台刷新。
-	flight := make(chan struct{})
-	h.mu.Lock()
-	h.catalogFlight = flight
-	h.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	previous := make(chan error, 2)
+	for _, rt := range h.Platforms() {
+		go func(rt *PlatformRuntime) { previous <- h.refreshPlatformCatalog(ctx, rt, false) }(rt)
+	}
+	for _, fixture := range []*gatedSetupFixture{one, other} {
+		select {
+		case <-fixture.entered:
+		case <-ctx.Done():
+			t.Fatal("previous catalogue request did not enter the adapter")
+		}
+	}
+	waiting := catalogWaitContext{Context: ctx, selects: make(chan struct{}, 3)}
 	done := make(chan error, 1)
-	go func() { done <- h.RefreshAllPlatforms(context.Background()) }()
-	h.mu.Lock()
-	h.catalogFlight = nil
-	close(flight)
-	h.mu.Unlock()
+	go func() { done <- h.RefreshAllPlatforms(waiting) }()
+	for range 3 {
+		select {
+		case <-waiting.selects:
+		case <-ctx.Done():
+			t.Fatal("explicit refresh did not wait for both previous flights")
+		}
+	}
+	if one.calls.Load() != 2 || other.calls.Load() != 2 || one.invalidations.Load() != 0 || other.invalidations.Load() != 0 {
+		t.Fatal("explicit refresh invalidated or queried before previous flights finished")
+	}
+	close(gate)
+	for range 2 {
+		if err := <-previous; err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if one.invalidations != 1 || other.invalidations != 1 || one.calls != 2 || other.calls != 2 {
+	if one.invalidations.Load() != 1 || other.invalidations.Load() != 1 || one.calls.Load() != 3 || other.calls.Load() != 3 {
 		t.Fatal("explicit refresh reused a previous flight or stale adapter caches")
+	}
+	for _, model := range h.CachedModels() {
+		if model.ID != "fresh-model" {
+			t.Fatalf("explicit refresh published an old snapshot: %s", model.ID)
+		}
 	}
 }

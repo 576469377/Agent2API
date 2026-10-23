@@ -34,7 +34,8 @@ type Adapter struct {
 	cfg           Config
 	client        *http.Client
 	mu            sync.Mutex
-	fetchMu       sync.Mutex
+	fetchGate     chan struct{}
+	modelRevision uint64
 	models        []adapter.ModelInfo
 	expires       time.Time
 	storedKey     string
@@ -67,7 +68,7 @@ func New(cfg Config) (*Adapter, error) {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = cfg.RequestTimeout
-	a := &Adapter{cfg: cfg, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	a := &Adapter{cfg: cfg, fetchGate: make(chan struct{}, 1), client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	a.loadSavedKey()
 	return a, nil
 }
@@ -220,17 +221,69 @@ func freePricing(pricing map[string]json.RawMessage) bool {
 }
 
 func (a *Adapter) ListModels(ctx context.Context) ([]adapter.ModelInfo, error) {
-	a.fetchMu.Lock()
-	defer a.fetchMu.Unlock()
-	a.mu.Lock()
-	if time.Now().Before(a.expires) {
-		models := slices.Clone(a.models)
+	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
+	defer cancel()
+	if err := a.lockFetch(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-a.fetchGate }()
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		a.mu.Lock()
+		if time.Now().Before(a.expires) {
+			models := cloneModels(a.models)
+			a.mu.Unlock()
+			return models, nil
+		}
+		revision := a.modelRevision
+		a.mu.Unlock()
+		models, err := a.fetchModels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		a.mu.Lock()
+		if revision != a.modelRevision {
+			a.mu.Unlock()
+			// A refresh was requested while this response was in flight. Its
+			// old prices must not repopulate the cache or authorize generation.
+			continue
+		}
+		a.models = models
+		a.expires = time.Now().Add(a.cfg.ModelCacheTTL)
+		models = cloneModels(models)
 		a.mu.Unlock()
 		return models, nil
 	}
-	a.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
-	defer cancel()
+}
+
+func (a *Adapter) lockFetch(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case a.fetchGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func cloneModels(models []adapter.ModelInfo) []adapter.ModelInfo {
+	out := slices.Clone(models)
+	for i := range out {
+		// OpenRouter's catalogue only sets a flat Pricing value. Give each
+		// caller its own copy, including callers served directly from a fetch.
+		if out[i].Pricing != nil {
+			pricing := *out[i].Pricing
+			out[i].Pricing = &pricing
+		}
+	}
+	return out
+}
+
+func (a *Adapter) fetchModels(ctx context.Context) ([]adapter.ModelInfo, error) {
 	resp, err := a.request(ctx, http.MethodGet, "/models", nil)
 	if err != nil {
 		return nil, err
@@ -258,14 +311,15 @@ func (a *Adapter) ListModels(ctx context.Context) ([]adapter.ModelInfo, error) {
 			Pricing: &adapter.ModelPricing{Status: "free", Source: "openrouter_models", ObservedAt: time.Now().UTC().Format(time.RFC3339)},
 		})
 	}
-	a.mu.Lock()
-	a.models = models
-	a.expires = time.Now().Add(a.cfg.ModelCacheTTL)
-	a.mu.Unlock()
-	return slices.Clone(models), nil
+	return models, nil
 }
 
-func (a *Adapter) InvalidateModels() { a.mu.Lock(); a.expires = time.Time{}; a.mu.Unlock() }
+func (a *Adapter) InvalidateModels() {
+	a.mu.Lock()
+	a.modelRevision++
+	a.expires = time.Time{}
+	a.mu.Unlock()
+}
 
 func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.ResponseStream, error) {
 	models, err := a.ListModels(ctx)

@@ -1,6 +1,6 @@
 # 开发与仓库导览
 
-[文档导航](README.md) · [当前架构](architecture.md) · [贡献指南](../CONTRIBUTING.md) · [本轮全仓审查](reviews/2026-10-24-project-optimization-review.md)
+[文档导航](README.md) · [当前架构](architecture.md) · [贡献指南](../CONTRIBUTING.md) · [最新审查](reviews/2026-10-24-catalog-and-client-review.md)
 
 先读请求路径，再选择需要修改的层。网关不要求前端打包器或数据库，Go 静态嵌入控制台；测试和维护脚本按需要使用 Node.js 与 Python。
 
@@ -93,6 +93,6 @@ OpenRouter、Cursor 与 TRAE 使用各自认证逻辑，不经过 WorkBuddy 的�
 - 配置、凭证、客户端文件、日志与 `bin/` 都属于本地资料；不要强制加入 Git。
 - 现有工作集中到 `main`；提交应说明用户遇到的具体问题、最终行为与验证范围，保留真实限制。
 
-已实施改进、基准和后续优先级见[全仓审查](reviews/2026-10-24-project-optimization-review.md)。
+最新的目录刷新、取消、客户端同步及连接收尾改进见[目录与客户端审查](reviews/2026-10-24-catalog-and-client-review.md)；上一轮协议和性能基准见[全仓审查](reviews/2026-10-24-project-optimization-review.md)。
 
 客户端快捷配置由 `internal/clientconfig/` 统一筛选已核验免费模型，并处理 pi JSON、cc-switch SQLite / Codex TOML；`internal/zcode/` 复用同一筛选规则。管理端点位于 `internal/app/clients.go`，交互与批量结果位于 `internal/web/static/client-setup.js`。新增客户端须覆盖配置保留、并发修改拒绝、重复同步不写入、备份和本机访问约束。

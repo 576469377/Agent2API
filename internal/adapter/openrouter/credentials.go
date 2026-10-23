@@ -75,6 +75,9 @@ func (a *Adapter) verifyKey(ctx context.Context, key string) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	resp, err := a.client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("无法连接 OpenRouter 检测密钥，请检查网络后重试")
 	}
 	defer resp.Body.Close()
@@ -107,8 +110,10 @@ func (a *Adapter) SaveAPIKey(ctx context.Context, key string) error {
 	if a.cfg.CredentialPath == "" {
 		return fmt.Errorf("此连接未配置密钥保存路径")
 	}
-	a.fetchMu.Lock()
-	defer a.fetchMu.Unlock()
+	if err := a.lockFetch(ctx); err != nil {
+		return err
+	}
+	defer func() { <-a.fetchGate }()
 	if err := a.verifyKey(ctx, key); err != nil {
 		return err
 	}
@@ -141,6 +146,7 @@ func (a *Adapter) SaveAPIKey(ctx context.Context, key string) error {
 	}
 	a.mu.Lock()
 	a.storedKey, a.storedPresent, a.expires = key, true, time.Time{}
+	a.modelRevision++
 	a.mu.Unlock()
 	return nil
 }

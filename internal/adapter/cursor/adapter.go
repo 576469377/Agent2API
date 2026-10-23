@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -134,7 +135,13 @@ type serverConfig struct {
 
 func (a *Adapter) authorize(ctx context.Context) (credentials, serverConfig, error) {
 	var server serverConfig
+	if err := ctx.Err(); err != nil {
+		return credentials{}, server, transportError(err)
+	}
 	c, err := a.load(ctx, a.cfg.CredentialPath)
+	if err := ctx.Err(); err != nil {
+		return c, server, transportError(err)
+	}
 	if err != nil {
 		return c, server, &llm.Failure{Code: "cursor_login_required", Message: err.Error(), Unauthorized: true}
 	}
@@ -188,11 +195,15 @@ func (a *Adapter) checkModel(ctx context.Context, c credentials) error {
 func (a *Adapter) ListModels(ctx context.Context) ([]adapter.ModelInfo, error) {
 	c, _, err := a.authorize(ctx)
 	if err != nil {
-		a.InvalidateModels()
+		if !errors.Is(err, context.Canceled) {
+			a.InvalidateModels()
+		}
 		return nil, err
 	}
 	if err = a.checkModel(ctx, c); err != nil {
-		a.InvalidateModels()
+		if !errors.Is(err, context.Canceled) {
+			a.InvalidateModels()
+		}
 		return nil, err
 	}
 	a.mu.Lock()
