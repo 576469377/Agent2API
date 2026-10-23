@@ -191,12 +191,13 @@ func TestFullCatalogRefreshAlsoFetchesPlatformsOutsideCurrentFlight(t *testing.T
 	}
 }
 
-func TestTargetedCatalogTimeoutKeepsCacheAndReleasesFlight(t *testing.T) {
+func TestTargetedCatalogCancellationKeepsCacheAndReleasesFlight(t *testing.T) {
 	ad := &controlledCatalog{}
 	h, err := NewHub([]*PlatformRuntime{{ID: "workbuddy", Adapter: ad}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	before, _ := h.CatalogStatuses()
 	gate, entered := make(chan struct{}), make(chan struct{}, 1)
 	ad.mu.Lock()
 	ad.gate, ad.entered, ad.ignoreCancellation = gate, entered, true
@@ -217,7 +218,7 @@ func TestTargetedCatalogTimeoutKeepsCacheAndReleasesFlight(t *testing.T) {
 		t.Fatal("cancelled catalogue request is still blocked on upstream")
 	}
 	statuses, refreshing := h.CatalogStatuses()
-	if refreshing || statuses[0].Status != "error" || len(h.CachedModels()) != 1 {
+	if refreshing || statuses[0].Status != "ready" || statuses[0].Error != "" || !statuses[0].UpdatedAt.Equal(*before[0].UpdatedAt) || len(h.CachedModels()) != 1 {
 		t.Fatalf("cancelled refresh changed its cached catalogue: %+v", statuses)
 	}
 }

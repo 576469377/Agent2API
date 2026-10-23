@@ -170,21 +170,29 @@ func (h *Hub) refreshPlatformCatalog(ctx context.Context, rt *PlatformRuntime, f
 	}
 	stamp := time.Now().UTC()
 	h.mu.Lock()
-	status := h.catalogStatus[rt.ID]
-	status.Platform = rt.ID
-	if row.err != nil {
-		status.Status, status.Error = "error", row.err.Error()
-	} else {
-		h.catalog[rt.ID] = row.models
-		status.Status, status.Error, status.UpdatedAt = "ready", "", &stamp
+	requestErr := ctx.Err()
+	if requestErr != nil {
+		row.err = requestErr
 	}
-	status.ModelCount = len(h.catalog[rt.ID])
-	h.catalogStatus[rt.ID] = status
-	h.index = map[string]string{}
-	for _, pid := range h.order {
-		for _, model := range h.catalog[pid] {
-			if _, exists := h.index[model.ID]; !exists {
-				h.index[model.ID] = pid
+	// A disconnected caller did not establish a platform failure. Preserve
+	// the last published state, including any earlier genuine upstream error.
+	if requestErr != context.Canceled {
+		status := h.catalogStatus[rt.ID]
+		status.Platform = rt.ID
+		if row.err != nil {
+			status.Status, status.Error = "error", row.err.Error()
+		} else {
+			h.catalog[rt.ID] = row.models
+			status.Status, status.Error, status.UpdatedAt = "ready", "", &stamp
+		}
+		status.ModelCount = len(h.catalog[rt.ID])
+		h.catalogStatus[rt.ID] = status
+		h.index = map[string]string{}
+		for _, pid := range h.order {
+			for _, model := range h.catalog[pid] {
+				if _, exists := h.index[model.ID]; !exists {
+					h.index[model.ID] = pid
+				}
 			}
 		}
 	}
