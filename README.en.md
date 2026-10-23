@@ -157,6 +157,8 @@ WorkBuddy pools schedule your authorized accounts by health, with affinity, opti
 
 Generation endpoints are `/v1/chat/completions`, `/v1/responses` and `/v1/messages`, with `/v1/models`, `/health` and `/metrics` alongside them. See the [API guide](docs/api.md).
 
+Responses supports namespaced `function` tools used by Codex MCP, preserving tool names, namespaces and result continuations in streaming and non-streaming responses. A free catalogue entry does not guarantee remaining account quota; see [client setup](docs/clients.md#cc-switch-与-pi-快捷配置).
+
 ## Security
 
 Credentials grant account access. Do not publish local config, account files, ZCode configuration or runtime metrics. Remove keys, nicknames and upstream request IDs from reports. The gateway binds to `127.0.0.1` by default; expanded network access requires an API key and access controls. See [SECURITY.md](SECURITY.md).

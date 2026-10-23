@@ -15,6 +15,14 @@
 
 管理与调试界面在 `/`（见[网页控制台](console.md)），不属于 API。
 
+## Responses 工具命名空间
+
+`/v1/responses` 接受一层 `type: "namespace"` 分组，内部为 `type: "function"` 工具。例如 Codex MCP 的 `mcp__acceptance` 分组中可以定义 `read_acceptance_file`。网关保留子工具的描述与 JSON Schema，使用稳定且无冲突的内部名称适配上游的扁平工具接口。
+
+响应的 `function_call` 返回原始 `name` 和 `namespace`；流式 `response.output_item.added`、`response.output_item.done`、最终 `response.completed` 以及非流式输出使用相同映射。把该调用连同 `function_call_output` 和原 `call_id` 放回 `input` 即可续轮，历史中的工具名称也会恢复为同一内部标识。不同分组可有同名函数，映射仅属于当前请求。
+
+空分组、重复或冲突的工具名、嵌套命名空间，以及分组内的自由文本 `custom` 工具会返回 `invalid_tools` / HTTP 400。此支持范围不包含托管工具、工具搜索或整个 OpenAI 产品 API。[OpenAI 函数与命名空间定义](https://developers.openai.com/api/docs/guides/function-calling#defining-namespaces)
+
 ## 鉴权
 
 配置 `auth.api_key` 后，生成接口、模型列表、管理接口和 `/metrics` 需要网关访问密钥。Chat / Responses 通常使用 `Authorization: Bearer <网关密钥>`，Messages 通常使用 `x-api-key: <网关密钥>`；网关支持这两种形式。`/health` 和静态控制台不要求密钥。

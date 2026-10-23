@@ -155,6 +155,8 @@ WorkBuddy 中本人已授权的多个账号可以按健康度调度，支持会�
 
 三种生成协议分别位于 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`，另提供 `/v1/models`、`/health` 与 `/metrics`。请求与鉴权示例见[API 参考](docs/api.md)。
 
+Responses 支持 Codex MCP 的 `function` 工具命名空间，保留工具名称、分组与结果续轮关联；流式和非流式行为一致。免费目录确认与真实调用验收的区别见[客户端接入](docs/clients.md#cc-switch-与-pi-快捷配置)。
+
 ## 安全须知
 
 凭证等同账号访问权限。不要上传 `config.json`、账号文件、ZCode 配置或运行指标；反馈时隐藏密钥、昵称和上游请求 ID。默认仅监听 `127.0.0.1`；若修改监听范围，必须配置访问密钥及相应访问控制。详见[安全策略](SECURITY.md)。

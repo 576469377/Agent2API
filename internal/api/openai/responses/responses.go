@@ -13,7 +13,7 @@ import (
 )
 
 // Protocol 是 Responses 协议实现。
-type Protocol struct{}
+type Protocol struct{ toolNames map[string]toolName }
 
 // Name 返回协议标识。
 func (Protocol) Name() string { return "openai-responses" }
@@ -51,6 +51,7 @@ type rawTool struct {
 	Name         string            `json:"name"`
 	Description  string            `json:"description"`
 	Parameters   map[string]any    `json:"parameters"`
+	Tools        []rawTool         `json:"tools"`
 }
 
 type rawInputMessage struct {
@@ -59,6 +60,7 @@ type rawInputMessage struct {
 	Type      string          `json:"type"`
 	CallID    string          `json:"call_id"`
 	Name      string          `json:"name"`
+	Namespace string          `json:"namespace"`
 	Arguments string          `json:"arguments"`
 	Output    json.RawMessage `json:"output"`
 }
@@ -100,20 +102,17 @@ func (Protocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
 	}
 	out.Messages = msgs
 
-	if len(r.Tools) > 0 {
-		out.Tools = make([]llm.ToolDefinition, 0, len(r.Tools))
-		for _, t := range r.Tools {
-			name := t.Name
-			if name == "" {
-				continue
-			}
-			out.Tools = append(out.Tools, llm.ToolDefinition{
-				Name: name, Description: t.Description, Parameters: t.Parameters, CacheControl: t.CacheControl,
-			})
-		}
+	out.Tools, _, err = decodeTools(r.Tools)
+	if err != nil {
+		return llm.RequestMessages{}, err
 	}
 	if r.ToolChoice != nil {
 		out.ToolChoice = normalizeToolChoice(r.ToolChoice)
+		if choice, ok := r.ToolChoice.(map[string]any); ok && out.ToolChoice != nil && out.ToolChoice.Mode == llm.ToolChoiceFunction {
+			if namespace, _ := choice["namespace"].(string); namespace != "" {
+				out.ToolChoice.FunctionName = namespaceToolName(namespace, out.ToolChoice.FunctionName)
+			}
+		}
 	}
 	return out, nil
 }
@@ -142,9 +141,13 @@ func decodeInput(raw json.RawMessage) ([]llm.Message, error) {
 	for _, it := range items {
 		switch it.Type {
 		case "function_call":
+			name := it.Name
+			if it.Namespace != "" {
+				name = namespaceToolName(it.Namespace, name)
+			}
 			out = append(out, llm.Message{Role: llm.RoleAssistant, Content: []llm.Content{{
 				Type:     llm.ContentToolCall,
-				ToolCall: &llm.ToolCall{ID: it.CallID, Name: it.Name, Arguments: it.Arguments},
+				ToolCall: &llm.ToolCall{ID: it.CallID, Name: name, Arguments: it.Arguments},
 			}}})
 			continue
 		case "function_call_output":
@@ -257,10 +260,11 @@ type StreamEncoder struct {
 	text      map[int]string
 	thinking  map[int]string
 	completed map[int]any
+	toolNames map[string]toolName
 }
 
 // NewStreamEncoder 构造流式编码器。
-func (Protocol) NewStreamEncoder(model string, includeUsage bool) *StreamEncoder {
+func (p Protocol) NewStreamEncoder(model string, includeUsage bool) *StreamEncoder {
 	return &StreamEncoder{
 		id:        "resp_" + randomHex(24),
 		model:     model,
@@ -273,6 +277,7 @@ func (Protocol) NewStreamEncoder(model string, includeUsage bool) *StreamEncoder
 		text:      map[int]string{},
 		thinking:  map[int]string{},
 		completed: map[int]any{},
+		toolNames: p.toolNames,
 	}
 }
 
@@ -371,10 +376,7 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 		e.name[ev.ContentIndex] = ev.ToolName
 		return e.ev("response.output_item.added", map[string]any{
 			"output_index": ev.ContentIndex,
-			"item": map[string]any{
-				"id": id, "type": "function_call", "call_id": ev.ToolCallID,
-				"name": ev.ToolName, "arguments": "", "status": "in_progress",
-			},
+			"item":         toolItem(e.toolNames, id, ev.ToolCallID, ev.ToolName, "", "in_progress"),
 		})
 
 	case llm.EventToolCallDelta:
@@ -388,10 +390,7 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 		id := e.item(ev.ContentIndex, "function_call")
 		return e.ev("response.output_item.done", map[string]any{
 			"output_index": ev.ContentIndex,
-			"item": map[string]any{
-				"id": id, "type": "function_call", "call_id": ev.ToolCallID,
-				"name": ev.ToolName, "arguments": ev.ToolArguments, "status": "completed",
-			},
+			"item":         toolItem(e.toolNames, id, ev.ToolCallID, ev.ToolName, ev.ToolArguments, "completed"),
 		})
 
 	case llm.EventDone:
@@ -455,10 +454,7 @@ func (e *StreamEncoder) incompleteItem(idx int) map[string]any {
 	id := e.itemID[idx]
 	switch e.kind[idx] {
 	case "function_call":
-		return map[string]any{
-			"id": id, "type": "function_call", "call_id": e.callID[idx],
-			"name": e.name[idx], "arguments": e.args[idx], "status": "incomplete",
-		}
+		return toolItem(e.toolNames, id, e.callID[idx], e.name[idx], e.args[idx], "incomplete")
 	case "reasoning":
 		return map[string]any{
 			"id": id, "type": "reasoning", "summary": []any{
@@ -474,7 +470,7 @@ func (e *StreamEncoder) incompleteItem(idx int) map[string]any {
 }
 
 // EncodeFinal 把聚合后的消息编码为非流式响应。
-func (Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, error) {
+func (p Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, error) {
 	if msg == nil {
 		msg = &llm.AssistantMessage{}
 	}
@@ -490,10 +486,7 @@ func (Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, er
 			})
 		case llm.ContentToolCall:
 			if c.ToolCall != nil {
-				output = append(output, map[string]any{
-					"id": "fc_" + randomHex(24), "type": "function_call", "call_id": c.ToolCall.ID,
-					"name": c.ToolCall.Name, "arguments": c.ToolCall.Arguments, "status": "completed",
-				})
+				output = append(output, toolItem(p.toolNames, "fc_"+randomHex(24), c.ToolCall.ID, c.ToolCall.Name, c.ToolCall.Arguments, "completed"))
 			}
 		}
 	}

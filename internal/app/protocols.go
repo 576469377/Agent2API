@@ -39,20 +39,25 @@ func (chatProtocol) StreamErrorEvents() bool { return chat.Protocol{}.StreamErro
 
 // ───────────────────────── Responses ─────────────────────────
 
-type responsesProtocol struct{}
+type responsesProtocol struct{ codec responses.Protocol }
+
+func (responsesProtocol) WithRequest(body []byte) (Protocol, error) {
+	p, err := responses.Bind(body)
+	return responsesProtocol{codec: p}, err
+}
 
 func (responsesProtocol) Name() string { return "openai-responses" }
 
-func (responsesProtocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
-	return responses.Protocol{}.DecodeRequest(body)
+func (p responsesProtocol) DecodeRequest(body []byte) (llm.RequestMessages, error) {
+	return p.codec.DecodeRequest(body)
 }
 
-func (responsesProtocol) NewStreamEncoder(model string, includeUsage bool) StreamEncoder {
-	return responses.Protocol{}.NewStreamEncoder(model, includeUsage)
+func (p responsesProtocol) NewStreamEncoder(model string, includeUsage bool) StreamEncoder {
+	return p.codec.NewStreamEncoder(model, includeUsage)
 }
 
-func (responsesProtocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, error) {
-	return responses.Protocol{}.EncodeFinal(msg, model)
+func (p responsesProtocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, error) {
+	return p.codec.EncodeFinal(msg, model)
 }
 
 func (responsesProtocol) AppendSSE(dst []byte, name string, data []byte) []byte {

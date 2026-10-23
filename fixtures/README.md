@@ -33,6 +33,7 @@
 | `trae-stream-tool-result.sse` | 工具结果续轮；实际输入 376，其中缓存读取 256，不重复累计 |
 | `trae-free-quota.json` | 同日普通 Free 月赠 500 积分权益的最小脱敏结构；时间改为固定有效区间 |
 | `trae-model-catalog.json` | 同日 `solo_agent` 目录的最小字段集；含 DeepSeek / GLM 的 dev、1M max 配对，Seed 256K 配对及会员专属排除样本 |
+| `codex-namespaced-tools.json` | 2026-10-23 实际 Codex 客户端请求中函数与 MCP 命名空间的最小结构；保留工具层级和参数类型，提示词与模型名替换为测试值；用于下游编解码回归，并非上游响应 |
 
 TRAE 样本仅保留解析所需字段，移除账号 / 设备、会话和 pack 标识、内部提示词、加密模型参数。`timing_cost` 和携带缓存材料的 `extra_info` 帧整体省略。`prompt_completion_id` 使用数字占位，工具调用 ID 使用字符串占位；正文是固定测试提示的响应，不含用户项目内容。授权凭据与原始抓包只留在被忽略的本机目录。
 

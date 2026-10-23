@@ -51,6 +51,10 @@ TRAE 的 DeepSeek / GLM 已使用经真实免费账号验证的 1M 档位。同�
 
 Codex 配置采用官方支持的 `model_context_window` 与 HTTP Responses 选项，关闭本网关尚未提供的 WebSocket 传输。同步不新增 `model_max_output_tokens` 或 `disable_response_storage` 这类当前官方配置参考未列出的字段，也不声称通过它们限制输出；现有自定义字段继续保留。[OpenAI 官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)
 
+Codex 的 MCP `function` 工具可按命名空间分组。网关在内部适配上游的扁平工具接口，返回时恢复原始 `name` 与 `namespace`，工具结果仍通过同一个 `call_id` 续接；不能把分组名当成可执行工具。命名空间内的自由文本 `custom` 工具和嵌套命名空间暂不支持，详见 [Responses 工具命名空间](api.md#responses-工具命名空间)。
+
+一键同步检查登录、免费费率和可查询的权益，不会逐个生成回复。上游把模型列为免费不代表当天还有调用额度：OpenRouter 的免费请求数由账号共享，Cursor 也可能返回免费额度或限流错误。配置写入后，验收应包含普通回复、真实工具调用和工具结果续轮；遇到共享额度耗尽时，换同平台免费模型不能恢复额度。
+
 **pi** 未安装或尚无配置时，也可以先生成 `models.json`。已有配置会原样备份为 `models.json.bak-…`，增量更新所选平台的模型，保留其他供应商、自定义标签和更小的上下文 / 输出预算；不写 `auth.json`、`settings.json` 或会话。若本次移除了原默认模型，结果会提示在 pi 中重新选择。遵循网关进程的 `PI_CODING_AGENT_DIR` 环境变量。Cursor / TRAE 为固定思考，不生成无法兑现的强度开关。pi 会将 `!` 开头的密钥解释为命令、将 `$` 解释为环境插值，这类网关密钥会拒绝写入并给出原因。
 
 两个入口都只接受本机访问，写入地址由实际网关配置决定，浏览器不能指定任意路径或密钥接收地址。配置在核验期间被客户端修改时停止操作；重复点击无变化时不重写、不重复添加或生成备份。cc-switch 当前检测默认用户目录下的数据库；使用自定义数据目录的实例需手动配置，按钮不会搜索或接管其他目录。

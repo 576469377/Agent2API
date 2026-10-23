@@ -328,7 +328,20 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 		return
 	}
 
-	req, err := proto.DecodeRequest(body)
+	// 工具命名空间等有往返状态的协议，只绑定本次请求的编码上下文。
+	if binder, ok := proto.(interface {
+		WithRequest([]byte) (Protocol, error)
+	}); ok {
+		var bound Protocol
+		bound, err = binder.WithRequest(body)
+		if err == nil {
+			proto = bound
+		}
+	}
+	var req llm.RequestMessages
+	if err == nil {
+		req, err = proto.DecodeRequest(body)
+	}
 	if err != nil {
 		f := llm.Wrap(err)
 		rec.OK, rec.Status, rec.Error = false, f.HTTPStatus(), f.Error()
