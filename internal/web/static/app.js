@@ -291,7 +291,9 @@ async function api(path, body, extraHeaders = {}, signal) {
 function publishResource(key, data, checkedRates = false) {
   if (data.error) throw new Error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
   if (key === "models" && Array.isArray(data.models)) {
-    if (checkedRates) data.models = verifyRateObservations(data.models, s.rateSync.lastAttempt);
+    // Ordinary reads may observe recovery after the explicit check finished.
+    // Keep its observation cutoff so an older cache cannot restore free rates.
+    if (checkedRates || s.rateSync.lastAttempt || data.pricing_snapshot) data.models = verifyRateObservations(data.models, s.rateSync.lastAttempt);
     const failedPlatforms = new Set((data.catalog_status || []).filter(row => row.status === "error").map(row => row.platform));
     data.models = data.models.map(model => failedPlatforms.has(model.platform) ? { ...model, pricing_sync_failed: true } : model);
     const changes = pricingChanges([...s.rateSync.confirmed.values()], data.models);
@@ -301,10 +303,11 @@ function publishResource(key, data, checkedRates = false) {
       changes.forEach(change => pending.set(change.routingId, change));
       s.rateSync.changes = [...pending.values()];
     }
-    if (checkedRates) {
-      const unverified = [...new Set(data.models.filter(m => m.pricing && m.pricing_sync_failed).map(m => platformName(m.platform)))];
-      s.rateSync.error = data.pricing_snapshot ? L("历史费率快照待更新。", "Historical rates need an update.") : unverified.length ? L(`${unverified.join("、")} 费率更新失败。`, `Rate update failed: ${unverified.join(", ")}.`) : "";
-    }
+    const unverified = [...new Set([...failedPlatforms, ...data.models.filter(m => m.pricing && m.pricing_sync_failed).map(m => m.platform)].map(platformName))];
+    s.rateSync.error = [
+      data.pricing_snapshot ? L("历史费率快照待更新。", "Historical rates need an update.") : "",
+      unverified.length ? L(`${unverified.join("、")} 费率更新失败。`, `Rate update failed: ${unverified.join(", ")}.`) : "",
+    ].filter(Boolean).join(" ");
   }
   s.cache[key] = data;
   s.receivedAt[key] = Date.now();
@@ -342,11 +345,7 @@ async function syncRates(manual = false) {
   try {
     await resourceLoader.load(["models"], {
       replace: true,
-      request: async (_, signal) => {
-        const result = await api("/api/config", { refresh_models: true }, {}, signal);
-        if (!(result.applied?.refresh_models > 0)) throw new Error(L("当前后端不支持费率更新。", "This backend does not support rate updates."));
-        return readResource("models", true, signal);
-      },
+      request: (_, signal) => readResource("models", true, signal),
       success: (key, data) => publishResource(key, data, true),
       failure: (key, error) => {
         s.errors[key] = error;

@@ -933,20 +933,55 @@ func (p *Pool) ModelsByAccount(ctx context.Context) map[string][]string {
 	return out
 }
 
-// ListModels 实现 adapter.Adapter：用第一个健康账号的模型目录。
-// 同平台账号的目录应当一致；全冷却时退回第一个账号让其报出真实错误。
+// ListModels 使用首选健康账号的模型目录，失败时在同一请求预算内尝试其他可用账号。
+// 目录查询不占用生成槽位，也不改变聊天健康度或账号冷却状态。
 func (p *Pool) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	p.mu.Lock()
-	// 列模型不针对特定模型，传空串：只要求账号本身可用。
-	acc := p.pickLocked(time.Now(), "")
-	if acc == nil && len(p.accounts) > 0 {
-		acc = p.accounts[0]
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	p.mu.Unlock()
-	if acc == nil {
+	p.mu.Lock()
+	if len(p.accounts) == 0 {
+		p.mu.Unlock()
 		return nil, &llm.Failure{Code: "no_account", Message: "号池为空：未配置任何可用账号", ClientFixable: true}
 	}
-	return acc.adp.ListModels(ctx)
+	// 列模型不针对特定模型，传空串：只要求账号本身可用。
+	now := time.Now()
+	preferred := p.pickLocked(now, "")
+	candidates := make([]*poolAccount, 0, len(p.accounts))
+	if preferred != nil {
+		candidates = append(candidates, preferred)
+	}
+	for _, acc := range p.accounts {
+		if acc != preferred && acc.accountUsable(now) {
+			candidates = append(candidates, acc)
+		}
+	}
+	p.mu.Unlock()
+
+	var lastErr error
+	for _, acc := range candidates {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+		usable := acc.accountUsable(time.Now())
+		p.mu.Unlock()
+		if !usable {
+			continue
+		}
+		models, err := acc.adp.ListModels(ctx)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil {
+			return models, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, p.exhaustedFailure("", nil)
 }
 
 // Statuses 返回各账号的运行状态快照（供横幅与控制台）。
