@@ -1,6 +1,7 @@
 package common
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,6 +27,23 @@ func TestAppendSSEFormats(t *testing.T) {
 	dst = AppendSSE(dst, "", []byte("2"))
 	if !strings.Contains(string(dst), "1") || !strings.Contains(string(dst), "2") {
 		t.Fatalf("追加语义破坏: %q", dst)
+	}
+}
+
+func TestWriteErrorDiscouragesReplayingPartiallySubmittedRequests(t *testing.T) {
+	for _, noRetry := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		WriteError(w, &llm.Failure{Code: "upstream_upload_timeout", Timeout: true, NoRetry: noRetry})
+		if w.Code != http.StatusGatewayTimeout {
+			t.Fatalf("timeout status changed: %d", w.Code)
+		}
+		want := ""
+		if noRetry {
+			want = "false"
+		}
+		if got := w.Header().Get("X-Should-Retry"); got != want {
+			t.Fatalf("replay hint=%q want %q", got, want)
+		}
 	}
 }
 

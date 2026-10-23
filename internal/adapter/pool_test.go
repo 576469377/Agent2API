@@ -76,6 +76,27 @@ func (f *fakeAd) Name() string                                    { return f.nam
 
 func rateLimitedErr(msg string) error { return rateLimitedFailure(msg) }
 
+func TestPoolDoesNotReplayPartiallyUploadedRequestAndReleasesSlot(t *testing.T) {
+	var calls atomic.Int64
+	failure := &llm.Failure{Code: "upstream_upload_timeout", Message: "upload stalled", Cause: context.DeadlineExceeded, Timeout: true, UpstreamFault: true, NoRetry: true}
+	p := NewPool("test", nil)
+	for _, label := range []string{"first", "second", "third"} {
+		p.Add(label, &fakeAd{name: "test", err: failure, onStream: func() { calls.Add(1) }})
+	}
+	_, err := p.Stream(context.Background(), llm.RequestMessages{Model: "fixture"})
+	if err != failure || calls.Load() != 1 {
+		t.Fatalf("partial upload replayed: calls=%d err=%v", calls.Load(), err)
+	}
+	for _, status := range p.Statuses() {
+		if status.InFlight != 0 {
+			t.Fatalf("upload timeout leaked a pool slot: %+v", status)
+		}
+	}
+	if p.HealthyCount() != 3 {
+		t.Fatal("upload timeout was mistaken for exhausted account quota")
+	}
+}
+
 func rateLimitedFailure(msg string) *llm.Failure {
 	f := llm.NewFailure("rate_limited", msg, nil)
 	f.RateLimited = true

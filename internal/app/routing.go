@@ -64,7 +64,7 @@ func (a *App) routeStream(ctx context.Context, req llm.RequestMessages, hint str
 	}
 	failure := llm.Wrap(err)
 	eligible := func(f *llm.Failure) bool {
-		return !f.Local && (f.RateLimited || f.QuotaExhausted || strings.HasPrefix(f.Code, "http_5"))
+		return !f.Local && !f.NoRetry && (f.RateLimited || f.QuotaExhausted || strings.HasPrefix(f.Code, "http_5"))
 	}
 	if !eligible(failure) {
 		return stream, primary, err

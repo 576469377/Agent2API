@@ -24,6 +24,9 @@ type Failure struct {
 	UpstreamFault bool
 	// Local 表示网关自身的容量或尝试预算不足，不应降低上游账号健康度。
 	Local bool
+	// NoRetry stops automatic replay when a partially submitted request may
+	// already have been accepted. It does not change the HTTP error category.
+	NoRetry bool
 
 	// RetryAfterSeconds 是上游建议的重试等待秒数。
 	RetryAfterSeconds int

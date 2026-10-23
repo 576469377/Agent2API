@@ -119,6 +119,7 @@ func TestSameModelFallbackDoesNotOverridePinnedRoutes(t *testing.T) {
 		{"quota", "shared", true, true, true, &llm.Failure{Code: "quota", QuotaExhausted: true}},
 		{"rate", "shared", true, true, true, &llm.Failure{Code: "rate_limited", RateLimited: true}},
 		{"server", "shared", true, true, true, &llm.Failure{Code: "http_503", UpstreamFault: true}},
+		{"partially submitted", "shared", true, true, false, &llm.Failure{Code: "http_503", UpstreamFault: true, NoRetry: true}},
 		{"pinned", "workbuddy/shared", true, true, false, &llm.Failure{Code: "rate_limited", RateLimited: true}},
 		{"disabled", "shared", false, true, false, &llm.Failure{Code: "rate_limited", RateLimited: true}},
 		{"different model", "shared", true, false, false, &llm.Failure{Code: "rate_limited", RateLimited: true}},

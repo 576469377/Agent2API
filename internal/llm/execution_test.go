@@ -3,9 +3,56 @@ package llm
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestUploadProgressSnapshotsAreIndependentAndIgnoreOlderAttemptCallbacks(t *testing.T) {
+	e := NewExecution(6)
+	ctx := WithExecution(context.Background(), e)
+	first, finish, err := BeginAttempt(ctx, "fixture", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetRequestBytes(first, 4096)
+	ObserveUploadConnection(first, "HTTP/1.1", false)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			ObserveUpload(first, 32)
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		_ = e.Snapshot()
+	}
+	wg.Wait()
+	before := e.Snapshot()
+	if before.Attempts[0].UploadedBytes != 3200 || before.Attempts[0].UploadStartedAtMs == 0 {
+		t.Fatal("upload progress not recorded")
+	}
+	ObserveUpload(first, 32)
+	if before.Attempts[0].UploadedBytes != 3200 {
+		t.Fatal("snapshot aliases mutable progress")
+	}
+	_ = finish(502, errors.New("fixture failure"))
+	second, finishSecond, err := BeginAttempt(ctx, "fixture", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetRequestBytes(second, 10)
+	ObserveUpload(first, 1000)
+	CompleteUpload(first)
+	ObserveUploadConnection(first, "HTTP/2.0", true)
+	CompleteUpload(second)
+	after := e.Snapshot()
+	if after.Attempts[0].UploadedBytes != 3232 || after.Attempts[0].UploadCompletedAtMs != 0 || after.Attempts[1].UploadedBytes != 0 || after.Attempts[1].UploadCompletedAtMs == 0 {
+		t.Fatalf("late callback contaminated progress: %+v", after)
+	}
+	_ = finishSecond(200, nil)
+}
 
 func TestExecutionBudgetAndSuccessfulAttemptDoNotCancelLongStream(t *testing.T) {
 	e := NewExecution(2)

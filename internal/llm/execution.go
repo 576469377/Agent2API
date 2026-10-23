@@ -13,7 +13,21 @@ type executionKey struct{}
 type attemptAccountKey struct{}
 type attemptIndexKey struct{}
 
+// UploadProgress contains counters and transport timing only. UploadedBytes
+// counts body bytes read by the transport, not an acknowledgement from upstream;
+// UploadCompletedAtMs is set only after the socket write has completed.
+type UploadProgress struct {
+	RequestBytes           int64  `json:"request_bytes,omitempty"`
+	UploadedBytes          int64  `json:"uploaded_bytes,omitempty"`
+	UploadStartedAtMs      int64  `json:"upload_started_at_ms,omitempty"`
+	UploadLastProgressAtMs int64  `json:"upload_last_progress_at_ms,omitempty"`
+	UploadCompletedAtMs    int64  `json:"upload_completed_at_ms,omitempty"`
+	UpstreamProtocol       string `json:"upstream_protocol,omitempty"`
+	ConnectionReused       bool   `json:"connection_reused,omitempty"`
+}
+
 type Attempt struct {
+	UploadProgress
 	Number     int    `json:"number"`
 	Platform   string `json:"platform"`
 	AccountID  string `json:"account_id,omitempty"`
@@ -89,6 +103,45 @@ func SetAttemptPhase(ctx context.Context, phase string) {
 	if e.phase == "connecting" || e.phase == "uploading" || e.phase == "waiting_headers" {
 		e.phase = phase
 	}
+}
+
+func updateUpload(ctx context.Context, update func(*UploadProgress)) {
+	e := ExecutionFrom(ctx)
+	index, ok := ctx.Value(attemptIndexKey{}).(int)
+	if e == nil || !ok || index < 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if index != len(e.attempts)-1 || e.attempts[index].ErrorCode != "" {
+		return
+	}
+	update(&e.attempts[index].UploadProgress)
+}
+
+func SetRequestBytes(ctx context.Context, total int64) {
+	updateUpload(ctx, func(p *UploadProgress) { p.RequestBytes = total })
+}
+
+func ObserveUploadConnection(ctx context.Context, protocol string, reused bool) {
+	updateUpload(ctx, func(p *UploadProgress) {
+		p.UpstreamProtocol, p.ConnectionReused = protocol, reused
+		p.UploadStartedAtMs = time.Now().UnixMilli()
+	})
+}
+
+func ObserveUpload(ctx context.Context, n int64) {
+	if n <= 0 {
+		return
+	}
+	updateUpload(ctx, func(p *UploadProgress) {
+		p.UploadedBytes += n
+		p.UploadLastProgressAtMs = time.Now().UnixMilli()
+	})
+}
+
+func CompleteUpload(ctx context.Context) {
+	updateUpload(ctx, func(p *UploadProgress) { p.UploadCompletedAtMs = time.Now().UnixMilli() })
 }
 
 func (e *Execution) Remaining() time.Duration {

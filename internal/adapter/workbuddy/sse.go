@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -185,8 +186,17 @@ func (s *upstreamStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
 		}
 	}
 	if err := s.scanner.Err(); err != nil {
-		if err == context.Canceled || ctx.Err() != nil {
-			return llm.ResponseEvent{}, ctx.Err()
+		if ctx.Err() != nil {
+			return llm.ResponseEvent{}, context.Cause(ctx)
+		}
+		if errors.Is(err, context.Canceled) {
+			// The transport may cancel its own child context while the caller
+			// is still connected, e.g. when a watchdog closes the response body.
+			// Returning ctx.Err() used to emit successful empty events forever.
+			return llm.ResponseEvent{}, &llm.Failure{Code: "upstream_response_canceled", Message: "上游响应连接已关闭", UpstreamFault: true, NoRetry: true}
+		}
+		if isUploadTimeout(err) {
+			return llm.ResponseEvent{}, err
 		}
 		return llm.ResponseEvent{}, llm.Wrap(&llm.Failure{
 			Code: "upstream_read_failed", Message: "读取上游流失败: " + err.Error(),

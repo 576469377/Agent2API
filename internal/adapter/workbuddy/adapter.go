@@ -109,6 +109,7 @@ func New(cfg Config) (*Adapter, error) {
 	credPath := cfg.CredentialPath
 
 	cli := newHTTPClient(cfg.BaseURL, 0)
+	cli.uploadIdleTimeout = cfg.StreamIdleTimeout
 	auth := newAuth(cli, cred, credPath)
 	a := &Adapter{
 		cli:    cli,
@@ -311,6 +312,9 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 // 账号多打几顿、拖长失败时间），号池层会冷却该模型并换其他账号；
 // 鉴权由 401 分支的凭证刷新处理。
 func shouldRetryDial(err error) bool {
+	if f := llm.Wrap(err); f != nil && f.NoRetry {
+		return false
+	}
 	if isRetryableTransportError(err) {
 		return true
 	}

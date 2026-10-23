@@ -433,7 +433,7 @@ func (p *Pool) Stream(ctx context.Context, req llm.RequestMessages) (llm.Respons
 		// 本次尝试结束（不管成功与否都已换号或返回），归还槽位。
 		release()
 		lastErr = err
-		if llm.Wrap(err).Local {
+		if f := llm.Wrap(err); f.Local || f.NoRetry {
 			return nil, err
 		}
 		// 会话亲和解绑：绑定的账号失败了，旧绑定已无意义

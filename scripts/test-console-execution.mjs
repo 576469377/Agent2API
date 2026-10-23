@@ -18,3 +18,11 @@ test("request drill-down and search use the server request ID without breaking l
   assert.deepEqual(filterRequests([row],{query:"stable-request"}),[row]);
   assert.notEqual(requestKey({time:"first",model:"m"}),requestKey({time:"second",model:"m"}));
 });
+
+test("upload status shows body progress and distinguishes a blocked final write", () => {
+  const row = {phase:"uploading",request_bytes:2097152,uploaded_bytes:1048576,upload_started_at_ms:1000,upload_last_progress_at_ms:2000};
+  assert.equal(liveRequestStatus(row,L,3000),"正在上传请求 · 1.0 MB / 2.0 MB");
+  assert.equal(liveRequestStatus(row,L,9000),"正在上传请求 · 1.0 MB / 2.0 MB · 7秒无进展");
+  assert.equal(liveRequestStatus({...row,uploaded_bytes:2097152},L,3000),"正在上传请求 · 2.0 MB / 2.0 MB · 等待发送完成");
+  assert.equal(liveRequestStatus({...row,phase:"waiting_headers",upload_completed_at_ms:3000},L,3000),"等待上游响应");
+});

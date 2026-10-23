@@ -51,6 +51,7 @@ type TokenCalibration struct {
 	Samples    int64 `json:"samples"`
 }
 type LiveRequest struct {
+	llm.UploadProgress
 	RequestID                string     `json:"request_id,omitempty"`
 	Phase                    string     `json:"phase,omitempty"`
 	AttemptCount             int        `json:"attempt_count,omitempty"`
@@ -138,6 +139,9 @@ func (m *Metrics) liveSnapshotAt(now time.Time) LiveSnapshot {
 		if request.Execution != nil {
 			execution := request.Execution.Snapshot()
 			row.RequestID, row.Phase, row.AttemptCount, row.QueueMs = execution.RequestID, execution.Phase, execution.AttemptCount, execution.QueueMs
+			if len(execution.Attempts) > 0 {
+				row.UploadProgress = execution.Attempts[len(execution.Attempts)-1].UploadProgress
+			}
 		}
 		if !request.LastOutput.IsZero() {
 			stamp := request.LastOutput

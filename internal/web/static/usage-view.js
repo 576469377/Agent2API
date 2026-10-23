@@ -7,7 +7,18 @@ export function liveRequestStatus(row, L, now) {
     uploading: L("正在上传请求", "Uploading request"), waiting_headers: L("等待上游响应", "Awaiting response headers"),
     waiting_output: L("等待首段输出", "Awaiting first output"),
   };
-  if (labels[row.phase]) return labels[row.phase] + (row.phase === "queued" && row.queue_ms > 0 ? ` · ${(row.queue_ms / 1000).toFixed(1)}s` : "");
+  if (labels[row.phase]) {
+    let detail = row.phase === "queued" && row.queue_ms > 0 ? ` · ${(row.queue_ms / 1000).toFixed(1)}s` : "";
+    if (row.phase === "uploading" && row.request_bytes > 0) {
+      const size = bytes => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+      detail += ` · ${size(row.uploaded_bytes || 0)} / ${size(row.request_bytes)}`;
+      const last = row.upload_last_progress_at_ms || row.upload_started_at_ms;
+      const idle = last > 0 ? Math.max(0, Math.floor((now - last) / 1000)) : 0;
+      if (idle >= 5) detail += ` · ${L(`${idle}秒无进展`, `No progress for ${idle}s`)}`;
+      if (row.uploaded_bytes >= row.request_bytes && !row.upload_completed_at_ms) detail += ` · ${L("等待发送完成", "Finishing send")}`;
+    }
+    return labels[row.phase] + detail;
+  }
   return !row.last_output_at ? L("等待首段输出", "Awaiting first output") : now - Date.parse(row.last_output_at) >= 3000 ? L("等待后续输出", "Awaiting more output") : L("正在接收", "Receiving");
 }
 

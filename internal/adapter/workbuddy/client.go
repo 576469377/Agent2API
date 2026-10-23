@@ -3,11 +3,13 @@ package workbuddy
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,19 +53,38 @@ const (
 
 // httpClient 封装上游 HTTP 调用。
 type httpClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL           string
+	http              *http.Client
+	streamHTTP        *http.Client
+	uploadIdleTimeout time.Duration
 }
 
 func newHTTPClient(baseURL string, timeout time.Duration) *httpClient {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	control := http.DefaultTransport.(*http.Transport).Clone()
+	chat := http.DefaultTransport.(*http.Transport).Clone()
+	// HTTP/2 multiplexes all concurrent uploads on one connection, including
+	// its flow-control window. Use one HTTP/1.1 connection per active chat so
+	// a stalled upload cannot hold up another chat on the same account.
+	// Keep control traffic (catalogue, auth and benefits) in a separate pool.
+	chat.ForceAttemptHTTP2 = false
+	chat.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	if chat.TLSClientConfig == nil {
+		chat.TLSClientConfig = &tls.Config{}
+	} else {
+		chat.TLSClientConfig = chat.TLSClientConfig.Clone()
+	}
+	chat.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	chat.MaxConnsPerHost = 0
 	return &httpClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		// 不设 Client.Timeout：它会作用于整个响应体读取，必然误杀长流。
 		// 超时改由 ctx deadline 控制（非流式）+ 空闲看门狗控制（流式）。
-		http: &http.Client{},
+		http:              &http.Client{Transport: control},
+		streamHTTP:        &http.Client{Transport: chat},
+		uploadIdleTimeout: 2 * time.Minute,
 	}
 }
 
@@ -428,19 +449,40 @@ func (c *httpClient) openStream(ctx context.Context, path string, body any, head
 	}
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Accept", "text/event-stream")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(raw))
+	guard := newUploadGuard(ctx, c.uploadIdleTimeout)
+	traced := httptrace.WithClientTrace(guard.ctx, &httptrace.ClientTrace{
+		GotConn:      func(httptrace.GotConnInfo) { guard.start() },
+		WroteHeaders: guard.start,
+		WroteRequest: func(httptrace.WroteRequestInfo) { guard.finishUpload() },
+	})
+	llm.SetRequestBytes(ctx, int64(len(raw)))
+	// A custom reader prevents implicit body replay (GetBody stays nil).
+	// Reading the last chunk does not mean its socket write has completed;
+	// the guard remains armed until WroteRequest fires.
+	req, err := http.NewRequestWithContext(traced, http.MethodPost, c.baseURL+path, &uploadReader{Reader: bytes.NewReader(raw), guard: guard})
 	if err != nil {
+		guard.close()
 		return nil, &llm.Failure{Code: "request_build_failed", Message: err.Error(), Cause: err}
 	}
+	req.ContentLength = int64(len(raw))
 	for k, vs := range headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.streamHTTP.Do(req)
 	if err != nil {
+		cause := context.Cause(guard.ctx)
+		guard.close()
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
+		if isUploadTimeout(cause) {
+			return nil, cause
+		}
 		return nil, llm.Wrap(&llm.Failure{Code: "upstream_unreachable", Message: "连接上游失败: " + err.Error(), Cause: err, UpstreamFault: true})
 	}
+	resp.Body = &uploadResponseBody{ReadCloser: resp.Body, guard: guard}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		resp.Body.Close()
