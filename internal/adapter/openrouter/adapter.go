@@ -30,12 +30,13 @@ type Config struct {
 }
 
 type Adapter struct {
-	cfg     Config
-	client  *http.Client
-	mu      sync.Mutex
-	fetchMu sync.Mutex
-	models  []adapter.ModelInfo
-	expires time.Time
+	benefits adapter.BenefitCache
+	cfg      Config
+	client   *http.Client
+	mu       sync.Mutex
+	fetchMu  sync.Mutex
+	models   []adapter.ModelInfo
+	expires  time.Time
 }
 
 func New(cfg Config) (*Adapter, error) {

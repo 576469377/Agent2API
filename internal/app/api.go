@@ -291,6 +291,8 @@ type managedAccount struct {
 	adapter.AccountStatus
 	Platform string                     `json:"platform"`
 	Identity *workbuddy.AccountIdentity `json:"identity,omitempty"`
+	Checkin  *adapter.CheckinView       `json:"checkin,omitempty"`
+	Benefits *adapter.AccountBenefits   `json:"benefits,omitempty"`
 }
 
 // listManagedAccounts 返回**全部平台账号的合并视图**（控制台「账号」页数据源）。
@@ -320,6 +322,14 @@ func (a *App) listManagedAccounts(w http.ResponseWriter) {
 				out.Healthy++
 			}
 			m := managedAccount{AccountStatus: st, Platform: rt.ID}
+			if p, ok := st.Adapter.(adapter.BenefitsProvider); ok {
+				view := p.AccountBenefits()
+				m.Benefits = &view
+			}
+			if p, ok := st.Adapter.(checkinPlatform); ok {
+				state := p.CheckinStatus()
+				m.Checkin = &state
+			}
 			// 登录状态：凭证是否还有效、refreshToken 是否已死。
 			if p, ok := st.Adapter.(accountIdentityProvider); ok {
 				id := p.AccountIdentity()

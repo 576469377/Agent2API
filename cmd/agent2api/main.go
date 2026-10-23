@@ -191,6 +191,9 @@ func runServer(args []string) {
 
 	application := app.New(cfg, hub, logger)
 	application.StartMetricsPersistence(30 * time.Second)
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	application.StartPlatformBackground(backgroundCtx)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           application.Handler(),
@@ -211,6 +214,7 @@ func runServer(args []string) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopBackground()
 
 	logger.Printf("正在关闭...")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

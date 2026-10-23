@@ -57,10 +57,12 @@ func DefaultConfig() Config {
 
 // Adapter 是 WorkBuddy 平台适配器。
 type Adapter struct {
-	cli    *httpClient
-	auth   *Auth
-	models *modelCache
-	cfg    Config
+	checkins *accountCheckin
+	benefits adapter.BenefitCache
+	cli      *httpClient
+	auth     *Auth
+	models   *modelCache
+	cfg      Config
 	// sanitize 是运行期可变的脱敏开关，控制台可以在不重启的情况下切换。
 	sanitize atomic.Bool
 }
@@ -115,6 +117,7 @@ func New(cfg Config) (*Adapter, error) {
 		cfg:    cfg,
 	}
 	a.sanitize.Store(cfg.Sanitize)
+	a.checkins = newAccountCheckin(a)
 	return a, nil
 }
 

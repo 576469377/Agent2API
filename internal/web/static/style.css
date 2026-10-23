@@ -2322,3 +2322,35 @@ thead th { background: var(--surface-alt); font-weight: 500; }
     transition: none !important;
   }
 }
+
+.trae-checkin { padding: 20px; margin-bottom: 18px; }
+.trae-checkin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.trae-checkin-heading h2 { font-size: 15px; margin: 0; }
+.trae-checkin-heading p, .trae-checkin-note, .trae-checkin-footer { font-size: 12px; color: var(--muted); }
+.trae-checkin-heading p { margin: 5px 0 0; }
+.trae-credit-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin: 20px 0; }
+.trae-credit-metrics dt { color: var(--muted); font-size: 12px; }
+.trae-credit-metrics dd { margin: 5px 0 0; font-size: 25px; font-variant-numeric: tabular-nums; }
+.trae-checkin-facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; font-size: 12px; }
+.trae-checkin-facts span { display: flex; flex-direction: column; gap: 5px; color: var(--muted); }
+.trae-checkin-facts strong { color: var(--text); font-weight: 500; }
+.trae-checkin-note { margin: 16px 0; }
+.trae-checkin-footer, .trae-checkin-footer > div { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.trae-checkin-footer { border-top: 1px solid var(--border); padding-top: 14px; }
+@media (max-width: 720px) {
+  .trae-checkin-facts { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .trae-credit-metrics dd { font-size: 21px; }
+}
+/* Account balances retain their upstream units; check-in is scoped to a row. */
+.account-benefits-compact { display:flex; flex-direction:column; gap:4px; font-size:12px; min-width:135px; }
+.account-benefits-compact small { color:var(--muted); font-size:11px; }
+.account-card > .account-benefits-compact { padding:10px 0; border-bottom:1px solid var(--border); }
+.account-benefits-detail { margin:18px 0; }
+.account-benefits-detail h3, .account-balance h4 { font-size:14px; margin:0; }
+.account-balance { padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border); }
+.account-balance h4 { color:var(--muted); margin-bottom:12px; }
+.account-benefits-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; color:var(--muted); }
+.account-checkin-overview { margin-bottom:18px; padding:16px; }
+.account-checkin-overview > summary { cursor:pointer; color:var(--muted); font-size:13px; }
+.account-checkin-overview > div { margin-top:16px; }
+.account-checkin-overview .trae-checkin { margin-bottom:12px; }

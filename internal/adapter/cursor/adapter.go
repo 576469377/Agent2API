@@ -26,11 +26,12 @@ type Config struct {
 }
 
 type Adapter struct {
-	cfg    Config
-	client *http.Client
-	load   func(context.Context, string) (credentials, error)
-	mu     sync.Mutex
-	ready  bool
+	benefits adapter.BenefitCache
+	cfg      Config
+	client   *http.Client
+	load     func(context.Context, string) (credentials, error)
+	mu       sync.Mutex
+	ready    bool
 }
 
 func New(cfg Config) (*Adapter, error) {

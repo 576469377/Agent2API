@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
@@ -56,7 +57,8 @@ type App struct {
 	startedAt time.Time
 	// logins 管理进行中的设备码登录（控制台「添加账号」「重新登录」）。
 	// 会话按平台标记；不同平台的登录方式在 loginManager 内部分派。
-	logins *loginManager
+	logins            *loginManager
+	accountBackground sync.Once
 }
 
 // New 构造应用。hub 由装配层（cmd）按配置建好所有平台后传入。
@@ -134,6 +136,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
 	mux.HandleFunc("/api/accounts", a.withAuth(a.apiAccounts))
 	mux.HandleFunc("/api/accounts/manage", a.withAuth(a.apiAccountsManage))
+	mux.HandleFunc("/api/accounts/checkin", a.withAuth(a.apiAccountCheckin))
+	mux.HandleFunc("/api/accounts/benefits", a.withAuth(a.apiAccountBenefits))
 	mux.HandleFunc("/api/accounts/login-status", a.withAuth(a.apiLoginStatus))
 	mux.HandleFunc("/api/accounts/models", a.withAuth(a.apiAccountModels))
 	mux.HandleFunc("/api/models", a.withAuth(a.apiModels))

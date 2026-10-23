@@ -11,6 +11,8 @@ import {
   markdown,
 } from "./core.js";
 import { renderMath } from "./math.js";
+import { renderTraeCheckin } from "./trae-checkin.js";
+import { renderAccountBenefits, renderCheckinOverview, accountBenefitEndpoint } from "./account-benefits.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage, requestOutcome } from "./monitor.js";
 import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
@@ -199,9 +201,9 @@ const gatewayURL = () => {
 const tag = (label, color = "", dot = false) =>
   `<span class="tag ${color}">${dot ? '<span class="status-dot"></span>' : ""}${e(label)}</span>`;
 const button = (label, action, extra = "", glyph = "") =>
-  `<button class="button ${extra}" data-action="${action}">${glyph ? icon(glyph) : ""}${e(label)}</button>`;
+  `<button type="button" class="button ${extra}" data-action="${action}">${glyph ? icon(glyph) : ""}${e(label)}</button>`;
 const iconButton = (glyph, label, action, attrs = "") =>
-  `<button class="icon-button" aria-label="${e(label)}" title="${e(label)}" data-action="${action}" ${attrs}>${icon(glyph)}</button>`;
+  `<button type="button" class="icon-button" aria-label="${e(label)}" title="${e(label)}" data-action="${action}" ${attrs}>${icon(glyph)}</button>`;
 const empty = (title, description = "", glyph = "search") =>
   `<div class="empty-state">${icon(glyph)}<h3>${e(title)}</h3><p>${e(description)}</p></div>`;
 const cardHead = (title, subtitle = "", right = "") =>
@@ -893,7 +895,7 @@ function accountActions(a) {
 function accountPage() {
   const all = accounts().filter((a) => s.accounts.platform === "all" || a.platform === s.accounts.platform),
     health = accountReadiness(all);
-  return `<section class="card resource-workspace account-workspace"><div class="health-summary metric-strip">${[["ready", L("就绪账号", "Ready accounts"), health.ready, "positive"], ["attention", L("需关注", "Need attention"), health.attention, health.attention ? "negative" : ""], ["disabled", L("已停用", "Disabled"), health.disabled, ""]].map(([id, label, count, tone]) => `<button class="item metric-filter ${s.accounts.status === id ? "selected" : ""}" data-action="account-status" data-value="${id}" aria-pressed="${s.accounts.status === id}" ${!s.cache.accounts ? "disabled" : ""}><span>${e(label)}${icon("arrow")}</span><strong class="${tone}">${s.cache.accounts ? n(count) : "—"}</strong></button>`).join("")}<span class="item"><span>${e(L("处理中的请求", "Active requests"))}</span><strong>${s.cache.accounts ? n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0)) : "—"}</strong></span></div><div class="workspace-controls">
+  return `<div id="accountCheckins"></div><section class="card resource-workspace account-workspace"><div class="health-summary metric-strip">${[["ready", L("就绪账号", "Ready accounts"), health.ready, "positive"], ["attention", L("需关注", "Need attention"), health.attention, health.attention ? "negative" : ""], ["disabled", L("已停用", "Disabled"), health.disabled, ""]].map(([id, label, count, tone]) => `<button class="item metric-filter ${s.accounts.status === id ? "selected" : ""}" data-action="account-status" data-value="${id}" aria-pressed="${s.accounts.status === id}" ${!s.cache.accounts ? "disabled" : ""}><span>${e(label)}${icon("arrow")}</span><strong class="${tone}">${s.cache.accounts ? n(count) : "—"}</strong></button>`).join("")}<span class="item"><span>${e(L("处理中的请求", "Active requests"))}</span><strong>${s.cache.accounts ? n(all.reduce((sum, a) => sum + (a.in_flight || 0), 0)) : "—"}</strong></span></div><div class="workspace-controls">
   <div class="toolbar"><div class="toolbar-group">${platformTabs("accounts", s.accounts.platform)}</div></div>
   <div class="toolbar"><div class="toolbar-group">${search("accountSearch", s.accounts.query, L("搜索昵称、账号或 UID…", "Search name, account or UID…"))}<select id="accountStatusFilter" class="select" aria-label="${e(L("账号状态", "Account status"))}">${options(
     [
@@ -907,6 +909,8 @@ function accountPage() {
 }
 function updateAccountCards() {
   if (!$("accountCards")) return;
+  const checkinRoot = $("accountCheckins");
+  if (checkinRoot) checkinRoot.innerHTML = renderCheckinOverview(accounts().filter(a => s.accounts.platform === "all" || a.platform === s.accounts.platform), s.lang, !!checkinRoot.querySelector("details")?.open);
   $("pageContent").querySelectorAll('[data-action="account-status"]').forEach(button => {
     const selected = s.accounts.status === button.dataset.value;
     button.classList.toggle("selected", selected);
@@ -932,12 +936,12 @@ function updateAccountCards() {
     `${rows.length} accounts`,
   );
   if (s.accounts.view === "table") {
-    $("accountCards").innerHTML = rows.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("账号列表，可滚动", "Scrollable account list"))}"><table class="account-table"><thead><tr><th>${e(L("账号", "Account"))}</th><th>${e(L("平台", "Platform"))}</th><th>${e(L("调度状态", "Scheduling"))}</th><th>${e(L("登录状态", "Credentials"))}</th><th>${e(L("并发", "Concurrency"))}</th><th class="num">${e(L("累计调用", "Requests"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${rows.map((a) => {
+    $("accountCards").innerHTML = rows.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(L("账号列表，可滚动", "Scrollable account list"))}"><table class="account-table"><thead><tr><th>${e(L("账号", "Account"))}</th><th>${e(L("平台", "Platform"))}</th><th>${e(L("积分 / 额度", "Credits / allowance"))}</th><th>${e(L("调度状态", "Scheduling"))}</th><th>${e(L("登录状态", "Credentials"))}</th><th>${e(L("并发", "Concurrency"))}</th><th class="num">${e(L("累计调用", "Requests"))}</th><th class="num">${e(L("操作", "Actions"))}</th></tr></thead><tbody>${rows.map((a) => {
       const index = accounts().indexOf(a), name = a.identity?.nickname || a.label;
       const ambiguous = accounts().filter((other) => other.label === a.label).length > 1;
       const usage = s.cache.metrics?.by_account?.find((row) => row.key === a.label);
       const max = a.max_concurrency || 0, current = a.in_flight || 0;
-      return `<tr><td><div class="account-table-name"><span class="account-avatar">${e(name.slice(0, 1))}</span><div><strong>${e(name)}</strong><div class="cell-sub mono">${e(a.label)}</div></div></div><div class="cell-sub">${e(accountSource(a))}</div></td><td>${regionTag(a.platform)}</td><td>${tag(...accountStatus(a))}${Object.keys(a.model_cooldowns || {}).length ? `<div class="cell-sub">${Object.keys(a.model_cooldowns).length} ${e(L("个模型冷却", "models cooling"))}</div>` : ""}${a.cooldown_secs > 0 ? `<div class="cell-sub" data-until="${(s.receivedAt.accounts || Date.now()) + a.cooldown_secs * 1000}">${e(countdown(remainingCooldown(a.cooldown_secs, s.receivedAt.accounts)))}</div>` : ""}</td><td><span class="${a.identity?.refresh_expired ? "negative" : ""}">${e(credentialStatus(a))}</span><div class="cell-sub">${a.identity?.expires_at ? e(timestamp(a.identity.expires_at, true)) : "—"}</div></td><td class="account-concurrency"><span class="numeric">${current} / ${e(max || L("不限", "Unlimited"))}</span><div class="load-track"><span style="width:${max ? Math.min(100, current / max * 100) : 0}%"></span></div></td><td class="num numeric">${ambiguous ? `<span class="muted" title="${e(L("同标识跨平台聚合，无法单独归属", "This label is aggregated across platforms"))}">—</span>` : n(usage?.total)}${!ambiguous && usage?.failed ? `<div class="cell-sub negative">${n(usage.failed)} ${e(L("失败", "failed"))}</div>` : ""}</td><td><div class="row-actions"><button class="button small" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${e(L("记录", "Logs"))}</button>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div></td></tr>`;
+      return `<tr><td><div class="account-table-name"><span class="account-avatar">${e(name.slice(0, 1))}</span><div><strong>${e(name)}</strong><div class="cell-sub mono">${e(a.label)}</div></div></div><div class="cell-sub">${e(accountSource(a))}</div></td><td>${regionTag(a.platform)}</td><td>${renderAccountBenefits(a,s.lang,true)}</td><td>${tag(...accountStatus(a))}${Object.keys(a.model_cooldowns || {}).length ? `<div class="cell-sub">${Object.keys(a.model_cooldowns).length} ${e(L("个模型冷却", "models cooling"))}</div>` : ""}${a.cooldown_secs > 0 ? `<div class="cell-sub" data-until="${(s.receivedAt.accounts || Date.now()) + a.cooldown_secs * 1000}">${e(countdown(remainingCooldown(a.cooldown_secs, s.receivedAt.accounts)))}</div>` : ""}</td><td><span class="${a.identity?.refresh_expired ? "negative" : ""}">${e(credentialStatus(a))}</span><div class="cell-sub">${a.identity?.expires_at ? e(timestamp(a.identity.expires_at, true)) : "—"}</div></td><td class="account-concurrency"><span class="numeric">${current} / ${e(max || L("不限", "Unlimited"))}</span><div class="load-track"><span style="width:${max ? Math.min(100, current / max * 100) : 0}%"></span></div></td><td class="num numeric">${ambiguous ? `<span class="muted" title="${e(L("同标识跨平台聚合，无法单独归属", "This label is aggregated across platforms"))}">—</span>` : n(usage?.total)}${!ambiguous && usage?.failed ? `<div class="cell-sub negative">${n(usage.failed)} ${e(L("失败", "failed"))}</div>` : ""}</td><td><div class="row-actions"><button class="button small" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${e(L("记录", "Logs"))}</button>${iconButton("more", L("账号详情与操作", "Account details and actions"), "account-detail", `data-index="${index}"`)}</div></td></tr>`;
     }).join("")}</tbody></table></div>` : empty(L("没有匹配的账号", "No matching accounts"), L("更换筛选条件，或添加一个账号。", "Change filters or add an account."), "accounts");
     return;
   }
@@ -953,7 +957,7 @@ function updateAccountCards() {
         const limits = Object.keys(a.model_cooldowns || {}).length;
         return `<article class="card account-card"><div class="account-card-top"><div class="account-avatar">${e(name.slice(0, 1).toUpperCase())}</div><div class="account-name"><strong title="${e(name)}">${e(name)}</strong>${a.label !== name ? `<small class="mono" title="${e(a.label)}">${e(a.label)}</small>` : `<small>${e(platformName(a.platform))}</small>`}</div>${tag(state,color,true)}</div>
         <div class="account-card-context">${regionTag(a.platform)}<span>${e(accountSource(a))}</span><span class="${credentialState(a)==="sign_in"?"negative":""}">${e(credentialStatus(a))}</span></div>
-        <div class="account-card-metrics"><div><span>${e(L("累计调用", "Requests"))}</span><strong>${usage ? n(usage.total) : "—"}</strong></div><div><span>Token</span><strong>${usage ? compact((usage.input_tokens||0)+(usage.output_tokens||0)) : "—"}</strong></div><div><span>${e(L("并发", "Concurrency"))}</span><strong>${a.in_flight||0}<small> / ${e(max || L("不限", "Unlimited"))}</small></strong></div></div>
+        ${renderAccountBenefits(a,s.lang,true)}<div class="account-card-metrics"><div><span>${e(L("累计调用", "Requests"))}</span><strong>${usage ? n(usage.total) : "—"}</strong></div><div><span>Token</span><strong>${usage ? compact((usage.input_tokens||0)+(usage.output_tokens||0)) : "—"}</strong></div><div><span>${e(L("并发", "Concurrency"))}</span><strong>${a.in_flight||0}<small> / ${e(max || L("不限", "Unlimited"))}</small></strong></div></div>
         ${a.cooldown_secs>0?`<div class="account-note">${e(L("账号冷却", "Account cooldown"))} <span data-until="${(s.receivedAt.accounts||Date.now())+a.cooldown_secs*1000}">${e(countdown(remainingCooldown(a.cooldown_secs,s.receivedAt.accounts)))}</span></div>`:""}
         <div class="account-card-footer"><span class="${limits?"amber":"muted"}">${limits?e(L(`${limits} 个模型限流`,`${limits} models limited`)):e(L("无模型冷却", "No model cooldowns"))}</span><div><button class="button small ghost" data-action="account-requests" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${icon("requests")}${e(L("调用记录", "Logs"))}</button><button class="button small" data-action="account-detail" data-index="${index}">${e(L("管理", "Manage"))}${icon("chevron")}</button></div></div></article>`;
       })
@@ -1127,7 +1131,7 @@ function showAccountDetail(index) {
             "mono",
           )
         : ""
-    }</dl><div class="detail-actions sticky-detail-actions">${accountActions(a)}</div>`,
+    }</dl>${renderAccountBenefits(a,s.lang)}${renderTraeCheckin(a.checkin, s.lang, {name:platformName(a.platform),platform:a.platform,label:a.label})}<div class="detail-actions sticky-detail-actions">${accountActions(a)}</div>`,
   );
 }
 function accountUsageDetails(account) {
@@ -1276,6 +1280,37 @@ async function saveAuth(event) {
     }
     if ($("authSave")) $("authSave").disabled = false;
   }
+}
+function checkinSettingsDialog(target) {
+  const account = accounts().find(a => a.platform === target.dataset.platform && a.label === target.dataset.label), state = account?.checkin;
+  if (!state) return toast(L("账号状态已变化，请刷新列表后重试", "Account changed; refresh the list first"), true);
+  $("detailDialog").close();
+  modal(L("每日自动签到设置", "Daily automatic check-in"), `<form id="traeCheckinForm" data-platform="${e(account.platform)}" data-label="${e(account.label)}"><p>${e(platformName(account.platform))} · ${e(account.identity?.nickname || account.label)}</p><label class="field"><span><input type="checkbox" name="enabled" ${state.enabled ? "checked" : ""}> ${e(L("启用每日自动签到", "Enable daily automatic check-in"))}</span></label><label class="field"><span>${e(L("每天执行时间（北京时间）", "Daily time (Beijing time)"))}</span><input type="time" name="time" value="${e(state.time || "09:00")}" required></label><p>${e(L("网关在线时后台执行；先查今日状态，已签到或活动未开放时跳过。", "Runs while the gateway is online; already checked-in accounts and closed activities are skipped."))}</p><p id="checkinConfigStatus" class="login-status" role="status"></p><div class="modal-actions">${button(L("取消", "Cancel"), "close-modal")}<button type="submit" class="button primary">${e(L("保存设置", "Save settings"))}</button></div></form>`);
+}
+async function checkinAction(claim, target) {
+  const reopen = !!target.closest("#detailDialog");
+  target.disabled = true;
+  try {
+    await api(accountBenefitEndpoint("checkin",target.dataset,!claim), claim ? { action: "claim" } : undefined);
+    toast(L("签到状态已更新", "Check-in status updated"));
+  } catch (error) { toast(error.message, true); }
+  finally { await refresh(["accounts"]); if (reopen && $("detailDialog").open) { const index = accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label); if(index>=0) showAccountDetail(index); } if (target.isConnected) target.disabled = false; }
+}
+async function refreshAccountBenefits(target) {
+  const reopen = !!target.closest("#detailDialog");
+  target.disabled = true;
+  try { await api(accountBenefitEndpoint("benefits",target.dataset,true)); toast(L("积分与额度已更新", "Credits and allowances updated")); }
+  catch (error) { toast(error.message,true); }
+  finally { await refresh(["accounts"]); if(reopen && $("detailDialog").open) {const index=accounts().findIndex(a=>a.platform===target.dataset.platform&&a.label===target.dataset.label);if(index>=0)showAccountDetail(index);} if(target.isConnected) target.disabled=false; }
+}
+async function saveCheckinSettings(form) {
+  const submit = form.querySelector('[type="submit"]'), status = $("checkinConfigStatus"), data = new FormData(form);
+  submit.disabled = true;
+  try {
+    await api(accountBenefitEndpoint("checkin",form.dataset), { action: "configure", enabled: data.has("enabled"), time: data.get("time") });
+    $("modal").close(); await refresh(["accounts"]); toast(L("自动签到设置已保存", "Automatic check-in settings saved"));
+  } catch (error) { status.textContent = error.message; status.className = "login-status negative"; }
+  finally { submit.disabled = false; }
 }
 function addAccountDialog() {
   const available = platforms().filter((p) => ["workbuddy", "workbuddy-global"].includes(p.id));
@@ -1876,6 +1911,14 @@ document.addEventListener("click", async (event) => {
         return showRequestDetail(key);
       case "add-account":
         return addAccountDialog();
+      case "account-benefits-refresh":
+        return refreshAccountBenefits(target);
+      case "trae-checkin-settings":
+        return checkinSettingsDialog(target);
+      case "trae-checkin-refresh":
+        return checkinAction(false, target);
+      case "trae-checkin-manual":
+        return checkinAction(true, target);
       case "relogin":
         return startLogin(platform, label);
       case "account-control":
@@ -2041,6 +2084,10 @@ document.addEventListener("change", async (event) => {
   }
 });
 document.addEventListener("submit", (event) => {
+  if (event.target.id === "traeCheckinForm") {
+    event.preventDefault();
+    saveCheckinSettings(event.target);
+  }
   if (event.target.id === "chatForm") sendChat(event);
   if (event.target.id === "authForm") saveAuth(event);
   if (event.target.id === "addAccountForm") {
