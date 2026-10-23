@@ -5,6 +5,7 @@ export const palette = ["#438ff4", "#36b989", "#9b78ec", "#ef9860", "#ec6883", "
 const count = (v) => Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0;
 export const dateKey = (ms) => new Date(ms).toISOString().slice(0, 10);
 export const modelKey = (platform, model) => JSON.stringify([platform || "", model || ""]);
+export const tokenUsageMissing = row => row.tokens === 0 && row.unknown_token_requests > 0;
 export function modelColor(key) {
   let hash = 0;
   for (const char of key) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
@@ -83,10 +84,15 @@ export function curveSeries(usage, metric = "tokens", hidden = new Set()) {
   const ranked = [...usage.models].sort((a, b) => b[metric] - a[metric] || a.key.localeCompare(b.key));
   const top = ranked.slice(0, 6), tail = new Set(ranked.slice(6).map((m) => m.key));
   const models = [...top, ...(tail.size ? [{ key: "other", model: "other", platform: "", color: "#8493a7" }] : [])];
-  return models.map((model) => ({ ...model, hidden: hidden.has(model.key), values: usage.days.map((day) => {
-    if (day.coverage === "unknown" || metric === "tokens" && day.unknown_token_requests > 0 && !day.estimated_tokens) return null;
-    return day.models.reduce((sum, row) => sum + ((model.key === "other" ? tail.has(row.key) : row.key === model.key) ? row[metric] : 0), 0);
-  }) }));
+  return models.map((model) => {
+    const points = usage.days.map((day) => {
+      const rows = day.models.filter(row => model.key === "other" ? tail.has(row.key) : row.key === model.key);
+      const value = rows.reduce((sum, row) => sum + row[metric], 0);
+      const missingTokens = rows.some(row => row.unknown_token_requests > 0);
+      return { value: day.coverage === "unknown" || metric === "tokens" && value === 0 && missingTokens ? null : value, missingTokens };
+    });
+    return { ...model, hidden: hidden.has(model.key), values: points.map(point => point.value), missingTokens: points.map(point => point.missingTokens) };
+  });
 }
 // Monotone cubic interpolation: no negative/overshooting invented peaks.
 export function curvePath(values, x, y) {
@@ -128,16 +134,17 @@ export function heatmapColumns(calendar, mode = "daily", metric = "tokens") {
   for (let i=0,n=new Date(cells[0].ms).getUTCDay();i<n;i++) cells.unshift(null);
   while(cells.length % 7) cells.push(null);
   const weeks = Array.from({length:cells.length/7},(_,i)=>cells.slice(i*7,i*7+7));
-  let cumulative=0, observedDays=0, incomplete=false, cumulativeEstimated=false;
+  let cumulative=0, observedDays=0, incomplete=false, cumulativeEstimated=false, cumulativeUnknownTokens=0;
   const columns=weeks.map(days=>{
     const real=days.filter(Boolean), known=real.filter(d=>d.coverage!=="unknown");
     const value=known.reduce((sum,d)=>sum+count(d[metric]),0);
+    const unknownTokens=known.reduce((sum,d)=>sum+count(d.unknown_token_requests),0);
     const partial=real.some(d=>d.coverage!=="complete"||metric==="tokens"&&d.unknown_token_requests>0);
     const estimated=known.some(day=>day.coverage==="estimated"||day.estimated_requests>0||day.estimated_tokens>0);
     cumulativeEstimated ||= estimated;
-    cumulative+=value; observedDays+=known.length; incomplete ||= partial;
+    cumulative+=value; observedDays+=known.length; incomplete ||= partial; cumulativeUnknownTokens+=unknownTokens;
     const end=real.at(-1)?.date, start=real[0]?.date;
-    return {days,start,end,value:mode==="cumulative"?cumulative:value,estimated:mode==="cumulative"?cumulativeEstimated:estimated,
+    return {days,start,end,value:mode==="cumulative"?cumulative:value,estimated:mode==="cumulative"?cumulativeEstimated:estimated,unknown_token_requests:mode==="cumulative"?cumulativeUnknownTokens:unknownTokens,
       coverage:mode==="cumulative" ? observedDays ? incomplete?"partial":"complete" : "unknown" : known.length ? partial?"partial":"complete":"unknown",
       monthDate:real.find(d=>d.date.endsWith("-01"))?.date||start};
   });

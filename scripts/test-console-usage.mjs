@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition, heatmapColumns, liveGeneration, sampleLive } from "../internal/web/static/usage.js";
-import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView } from "../internal/web/static/usage-view.js";
+import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageDayView, usageWeekView, usageTokenValue } from "../internal/web/static/usage-view.js";
 import { escapeHTML, number, compact, icon } from "../internal/web/static/core.js";
 const now=Date.parse("2026-10-15T10:00:00Z");
 const row=(platform,model,tokens,total=1)=>({platform,model,total,ok:total,failed:0,input_tokens:tokens,output_tokens:0});
@@ -103,9 +103,59 @@ test("recovered activity is visible but missing token records never become a fal
  const metrics={usage_history:{timezone:"UTC",tracking_since:"2026-10-15",days:[{date:"2026-10-11",models:[{...row("p","m",0,5),unknown_token_requests:5}]}]}};
  const usage=buildUsage(metrics,state);assert.equal(usage.activeDays,1);assert.equal(usage.unknown_token_requests,5);
  assert.equal(curveSeries(usage,"tokens")[0].values[2],null);assert.equal(curveSeries(usage,"total")[0].values[2],5);
- const html=usageView(metrics,{...state,calendarExpanded:true},ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 明细未留存"));
+ const html=usageView(metrics,{...state,calendarExpanded:true},ui);assert.ok(html.includes("activity-only"));assert.ok(html.includes("Token 未上报"));
+ const day=usage.days[2];
+ assert.equal(usageTokenValue(day,number),"—");
+ assert.ok(!usageTooltip(metrics,state,2,ui).includes("0 tokens"));
+ assert.ok(usageDayView(day,ui).includes("Token 未上报"));
  const unrecorded={usage_history:{...metrics.usage_history,days:[{date:"2026-10-11",models:[{...row("","m",0,5),unknown_token_requests:5}]}]}};
  assert.equal(buildUsage(unrecorded,{...state,platform:"unknown"}).total,5);
+});
+
+test("missing usage from one model preserves today's measured tokens and other model curves",()=>{
+ const metrics={usage_history:{timezone:"UTC",tracking_since:"2026-10-15",days:[{date:"2026-10-15",models:[
+  row("workbuddy","hy3",100),
+  {...row("trae-cn","flash",200,3),output_tokens:20,unknown_token_requests:1},
+  {...row("kiro","glm-5",0,4),unknown_token_requests:3},
+  row("cursor","composer",0),
+ ]}]}};
+ const before=JSON.stringify(metrics),usage=buildUsage(metrics,state),curves=curveSeries(usage);
+ const point=(platform,model)=>curves.find(series=>series.key===modelKey(platform,model)).values.at(-1);
+ assert.equal(usage.tokens,320);assert.equal(usage.total,9);assert.equal(usage.unknown_token_requests,4);
+ assert.equal(point("workbuddy","hy3"),100);
+ assert.equal(point("trae-cn","flash"),220);
+ assert.equal(point("kiro","glm-5"),null);
+ assert.equal(point("cursor","composer"),0);
+ const html=usageView(metrics,{...state,calendarExpanded:true},ui),tooltip=usageTooltip(metrics,state,6,ui);
+ assert.ok(html.includes("2026-10-15 UTC · ≥ 320 tokens"));
+ assert.ok(tooltip.includes("workbuddy/hy3"));assert.ok(tooltip.includes("trae-cn/flash"));
+ assert.ok(tooltip.includes("≥ 220"));assert.ok(tooltip.includes("≥ 320 tokens"));
+ assert.ok(!tooltip.includes("kiro/glm-5"));
+ const day=usage.days.at(-1),details=usageDayView(day,ui),week=usageWeekView([day],false,ui);
+ assert.ok(details.includes("≥ 220 tokens"));assert.ok(details.includes("100 tokens"));
+ assert.equal((details.match(/Token 未上报/g)||[]).length,1);
+ assert.ok(week.includes("≥ 320 tokens"));assert.ok(!week.includes("明细不完整"));
+ assert.ok(!html.includes("Token 明细未留存"));
+ const allocatedState={...state,range:"all",allocation:{enabled:true,days:7}};
+ const allocated=buildUsage({...metrics,total:39,input_tokens:600,output_tokens:20},allocatedState);
+ assert.ok(allocated.hasEstimates);assert.equal(usageTokenValue(allocated,number),"≥ 620");
+ for (const mode of ["weekly","cumulative"]) {
+  const column=heatmapColumns(usage.calendar,mode).at(-1);
+  assert.equal(column.value,320);assert.equal(column.unknown_token_requests,4);
+  assert.ok(usageView(metrics,{...state,calendarExpanded:true,heatMode:mode},ui).includes("≥ 320 tokens"));
+ }
+ assert.equal(buildUsage(metrics,{...state,platform:"workbuddy"}).tokens,100);
+ assert.equal(JSON.stringify(metrics),before);
+});
+
+test("other-model totals retain measured usage when one of their models has no tokens",()=>{
+ const models=Array.from({length:9},(_,i)=>row("p","m"+i,(i+1)*10));
+ models.push({...row("kiro","glm",0,2),unknown_token_requests:2});
+ const metrics={usage_history:{timezone:"UTC",tracking_since:"2026-10-15",days:[{date:"2026-10-15",models}]}};
+ const usage=buildUsage(metrics,state),curves=curveSeries(usage),other=curves.find(series=>series.key==="other");
+ assert.equal(other.values.at(-1),60);assert.equal(other.missingTokens.at(-1),true);
+ assert.equal(curves.reduce((sum,series)=>sum+series.values.at(-1),0),450);
+ assert.ok(usageTooltip(metrics,state,6,ui).includes("≥ 60"));
 });
 test("live samples distinguish calibrated token estimates from actual character speed and reject duplicate snapshots",()=>{
  const data={sampled_at:new Date(now).toISOString(),in_flight:1,active:[{id:1,platform:"p",model:"m",output_characters:100,characters_per_second:20}],last_completed:{output_tokens:40,gen_ms:2000,time:new Date(now-DAY).toISOString()}};

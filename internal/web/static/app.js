@@ -19,7 +19,7 @@ import { mergePricingSnapshot, modelPricing, pricingCategory, compareModelRates,
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 import { buildUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
-import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageModelLabel } from "./usage-view.js";
+import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageDayView, usageWeekView } from "./usage-view.js";
 import { recentHealthView, requestSampleView, requestDiagnostic, gatewayPolicyView } from "./insights.js";
 import { allocationPeriod } from "./usage-allocation.js";
 import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms, platformSetup, connectionPlatforms } from "./operations.js";
@@ -1841,7 +1841,7 @@ document.addEventListener("click", async (event) => {
         if (!column) return;
         const cumulative=s.usageInsights.heatMode==="cumulative";
         const days=cumulative?usage.calendar.filter(d=>d.date<=column.end):column.days.filter(Boolean);
-        modal(`${cumulative?L("累计至","Through"):column.start+" —"} ${column.end} · UTC`, `<p class="scope-note">${e(cumulative?L("累计范围：当前日历起点至所选日期。", "Cumulative range: calendar start through the selected date."):L("周日到周六，按当前记录汇总。", "Sunday through Saturday, using available records."))}</p><div class="usage-day-rows">${days.filter(d=>d.total>0).map(d=>`<div class="usage-token-row"><div><strong>${e(d.date)}</strong></div><b>${n(d.total)} ${e(L("次调用","requests"))} · ${d.unknown_token_requests && !d.estimated_tokens ? e(L("Token 明细不完整", "Incomplete token details")) : n(d.tokens)+" tokens"}</b></div>`).join("")||`<p class="muted">${e(L("暂无明细", "No details"))}</p>`}</div>`);
+        modal(`${cumulative?L("累计至","Through"):column.start+" —"} ${column.end} · UTC`, usageWeekView(days, cumulative, { e, L, n }));
         return;
       }
       case "usage-heat-metric":
@@ -1865,7 +1865,7 @@ document.addEventListener("click", async (event) => {
         const usage = buildUsage(s.cache.metrics, s.usageInsights), day = usage.calendar.find((d) => d.date === value);
         if (!day) return;
 
-        modal(`${day.date} · UTC`, `<div class="usage-day-rows">${day.models.map((m) => `<div class="usage-token-row"><i style="background:${m.color}"></i><div><strong>${e(usageModelLabel(m, L))}</strong><small>${m.total === 0 && m.estimated_tokens > 0 ? e(L("Token 用量", "Token usage")) : `${n(m.total)} ${e(L("次调用", "requests"))}`} · ${m.unknown_token_requests && !m.estimated_tokens ? e(L("Token 明细未留存", "Token details unavailable")) : `${n(m.input_tokens)} ${e(L("输入", "input"))} / ${n(m.output_tokens)} ${e(L("输出", "output"))}`}</small></div><b>${m.unknown_token_requests && !m.estimated_tokens ? "—" : compact(m.tokens)+" tokens"}</b></div>`).join("") || `<p class="muted">${e(day.coverage === "unknown" ? L("没有可恢复的明细", "No recoverable details") : L("没有已记录的调用", "No recorded requests"))}</p>`}</div>`);
+        modal(`${day.date} · UTC`, usageDayView(day, { e, L, n, compact }));
         return;
       }
       case "usage-methodology":
