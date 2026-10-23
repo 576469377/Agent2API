@@ -79,7 +79,7 @@ jobs:
 
       - name: Windows 文件、SQLite 与进程集成测试
         if: runner.os == 'Windows'
-        run: go test ./... -coverprofile=coverage.txt
+        run: go test ./... "-coverprofile=coverage.txt"
 
       - name: 覆盖率摘要
         shell: bash
