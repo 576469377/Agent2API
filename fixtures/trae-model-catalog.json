@@ -1,0 +1,120 @@
+{
+  "config_info_list": [
+    {
+      "config_name": "Doubao-Seed-2.1-Turbo",
+      "config_source": 1,
+      "config_switch": true,
+      "is_invisible_to_user": false,
+      "usage": "chat_completion",
+      "context_window_tokens": {
+        "dev": 256000,
+        "max": 256000
+      },
+      "display_config": {
+        "display_name": "Seed-2.1-Turbo",
+        "is_custom_model": false,
+        "max_mode": false
+      },
+      "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.2}}}",
+      "model_detail_list": [
+        {
+          "max_tokens": 32000,
+          "model_name": "Doubao-Seed-2.1-Turbo__dev",
+          "prompt_max_tokens": 224000
+        },
+        {
+          "max_tokens": 32000,
+          "model_name": "Doubao-Seed-2.1-Turbo__max",
+          "prompt_max_tokens": 224000
+        }
+      ]
+    },
+    {
+      "config_name": "Doubao-Seed-Evolving",
+      "config_source": 1,
+      "config_switch": true,
+      "is_invisible_to_user": false,
+      "usage": "chat_completion",
+      "context_window_tokens": {
+        "dev": 256000,
+        "max": 1000000
+      },
+      "display_config": {
+        "display_name": "Seed-Evolving",
+        "is_custom_model": false,
+        "max_mode": true
+      },
+      "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.8}}}",
+      "model_detail_list": [
+        {
+          "max_tokens": 32000,
+          "model_name": "Doubao-Seed-Evolving__dev",
+          "prompt_max_tokens": 224000
+        },
+        {
+          "max_tokens": 64000,
+          "model_name": "Doubao-Seed-Evolving__max",
+          "prompt_max_tokens": 936000
+        }
+      ]
+    },
+    {
+      "config_name": "glm-5.3-flash",
+      "config_source": 1,
+      "config_switch": true,
+      "is_invisible_to_user": false,
+      "usage": "chat_completion",
+      "context_window_tokens": {
+        "dev": 200000,
+        "max": 1000000
+      },
+      "display_config": {
+        "display_name": "GLM-5.3-Flash",
+        "is_custom_model": false,
+        "max_mode": true
+      },
+      "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.08}}}",
+      "model_detail_list": [
+        {
+          "max_tokens": 32000,
+          "model_name": "glm-5.3-flash__dev",
+          "prompt_max_tokens": 168000
+        },
+        {
+          "max_tokens": 64000,
+          "model_name": "glm-5.3-flash__max",
+          "prompt_max_tokens": 936000
+        }
+      ]
+    },
+    {
+      "config_name": "deepseek-v4.1-flash",
+      "config_source": 1,
+      "config_switch": true,
+      "is_invisible_to_user": false,
+      "usage": "chat_completion",
+      "context_window_tokens": {
+        "dev": 200000,
+        "max": 1000000
+      },
+      "display_config": {
+        "display_name": "DeepSeek-V4.1-Flash",
+        "is_custom_model": false,
+        "max_mode": true
+      },
+      "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.12}}}",
+      "model_detail_list": [
+        {
+          "max_tokens": 32000,
+          "model_name": "deepseek-v4.1-flash__dev",
+          "prompt_max_tokens": 168000
+        },
+        {
+          "max_tokens": 64000,
+          "model_name": "deepseek-v4.1-flash__max",
+          "prompt_max_tokens": 936000
+        }
+      ]
+    }
+  ]
+}

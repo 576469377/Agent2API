@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/576469377/Agent2API/internal/adapter/kiro"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/llm"
 )
@@ -37,26 +39,28 @@ const (
 // loginSessionTTL 是已完成会话的保留时长：够前端轮询取到结果即可。
 const loginSessionTTL = 5 * time.Minute
 
-// loginSession 是一次进行中的设备码登录。
+// loginSession 是一次进行中的浏览器授权。
 //
-// 设备码登录必须异步：用户要在浏览器里完成授权（最长 5 分钟），
+// 登录必须异步：用户要在浏览器里完成授权（WorkBuddy 5 分钟、TRAE 30 分钟），
 // 同步 HTTP 请求既会超时，也没法在等待期间把授权 URL 交给前端。
 type loginSession struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"`
-	Platform  string    `json:"platform"` // 本次登录所属平台
-	AuthURL   string    `json:"auth_url,omitempty"`
-	OutPath   string    `json:"out_path,omitempty"`
-	Account   string    `json:"account,omitempty"` // 成功后回填昵称/UID
-	Error     string    `json:"error,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	doneAt    time.Time
+	ID              string    `json:"id"`
+	Status          string    `json:"status"`
+	Platform        string    `json:"platform"` // 本次登录所属平台
+	AuthURL         string    `json:"auth_url,omitempty"`
+	UserCode        string    `json:"user_code,omitempty"`
+	ExternalBrowser bool      `json:"external_browser,omitempty"`
+	OutPath         string    `json:"out_path,omitempty"`
+	Account         string    `json:"account,omitempty"` // 成功后回填昵称/UID
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	doneAt          time.Time
 }
 
 // loginManager 管理进行中的登录会话。
 //
 // 多平台集成后一个管理器服务所有平台：会话带 Platform 标记，
-// Start 按平台分派登录方式（当前仅 workbuddy 设备码；新平台在此追加分支）。
+// Start 按平台分派设备码或网页授权。
 type loginManager struct {
 	logf func(format string, args ...any)
 
@@ -71,8 +75,11 @@ func newLoginManager(logf func(string, ...any)) *loginManager {
 }
 
 // Start 发起一次登录，立刻返回会话（含授权 URL）。
-// platform 决定登录方式；当前仅实现 workbuddy 的设备码授权。
+// platform 决定登录方式；WorkBuddy 设备码与 TRAE 网页授权各自隔离。
 func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*loginSnapshot, error) {
+	if platform == trae.Platform {
+		return m.startTrae(outPath)
+	}
 	if platform == "cursor" {
 		return nil, &llm.Failure{Code: "cursor_desktop_login", Message: "请在本机 Cursor 桌面端登录个人 Free 账号，再刷新模型目录", ClientFixable: true}
 	}
@@ -158,6 +165,108 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 	}, nil
 }
 
+func (m *loginManager) startTrae(path string) (*loginSnapshot, error) {
+	m.mu.Lock()
+	for _, s := range m.sessions {
+		if s.Platform == trae.Platform && s.OutPath == path && s.Status == loginPending {
+			snapshot := &loginSnapshot{ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, OutPath: s.OutPath, StartedAt: s.StartedAt}
+			m.mu.Unlock()
+			return snapshot, nil
+		}
+	}
+	s := &loginSession{ID: newSessionID(), Platform: trae.Platform, Status: loginPending, OutPath: path, StartedAt: time.Now()}
+	m.sessions[s.ID] = s
+	m.mu.Unlock()
+	ready := make(chan struct{}, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		_, err := trae.Login(ctx, trae.LoginOptions{OutputPath: path, OnAuthURL: func(u string) {
+			m.mu.Lock()
+			s.AuthURL = u
+			m.mu.Unlock()
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+		}})
+		m.mu.Lock()
+		s.doneAt = time.Now()
+		if err != nil {
+			s.Status = loginFailed
+			s.Error = err.Error()
+		} else {
+			s.Status = loginSuccess
+			s.Account = "TRAE Free"
+		}
+		m.mu.Unlock()
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(15 * time.Second):
+	}
+	return m.Get(s.ID)
+}
+
+func (m *loginManager) startKiro(cliPath, provider string) (*loginSnapshot, error) {
+	if _, err := kiro.ResolveCLI(cliPath); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	for _, s := range m.sessions {
+		if s.Platform == kiro.Platform && s.Status == loginPending {
+			snap := snapshotLogin(s)
+			m.mu.Unlock()
+			return snap, nil
+		}
+	}
+	s := &loginSession{ID: newSessionID(), Platform: kiro.Platform, Status: loginPending, StartedAt: time.Now(), ExternalBrowser: true}
+	m.sessions[s.ID] = s
+	m.mu.Unlock()
+	ready := make(chan struct{}, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		err := kiro.Login(ctx, kiro.LoginOptions{CLIPath: cliPath, Provider: provider, OnChallenge: func(code, url string) {
+			m.mu.Lock()
+			s.UserCode = code
+			s.AuthURL = url
+			m.mu.Unlock()
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+		}})
+		m.mu.Lock()
+		s.doneAt = time.Now()
+		if err != nil {
+			s.Status = loginFailed
+			s.Error = err.Error()
+		} else {
+			s.Status = loginSuccess
+			s.Account = "Kiro CLI 账号"
+		}
+		m.mu.Unlock()
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(15 * time.Second):
+	}
+	return m.Get(s.ID)
+}
+
+func snapshotLogin(s *loginSession) *loginSnapshot {
+	return &loginSnapshot{ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, UserCode: s.UserCode, ExternalBrowser: s.ExternalBrowser, OutPath: s.OutPath, Account: s.Account, Error: s.Error, StartedAt: s.StartedAt}
+}
+
 // Commit the new session before removing its staging file. Failed commits
 // retain that file for recovery instead of reporting a false login success.
 func (m *loginManager) commitCredential(platform, outPath, stagedPath string, cred *workbuddy.Credential) (string, error) {
@@ -229,13 +338,15 @@ func (a *App) replaceLoginCredential(platform string, cred *workbuddy.Credential
 // 直接返回 *loginSession 会与登录 goroutine 的字段写入构成数据竞争
 // （撕裂读），所以查询时在锁内复制一份。
 type loginSnapshot struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"`
-	AuthURL   string    `json:"auth_url,omitempty"`
-	OutPath   string    `json:"out_path,omitempty"`
-	Account   string    `json:"account,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	ID              string    `json:"id"`
+	Status          string    `json:"status"`
+	AuthURL         string    `json:"auth_url,omitempty"`
+	UserCode        string    `json:"user_code,omitempty"`
+	ExternalBrowser bool      `json:"external_browser,omitempty"`
+	OutPath         string    `json:"out_path,omitempty"`
+	Account         string    `json:"account,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
 }
 
 // Get 查询会话状态（锁内快照）。已完成且过期的会话会被清理；
@@ -259,10 +370,7 @@ func (m *loginManager) Get(id string) (*loginSnapshot, error) {
 			delete(m.sessions, k)
 		}
 	}
-	return &loginSnapshot{
-		ID: s.ID, Status: s.Status, AuthURL: s.AuthURL, OutPath: s.OutPath,
-		Account: s.Account, Error: s.Error, StartedAt: s.StartedAt,
-	}, nil
+	return snapshotLogin(s), nil
 }
 
 func newSessionID() string {

@@ -1,0 +1,15 @@
+event: metadata
+data: {"model":"","prompt_completion_id":102}
+
+event: output
+data: {"response":"","reasoning_content":null,"tool_calls":[{"index":0,"id":"fixture-call","type":"function","function_call":{"name":"lookup_test_value","arguments":"","partial_arguments":null,"namespace":null}}],"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":null,"tool_calls":[{"index":0,"id":"","type":"","function_call":{"name":"","arguments":"{\"tag\": \"demo\"}","partial_arguments":null,"namespace":null}}],"multimodal_contents":null,"phase":null}
+
+event: token_usage
+data: {"prompt_tokens":320,"completion_tokens":40,"total_tokens":360,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_tokens":0,"prompt_tokens_total":0,"completion_tokens_total":0,"total_tokens_total":0,"cache_creation_input_tokens_total":0,"cache_read_input_tokens_total":0,"reasoning_tokens_total":0}
+
+event: done
+data: {"finish_reason":"tool_calls"}
+

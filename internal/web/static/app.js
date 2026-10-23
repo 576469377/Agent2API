@@ -12,16 +12,17 @@ import {
 } from "./core.js";
 import { renderMath } from "./math.js";
 import { renderTraeCheckin } from "./trae-checkin.js";
+import { renderClientSetup, clientModelHasBudget, selectedClientPlatforms, clientRequest, clientReady, configClients, runClientBatch } from "./client-setup.js";
 import { renderAccountBenefits, renderCheckinOverview, accountBenefitEndpoint } from "./account-benefits.js";
 import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend, sortUsage, hasTokenUsage, requestOutcome } from "./monitor.js";
-import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
+import { mergePricingSnapshot, modelPricing, pricingCategory, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
 import { buildUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
 import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageModelLabel } from "./usage-view.js";
 import { recentHealthView, requestSampleView, requestDiagnostic, gatewayPolicyView } from "./insights.js";
 import { allocationPeriod } from "./usage-allocation.js";
-import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms } from "./operations.js";
+import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms, platformSetup, connectionPlatforms } from "./operations.js";
 
 const $ = (id) => document.getElementById(id);
 const saved = (key, fallback = "") => {
@@ -60,6 +61,12 @@ const s = {
   analytics: { dimension: "by_model", metric: "tokens", sort: "tokens", query: "", expanded: false },
   connectionModel: "",
   connectionProtocol: "openai-chat",
+  zcodeSync: { busy: false, result: null, error: "" },
+  clientSync: {
+    "cc-switch": { busy: false, result: null, error: "", platforms: null, apps: ["claude"] },
+    pi: { busy: false, result: null, error: "", platforms: null, apps: [] },
+  },
+  clientBatchBusy: false,
   models: {
     query: "",
     platform: "all",
@@ -162,6 +169,9 @@ const endpoints = {
   platforms: "/api/platforms",
   config: "/api/config",
   matrix: "/api/accounts/models",
+  zcode: "/api/clients/zcode",
+  "cc-switch": "/api/clients/cc-switch",
+  pi: "/api/clients/pi",
 };
 const pageKeys = pageResources;
 const currentResources = (background = false) => refreshResources(s.page, s.models.view === "matrix", background);
@@ -178,6 +188,7 @@ const platformName = (id) =>
     : id === "workbuddy-global"
       ? L("WorkBuddy 国际版", "WorkBuddy · Global")
       : platforms().find((p) => p.id === id)?.name ||
+        s.cache.platforms?.available?.find((p) => p.id === id)?.name ||
         id ||
         L("未记录平台", "Unrecorded platform");
 const imageOverflowName = (policy) => policy === "trim_oldest" ? L("清理最旧图片，保留最近图片", "Omit oldest images, keep newest") : L("拒绝超限请求", "Reject overflow requests");
@@ -258,12 +269,13 @@ async function copy(value) {
 function authHeaders() {
   return s.key ? { Authorization: `Bearer ${s.key}` } : {};
 }
-async function api(path, body) {
+async function api(path, body, extraHeaders = {}) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...authHeaders(),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
@@ -329,6 +341,8 @@ async function syncRates(manual = false) {
     s.rateSync.error = error.message;
     if (s.cache.models) s.cache.models = { ...s.cache.models, models: models().map(m => ({ ...m, pricing_sync_failed: true })) };
   } finally {
+    // 费率检查会使适配器缓存失效，完成后同步连接状态，避免保留检查中的旧快照。
+    if (!s.authRequired) await refresh(["accounts", "platforms"]);
     s.rateSync.busy = false;
     renderResources();
   }
@@ -377,7 +391,7 @@ function chrome() {
   $("breadcrumb").textContent = names[s.page]();
   $("pageTitle").textContent = names[s.page]();
   $("pageDescription").textContent = descriptions[s.page]();
-  const canAddAccount = platforms().some((p) => accountConnection({ platform: p.id }).pooled);
+  const canAddAccount = connectionPlatforms(s.cache.platforms?.active || platforms(), s.cache.platforms?.available || []).length > 0;
   const primarySignature = `${s.page}|${s.lang}|${canAddAccount}`;
   if (chrome.primarySignature !== primarySignature) {
     $("pagePrimary").innerHTML = ["accounts", "platforms"].includes(s.page) && canAddAccount ? button(L("添加账号", "Add account"), "add-account", "primary", "plus") : s.page === "requests" ? button(L("查看失败调用", "Inspect failures"), "inspect-failures", "", "info") : ["overview", "models"].includes(s.page) ? `<a class="button primary" href="#connection">${icon("external")}${e(L("接入客户端", "Connect a client"))}</a>` : "";
@@ -442,7 +456,7 @@ function renderPricingNotice() {
   if (target.dataset.signature === signature) return;
   target.dataset.signature = signature;
   target.hidden = !s.rateSync.error && !changes.length;
-  target.innerHTML = `${icon("info")}<div><strong>${e(s.rateSync.error ? L("费率更新需要检查", "Rate refresh needs attention") : L("上游模型费率已变化", "Upstream model rates changed"))}</strong><p>${e(s.rateSync.error || changes.slice(0, 3).map(c => `${c.routingId}: ${c.from.multiplier == null ? pricingName(c.from.status) : "×" + c.from.multiplier} → ${c.to.multiplier == null ? pricingName(c.to.status) : "×" + c.to.multiplier}`).join("；"))}${!s.rateSync.error && changes.length > 3 ? e(L(`；另有 ${changes.length - 3} 项`, `; ${changes.length - 3} more`)) : ""}</p><small>${e(L("费率提醒不拦截 WorkBuddy 付费请求；OpenRouter 与 Cursor 的免费限制由各自适配器执行。", "Rate alerts do not block paid WorkBuddy requests. OpenRouter and Cursor enforce their own free-use restrictions."))}</small></div><div class="rate-notice-actions">${button(L("查看费率", "Review rates"), "review-price-changes", "small")}${!s.rateSync.error ? button(L("已知晓", "Dismiss"), "dismiss-price-changes", "small ghost") : ""}</div>`;
+  target.innerHTML = `${icon("info")}<div><strong>${e(s.rateSync.error ? L("费率更新需要检查", "Rate refresh needs attention") : L("上游模型费率已变化", "Upstream model rates changed"))}</strong><p>${e(s.rateSync.error || changes.slice(0, 3).map(c => `${c.routingId}: ${c.from.multiplier == null ? pricingName(c.from.status) : "×" + c.from.multiplier} → ${c.to.multiplier == null ? pricingName(c.to.status) : "×" + c.to.multiplier}`).join("；"))}${!s.rateSync.error && changes.length > 3 ? e(L(`；另有 ${changes.length - 3} 项`, `; ${changes.length - 3} more`)) : ""}</p><small>${e(L("费率提醒不拦截 WorkBuddy 付费请求；OpenRouter、Cursor 与 TRAE 的免费限制由各自适配器执行。", "Rate alerts do not block paid WorkBuddy requests. OpenRouter, Cursor and TRAE enforce their own free-use restrictions."))}</small></div><div class="rate-notice-actions">${button(L("查看费率", "Review rates"), "review-price-changes", "small")}${!s.rateSync.error ? button(L("已知晓", "Dismiss"), "dismiss-price-changes", "small ghost") : ""}</div>`;
 }
 function navigate() {
   const page = location.hash.slice(1);
@@ -689,8 +703,63 @@ function connectionPage() {
   s.connectionModel = selected ? routeId(selected) : "";
   const origin = gatewayURL(), protocol = s.connectionProtocol;
   const url = protocol === "anthropic-messages" ? origin : `${origin}/v1`;
-  return `<div class="connection-layout"><section class="card">${cardHead(L("连接配置", "Connection configuration"), L("使用网关地址，支持同一入口接入多个平台", "One gateway endpoint for all connected platforms"))}<div class="card-body"><div class="protocol-choices">${[["openai-chat", "Chat Completions", L("OpenAI 兼容客户端", "OpenAI-compatible clients")], ["openai-responses", "Responses", L("Responses 兼容客户端", "Responses-compatible clients")], ["anthropic-messages", "Anthropic Messages", "Claude Code / ZCode"]].map(([id, name, note]) => `<button data-action="connection-protocol" data-value="${id}" class="${protocol === id ? "active" : ""}" aria-pressed="${protocol === id}"><span>${e(name)}</span><small>${e(note)}</small>${protocol === id ? icon("check") : ""}</button>`).join("")}</div><label class="field"><span>${e(L("使用模型", "Model"))}</span><select class="select" id="connectionModel">${freeModels.length ? options(freeModels.map((m) => [routeId(m), routeId(m)]), s.connectionModel) : '<option>—</option>'}</select></label><div class="field"><span>Base URL</span><div class="endpoint-box"><code>${e(origin ? url : "—")}</code><button class="icon-button" data-action="copy-connection-url" aria-label="${e(L("复制接入地址", "Copy connection URL"))}">${icon("copy")}</button></div></div>${protocol === "anthropic-messages" ? `<p class="scope-note">${e(L("Claude Code 使用上方根地址；ZCode 的 Anthropic 供应商 Base URL 填写根地址 + /v1。", "Claude Code uses the origin above. ZCode's Anthropic provider uses the origin plus /v1."))}</p>` : ""}<dl class="details-list">${detailItem(L("模型路由", "Model route"), s.connectionModel || "—", "mono")}${detailItem(L("鉴权", "Authentication"), s.cache.config?.auth_enabled ? L("填写你配置的网关 API Key", "Use your configured gateway API key") : L("未启用校验；客户端必填时使用 agent2api-local", "Not enabled; use agent2api-local if required"))}</dl><div class="detail-actions"><button class="button primary" data-action="try-model" data-model="${e(s.connectionModel)}" ${!selected ? "disabled" : ""}>${icon("chat")}${e(L("测试所选模型", "Try selected model"))}</button>${button(L("查看路由策略", "Routing policy"), "open-platforms", "")}</div></div></section><section class="card connection-example">${cardHead(L("请求示例", "Request example"), L("适用于 macOS / Linux shell", "For macOS / Linux shells"), button(L("复制示例", "Copy example"), "copy-connection-example", "small", "copy"))}<div class="card-body"><pre><code>${e(connectionExample())}</code></pre><p class="scope-note">${e(L("将 YOUR_GATEWAY_KEY 替换为网关 API Key。", "Replace YOUR_GATEWAY_KEY with your gateway API key."))}</p><div class="connection-checklist"><strong>${e(L("接入检查", "Connection checklist"))}</strong><p>${icon("check")}${e(L("客户端指向网关 8787，而非管理控制台 8788", "Use gateway port 8787, not console port 8788"))}</p><p>${icon("check")}${e(L("使用平台前缀明确模型来源", "Use a platform prefix for an explicit route"))}</p><p>${icon("check")}${e(L("在模型测试中验证连接", "Verify the connection in the playground"))}</p></div></div></section></div>`;
+  return `${zcodeSyncCard()}${renderClientSetup(s.clientSync, s.cache, models(), L, s.clientBatchBusy)}<div class="connection-layout"><section class="card">${cardHead(L("连接配置", "Connection configuration"), L("使用网关地址，支持同一入口接入多个平台", "One gateway endpoint for all connected platforms"))}<div class="card-body"><div class="protocol-choices">${[["openai-chat", "Chat Completions", L("OpenAI 兼容客户端", "OpenAI-compatible clients")], ["openai-responses", "Responses", L("Responses 兼容客户端", "Responses-compatible clients")], ["anthropic-messages", "Anthropic Messages", "Claude Code / ZCode"]].map(([id, name, note]) => `<button data-action="connection-protocol" data-value="${id}" class="${protocol === id ? "active" : ""}" aria-pressed="${protocol === id}"><span>${e(name)}</span><small>${e(note)}</small>${protocol === id ? icon("check") : ""}</button>`).join("")}</div><label class="field"><span>${e(L("使用模型", "Model"))}</span><select class="select" id="connectionModel">${freeModels.length ? options(freeModels.map((m) => [routeId(m), routeId(m)]), s.connectionModel) : '<option>—</option>'}</select></label><div class="field"><span>Base URL</span><div class="endpoint-box"><code>${e(origin ? url : "—")}</code><button class="icon-button" data-action="copy-connection-url" aria-label="${e(L("复制接入地址", "Copy connection URL"))}">${icon("copy")}</button></div></div>${protocol === "anthropic-messages" ? `<p class="scope-note">${e(L("Claude Code 使用上方根地址；ZCode 的 Anthropic 供应商 Base URL 填写根地址 + /v1。", "Claude Code uses the origin above. ZCode's Anthropic provider uses the origin plus /v1."))}</p>` : ""}<dl class="details-list">${detailItem(L("模型路由", "Model route"), s.connectionModel || "—", "mono")}${detailItem(L("鉴权", "Authentication"), s.cache.config?.auth_enabled ? L("填写你配置的网关 API Key", "Use your configured gateway API key") : L("未启用校验；客户端必填时使用 agent2api-local", "Not enabled; use agent2api-local if required"))}</dl><div class="detail-actions"><button class="button primary" data-action="try-model" data-model="${e(s.connectionModel)}" ${!selected ? "disabled" : ""}>${icon("chat")}${e(L("测试所选模型", "Try selected model"))}</button>${button(L("查看路由策略", "Routing policy"), "open-platforms", "")}</div></div></section><section class="card connection-example">${cardHead(L("请求示例", "Request example"), L("适用于 macOS / Linux shell", "For macOS / Linux shells"), button(L("复制示例", "Copy example"), "copy-connection-example", "small", "copy"))}<div class="card-body"><pre><code>${e(connectionExample())}</code></pre><p class="scope-note">${e(L("将 YOUR_GATEWAY_KEY 替换为网关 API Key。", "Replace YOUR_GATEWAY_KEY with your gateway API key."))}</p><div class="connection-checklist"><strong>${e(L("接入检查", "Connection checklist"))}</strong><p>${icon("check")}${e(L("客户端指向网关 8787，而非管理控制台 8788", "Use gateway port 8787, not console port 8788"))}</p><p>${icon("check")}${e(L("使用平台前缀明确模型来源", "Use a platform prefix for an explicit route"))}</p><p>${icon("check")}${e(L("在模型测试中验证连接", "Verify the connection in the playground"))}</p></div></div></section></div>`;
 }
+
+function zcodeSyncCard() {
+  const state = s.zcodeSync, info = s.cache.zcode, result = state.result;
+  const count = confirmedFreeModels(models()).filter(m => m.context_tokens > 0 && (m.max_output_tokens > 0 || m.platform === "kiro" && m.max_output_tokens === 0)).length;
+  const reason = info?.reason || (s.errors.zcode ? L("当前网关不支持一键配置，请更新网关后重试。", "This gateway does not support one-click setup. Update the gateway and retry.") : L("正在检测本机 ZCode 配置…", "Checking the local ZCode configuration…"));
+  const summary = result ? (result.status === "unchanged" ? L(`已是最新配置，共 ${result.model_count} 个免费模型，未重复写入。`, `Already up to date with ${result.model_count} free models; no rewrite was needed.`) : L(`已配置 ${result.model_count} 个免费模型：新增 ${result.added.length} 个，保留 ${result.retained} 个，移除 ${result.removed.length} 个。`, `Configured ${result.model_count} free models: ${result.added.length} added, ${result.retained} retained, ${result.removed.length} removed.`)) : "";
+  return `<section class="card zcode-sync-card">${cardHead(L("免费模型配置到 ZCode", "Free models in ZCode"), L("一键配置网关所在电脑的 ZCode", "Set up ZCode on the gateway computer"))}<div class="card-body"><div class="zcode-sync-main"><div><p>${e(L("重新核验免费目录，备份后更新 Agent2API 提供商。保留其他提供商、模型偏好和使用记录。", "Recheck free access, back up the configuration, and update the Agent2API provider. Other providers, model preferences and usage history are preserved."))}</p><p class="muted">${e(info?.available ? L(`当前目录有 ${count} 个符合条件的免费模型，ZCode 中已配置 ${info.configured_models} 个。`, `The current catalogue has ${count} eligible free models; ${info.configured_models} are configured in ZCode.`) : reason)}</p></div><button type="button" class="button primary" data-action="sync-zcode" ${state.busy || !info?.available ? "disabled" : ""}>${icon(state.busy ? "refresh" : "external")}${e(state.busy ? L("正在核验并配置…", "Verifying and configuring…") : L("一键配置免费模型", "Configure free models"))}</button></div>${state.error ? `<p class="message-error" role="alert">${e(state.error)}</p>` : ""}${result ? `<div class="zcode-sync-result" role="status"><strong>${e(summary)}</strong>${result.backup_path ? `<p>${e(L("原配置备份：", "Original configuration backup: "))}<code>${e(result.backup_path)}</code></p>` : ""}${result.default_changed ? `<p>${e(L("原默认模型已不在免费集合，已修正默认选择。", "The previous default was no longer eligible; its selection was updated."))}</p>` : ""}${!result.provider_enabled ? `<p>${e(L("你此前停用了 Agent2API 提供商；配置已保留该状态，请在 ZCode 中启用后使用。", "The Agent2API provider was disabled. That preference was retained; enable it in ZCode to use these models."))}</p>` : ""}<p>${e(L("在 ZCode 中重新打开模型选择器即可查看；若列表仍未更新，重新打开 ZCode。", "Reopen ZCode's model selector to see the models. Reopen ZCode if the list has not refreshed."))}</p><details><summary>${e(L("查看配置的模型", "View configured models"))}</summary><ul>${result.model_ids.map(id => `<li><code>${e(id)}</code></li>`).join("")}</ul></details></div>` : ""}</div></section>`;
+}
+
+async function syncZCode() {
+  if (s.zcodeSync.busy || !s.cache.zcode?.available) return;
+  s.zcodeSync.busy = true;
+  s.zcodeSync.error = "";
+  s.zcodeSync.result = null;
+  draw();
+  try {
+    s.zcodeSync.result = await api("/api/clients/zcode", {}, { "X-Agent2API-Local-Action": "zcode-sync" });
+    await refresh(["zcode", "models", "accounts", "platforms"]);
+  } catch (error) {
+    s.zcodeSync.error = error.message;
+  } finally {
+    s.zcodeSync.busy = false;
+    draw();
+  }
+}
+async function syncClient(client) {
+  if (!configClients.includes(client)) return;
+  const state = s.clientSync[client];
+  if (!clientReady(client, state, s.cache[client], models())) return;
+  const request = clientRequest(client, state, models());
+  state.busy = true;
+  state.error = "";
+  state.result = null;
+  draw();
+  try {
+    state.result = await api(request.path, request.body, request.headers);
+    return state.result;
+  } catch (error) {
+    state.error = error.message;
+    throw error;
+  } finally {
+    state.busy = false;
+    await refresh([client, "models", "accounts", "platforms"]);
+    draw();
+  }
+}
+
+async function syncClients() {
+  if (s.clientBatchBusy || configClients.some(id => !clientReady(id, s.clientSync[id], s.cache[id], models()))) return;
+  s.clientBatchBusy = true;
+  draw();
+  try { await runClientBatch(configClients, syncClient); }
+  finally { s.clientBatchBusy = false; draw(); }
+}
+
 function connectionExample() {
   const protocol = s.connectionProtocol, model = s.connectionModel || "YOUR_ROUTING_ID";
   const path = protocol === "openai-responses" ? "responses" : protocol === "anthropic-messages" ? "messages" : "chat/completions";
@@ -718,13 +787,13 @@ function modelPage() {
   </div><div id="modelInsights"></div><div class="resource-table" id="modelResults"></div></section><div class="catalog-route-hint">${icon("models")}<span>${e(L("平台前缀固定来源，无前缀按优先级路由。", "A platform prefix pins the source; bare IDs use priority routing."))}</span><a class="text-link" href="#platforms">${e(L("路由规则", "Routing policy"))}${icon("arrow")}</a></div><details class="console-explanation"><summary>${e(L("费率说明", "About rates"))}</summary><p>${e(L("× 为上游积分倍率。费率每分钟同步，超过 5 分钟或读取失败时标记为未知。零积分模型的账号额度与频率限制仍由上游管理。", "× is the upstream credit multiplier. Rates sync every minute; stale or failed reads are marked unknown. Upstream account quotas and frequency limits also apply to zero-credit models."))}</p></details>`;
 }
 function pricingName(status) {
-  return ({ free: L("免费", "Free"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
+  return ({ free: L("免费", "Free"), allowance: L("免费额度", "Free allowance"), credits: L("积分计费", "Uses credits"), dynamic: L("浮动倍率", "Variable rate"), unknown: L("费率未知", "Unknown rate") })[status] || L("费率未知", "Unknown rate");
 }
 function updateModelInsights() {
   if (!$("modelInsights")) return;
   const matrix = s.models.view === "matrix", matching = filterModelCatalog(models(), s.models).filter(m => matrix || matchesModelAvailability(m));
-  const counts = { free: 0, credits: 0, dynamic: 0, unknown: 0 };
-  for (const model of matching) counts[modelPricing(model).status]++;
+  const counts = { free: 0, allowance: 0, credits: 0, dynamic: 0, unknown: 0 };
+  for (const model of matching) counts[pricingCategory(model)]++;
   const freeSummary = platforms().filter(p => s.models.platform === "all" || p.id === s.models.platform).map(p => {
     const count = matching.filter(m => m.platform === p.id && modelPricing(m).status === "free").length;
     return `${regionName(p.id)} ${count}`;
@@ -738,7 +807,7 @@ function updateModelInsights() {
   const times = matching.map((m) => Date.parse(modelPricing(m).observedAt || "")).filter(Number.isFinite);
   const filters = [s.models.query.trim(), s.models.platform !== "all", s.models.capability !== "all", !matrix && s.models.pricing !== "all", !matrix && s.models.availability !== "all"].filter(Boolean).length;
   const displayed = !matrix && s.models.pricing !== "all" ? counts[s.models.pricing] || 0 : matching.length;
-  $("modelRateFilters").innerHTML = `${coverage ? `<div class="catalog-coverage">${coverage}</div>` : ""}<div class="catalog-summary" aria-label="${e(L("按费率筛选", "Filter by rate"))}">${Object.entries(counts).map(([key,count]) => `<button class="catalog-summary-item rate-${key} ${!matrix && s.models.pricing === key ? "selected" : ""}" data-action="model-summary-filter" data-value="${key}" aria-pressed="${!matrix && s.models.pricing === key}" ${matrix ? "disabled" : ""}><span>${e(pricingName(key))}</span><strong>${n(count)}</strong><small>${e(key === "free" ? freeSummary || L("当前目录确认免费", "Confirmed free in the current catalog") : key === "credits" ? L("显示上游积分倍率", "Upstream credit multipliers") : key === "dynamic" ? L("随自动选择的模型变化", "Depends on automatic selection") : L("缺失或已过期的信息", "Missing or stale metadata"))}</small></button>`).join("")}</div>`;
+  $("modelRateFilters").innerHTML = `${coverage ? `<div class="catalog-coverage">${coverage}</div>` : ""}<div class="catalog-summary" aria-label="${e(L("按费率筛选", "Filter by rate"))}">${Object.entries(counts).map(([key,count]) => `<button class="catalog-summary-item rate-${key} ${!matrix && s.models.pricing === key ? "selected" : ""}" data-action="model-summary-filter" data-value="${key}" aria-pressed="${!matrix && s.models.pricing === key}" ${matrix ? "disabled" : ""}><span>${e(pricingName(key))}</span><strong>${n(count)}</strong><small>${e(key === "free" ? freeSummary || L("当前目录确认免费", "Confirmed free in the current catalog") : key === "allowance" ? L("已确认免费账号额度，保留真实倍率", "Verified free allowance; real rate retained") : key === "credits" ? L("显示上游积分倍率", "Upstream credit multipliers") : key === "dynamic" ? L("随自动选择的模型变化", "Depends on automatic selection") : L("缺失或已过期的信息", "Missing or stale metadata"))}</small></button>`).join("")}</div>`;
   $("modelInsights").innerHTML = `
   <div class="catalog-context"><span><strong>${e(matrix ? L("账号可用性", "Account availability") : L("模型列表", "Model list"))}</strong><span class="result-count">${n(displayed)} / ${n(models().length)}${!matrix && s.models.pricing !== "all" ? ` · ${e(pricingName(s.models.pricing))}` : ""}</span></span><div class="toolbar-group">${filters ? `<button class="button ghost small" data-action="reset-model-filters">${icon("close")}${e(L("清除筛选", "Reset filters"))} (${filters})</button>` : ""}${densityControl()}</div></div>
   <div class="catalog-source" title="${e(s.refreshEvery ? L("每分钟同步上游费率", "Rates sync every minute") : L("手动刷新费率", "Refresh rates manually"))}">${icon("clock")}<span>${times.length ? e(L("费率同步 ", "Rates synced ") + timestamp(Math.min(...times))) : e(L("暂无费率数据", "No rate data"))}${s.cache.models?.pricing_snapshot ? ` · ${e(L("历史快照", "Historical snapshot"))}` : ""}</span></div>`;
@@ -746,13 +815,13 @@ function updateModelInsights() {
 function pricingCell(m) {
   const p = modelPricing(m), rate = p.multiplier;
   const value = p.status === "dynamic" ? L("随所选模型变化", "Model dependent") : rate !== undefined ? `${(p.stale || p.refreshFailed) ? L("上次 ", "Previously ") : ""}×${String(rate)}` : "—";
-  return `<div title="${e(p.observedAt ? L("费率读取：", "Rate observed: ") + timestamp(p.observedAt, true) : L("无已核实费率", "No verified rate"))}">${tag(pricingName(p.status), p.status === "free" ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${(p.stale || p.refreshFailed) ? e(L("未确认当前费率", "Current rate unverified")) : p.status === "unknown" ? e(L("无固定倍率", "No fixed rate")) : ""}</div></div>`;
+  return `<div title="${e(p.observedAt ? L("费率读取：", "Rate observed: ") + timestamp(p.observedAt, true) : L("无已核实费率", "No verified rate"))}">${tag(p.freeAllowance ? L("免费额度", "Free allowance") : pricingName(p.status), p.status === "free" || p.freeAllowance ? "green" : p.status === "credits" ? "blue" : "outline")}<div class="cell-sub mono">${e(value)}</div><div class="cell-sub">${(p.stale || p.refreshFailed) ? e(L("未确认当前费率", "Current rate unverified")) : p.status === "unknown" ? e(L("无固定倍率", "No fixed rate")) : ""}</div></div>`;
 }
 function updateModelTable() {
   if (!$("modelResults")) return;
   updateModelInsights();
   if (s.models.view === "matrix") return renderMatrix();
-  const filtered = filterModelCatalog(models(), s.models).filter((m) => (s.models.pricing === "all" || modelPricing(m).status === s.models.pricing) && matchesModelAvailability(m));
+  const filtered = filterModelCatalog(models(), s.models).filter((m) => (s.models.pricing === "all" || pricingCategory(m) === s.models.pricing) && matchesModelAvailability(m));
   const platformOrder = platforms().map((p) => p.id);
   filtered.sort((a, b) => (s.models.sort === "rate" ? compareModelRates(a, b) : s.models.sort === "context" ? (b.context_tokens || 0) - (a.context_tokens || 0) : s.models.sort === "output" ? (b.max_output_tokens || 0) - (a.max_output_tokens || 0) : 0) || compareModelIdentity(a, b, platformOrder));
   const { rows, footer } = paginate(filtered, "models", 20);
@@ -874,22 +943,25 @@ function accountStatus(a) {
   return [L("暂不可用", "Unavailable"), "red"];
 }
 function credentialStatus(a) {
-  if (a.platform === "openrouter") return L("由启动配置管理", "Managed by startup config");
+  if (a.platform === "openrouter") return L("API Key 连接", "API key connection");
   if (a.platform === "cursor") return L("由 Cursor 管理", "Managed by Cursor");
+  if (a.platform === "trae-cn") return L("官方网页授权", "Official web authorization");
   return { sign_in: L("需要重新登录", "Sign in again"), unknown: L("未提供信息", "No information"), refresh: L("等待自动刷新", "Awaiting refresh"), signed_in: L("已登录", "Signed in") }[credentialState(a)];
 }
 function accountSource(a) {
-  return { api_key: "API Key", desktop: L("桌面应用", "Desktop app"), file: L("凭证文件", "Credential file"), unknown: L("未提供来源", "Source unavailable") }[accountConnection(a).source];
+  return { cli: L("官方 CLI 登录", "Official CLI sign-in"), web: L("网页授权", "Web authorization"), api_key: "API Key", desktop: L("桌面应用", "Desktop app"), file: L("凭证文件", "Credential file"), unknown: L("未提供来源", "Source unavailable") }[accountConnection(a).source];
 }
 function platformSetupHint(id) {
-  if (id === "openrouter") return L("在启动环境中配置自己的 OPENROUTER_API_KEY 后重启网关。仅接入确认免费的模型，仍受上游额度和频率限制。", "Set your own OPENROUTER_API_KEY in the startup environment and restart the gateway. Only confirmed free models are allowed; upstream quotas and rate limits still apply.");
+  if (id === "kiro") return L("使用官方 Kiro CLI 完成 Google、GitHub 或 AWS Builder ID 网页登录。仅个人 Free 月度额度与账号实际可选模型；输出预算和采样由平台控制，工具由客户端执行。", "Sign in through the official Kiro CLI using Google, GitHub or AWS Builder ID. Personal Free monthly credits and account-selectable models only; output and sampling are provider controlled. The client executes tools.");
+  if (id === "trae-cn") return L("在本机浏览器完成官方网页授权；使用已验证的个人 Free 月赠与签到积分。DeepSeek / GLM 支持 1M 上下文；当前不支持图片，输出预算和采样由平台控制。", "Authorize in a browser on this computer. Uses verified personal Free monthly and check-in credits. DeepSeek / GLM support 1M context. Images are unsupported; output budgets and sampling are provider controlled.");
+  if (id === "openrouter") return L("在添加账号中填写自己的 API Key，验证后保存并立即生效。仅接入确认免费的模型，仍受上游额度和频率限制。", "Enter your API key in Add account to validate and save it immediately. Only confirmed free models are allowed; upstream quotas and rate limits still apply.");
   if (id === "cursor") return L("在同一系统用户的 Cursor 中登录个人 Free 账号，并关闭按量付费。仅 Composer 2.5；暂不支持图片和采样参数。", "Sign in to a personal Free account in Cursor under the same OS user and disable usage-based billing. Composer 2.5 only; images and sampling parameters are unsupported.");
   if (["workbuddy", "workbuddy-global"].includes(id)) return L("复用对应区域的桌面登录态，或在账号管理中添加账号。国内与国际分别授权，号池和额度独立。", "Reuse the region's desktop login or add an account in Accounts. China and Global use separate authorization, pools and quotas.");
   return "";
 }
 function accountActions(a) {
   const access = accountConnection(a), identity = a.identity || {};
-  if (!access.pooled) return `<p class="muted">${e(platformSetupHint(a.platform) || L("请按该平台的认证方式管理连接。", "Manage this connection using the platform's authentication method."))}</p>`;
+  if (!access.pooled) return `${platformSetup({ id: a.platform }) ? `<button type="button" class="button" data-action="platform-setup" data-platform="${e(a.platform)}">${e(a.platform === "openrouter" ? L("配置密钥", "Configure key") : a.platform === "cursor" ? L("检测桌面登录", "Check desktop login") : L("登录与检测", "Sign in or check"))}</button>` : ""}<p class="muted">${e(platformSetupHint(a.platform) || L("请按该平台的认证方式管理连接。", "Manage this connection using the platform's authentication method."))}</p>`;
   return `${button(a.state === "disabled" ? L("启用账号", "Enable account") : L("停用账号", "Disable account"), "account-control", "", a.state === "disabled" ? "check" : "stop").replace('data-action="account-control"', `data-action="account-control" data-value="${a.state === "disabled" ? "enable" : "disable"}" data-platform="${e(a.platform)}" data-label="${e(a.label)}"`)}<button class="button" data-action="account-control" data-value="reset" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${icon("refresh")}${e(L("重置冷却", "Reset cooldown"))}</button>${access.source === "desktop" ? `<p class="muted">${e(L("请在对应桌面应用中重新登录。已载入的 WorkBuddy 账号不会自动重新载入外部凭证变更，请按登录提示更新账号或重启网关。", "Sign in again in the desktop app. Loaded WorkBuddy accounts do not automatically reload external credential changes; follow the sign-in guidance to update the account or restart the gateway."))}</p>` : `<button class="button" data-action="relogin" data-platform="${e(a.platform)}" data-label="${e(identity.credential_path ? identity.credential_path.split(/[\\/]/).pop() : a.label)}">${e(L("重新登录", "Sign in again"))}</button>`}`;
 }
 function accountPage() {
@@ -976,13 +1048,13 @@ function routePolicy() {
   return `<div class="route-policy"><section class="card">${cardHead(L("自动路由", "Automatic routing"), L("使用不带平台前缀的模型名", "Use a model name without a prefix"))}<div class="card-body"><div class="route-path"><code>${e(example)}</code>${icon("arrow")}${order.map((id, index) => `${index ? icon("arrow") : ""}${regionTag(id)}`).join("")}</div><p>${e(L("按配置中的平台顺序，选择支持该模型的平台。", "Selects a platform supporting the model, in configured order."))}</p><div class="tags" style="margin-top:14px">${tag(routing ? (routing.fallback_on_unavailable ? L("不可用时同名模型回退已启用", "Same-model fallback enabled") : L("自动回退未启用", "Fallback disabled")) : L("路由信息加载中", "Loading routing policy"), routing?.fallback_on_unavailable ? "green" : "")}</div></div></section><section class="card">${cardHead(L("固定平台", "Pinned platform"), L("使用完整的平台 / 模型 ID", "Use the full platform / model ID"))}<div class="card-body"><div class="route-path"><code>${e(order.find((id) => id === "workbuddy-global") || order[0] || "platform")}/${e(example)}</code>${icon("arrow")}${regionTag(order.find((id) => id === "workbuddy-global") || order[0])}</div><p>${e(L("只使用指定平台。显式前缀与固定平台的模型别名不进行跨平台回退。", "Uses only the selected platform. Prefixed IDs and platform-pinned aliases never fall back across platforms."))}</p><div class="tags" style="margin-top:14px">${tag(L("适合 ZCode 的平台前缀配置", "Ideal for prefixed ZCode models"), "blue")}</div></div></section></div>`;
 }
 function platformPage() {
-  const active = s.cache.platforms?.active || platforms(), planned = s.cache.platforms?.planned || [];
+  const active = s.cache.platforms?.active || platforms(), planned = s.cache.platforms?.planned || [], available = s.cache.platforms?.available || [];
   const knownAccounts = !!s.cache.accounts;
   return `<section class="connected-providers"><div class="resource-section-head"><div><h2>${e(L("已接入平台", "Connected platforms"))}</h2><span class="resource-count">${active.length}</span></div><a class="text-link" href="#connection">${e(L("客户端接入指南", "Client setup"))}${icon("arrow")}</a></div><div class="provider-list">${active.map((p) => {
     const pool = accounts().filter((a) => a.platform === p.id), health = accountReadiness(pool);
     const count = s.cache.models ? models().filter((m) => m.platform === p.id).length : p.models;
-    return `<article class="card provider-row"><div class="provider-heading"><div class="provider-emblem" aria-hidden="true">${icon("platforms")}</div><div class="provider-identity"><h2>${e(platformName(p.id))}</h2><span class="provider-id mono">${e(p.id)}</span></div><span class="provider-state ${p.status === "active" ? "positive" : "muted"}"><i></i>${e(p.status === "unauthenticated" ? (p.id === "openrouter" ? L("待配置密钥", "API key needed") : L("待登录", "Sign in needed")) : p.status === "active" ? L("已接入", "Integrated") : L("需关注", "Attention"))}</span></div>${platformSetupHint(p.id) ? `<p class="provider-setup-note">${e(platformSetupHint(p.id))}</p>` : ""}<div class="provider-resources"><div><span>${e(L("模型目录", "Models"))}</span><strong>${count == null ? "—" : n(count)}<small>${e(L("个模型", "models"))}</small></strong></div><div><span>${e(L("就绪账号 / 已启用", "Ready / enabled accounts"))}</span><strong>${knownAccounts ? `${health.ready}<small>/ ${health.enabled}</small>` : "—"}</strong></div><div><span>${e(L("账号总数", "Total accounts"))}</span><strong>${knownAccounts ? n(health.total) : "—"}</strong></div><div class="provider-actions"><button class="button" data-action="platform-accounts" data-value="${e(p.id)}">${e(accountConnection({ platform: p.id }).pooled ? L("管理账号", "Accounts") : L("连接状态", "Connection status"))}</button><button class="button provider-model-action" data-action="platform-models" data-value="${e(p.id)}">${e(L("浏览模型", "Models"))}${icon("arrow")}</button></div></div><div class="provider-footer"><span class="provider-origin"><span>${e(L("上游地址", "Upstream"))}</span><code>${e(p.base_url || "—")}</code></span><span class="provider-prefix"><span>${e(L("路由前缀", "Route prefix"))}</span><code>${e(p.id)}/</code>${iconButton("copy", L("复制路由前缀", "Copy route prefix"), "copy-model", `data-model="${e(p.id)}/"`)}</span></div></article>`;
-  }).join("")}</div></section><section class="routing-section"><div class="resource-section-head"><div><h2>${e(L("模型路由", "Model routing"))}</h2></div><span>${e(L("同名模型，按调用方式选择来源", "Choose the source through the model ID"))}</span></div>${routePolicy()}</section>${planned.length ? `<details class="planned-platforms"><summary>${e(L("后续平台接入", "Upcoming integrations"))}<span>${planned.map((p) => e(p.name)).join(" · ")}</span></summary>${planned.map((p) => `<p><strong>${e(p.name)}</strong> · ${e(p.note || p.id)}</p>`).join("")}</details>` : ""}`;
+    return `<article class="card provider-row"><div class="provider-heading"><div class="provider-emblem" aria-hidden="true">${icon("platforms")}</div><div class="provider-identity"><h2>${e(platformName(p.id))}</h2><span class="provider-id mono">${e(p.id)}</span></div><span class="provider-state ${p.status === "active" ? "positive" : "muted"}"><i></i>${e(p.status === "unauthenticated" ? (p.id === "openrouter" ? L("待配置密钥", "API key needed") : L("待登录", "Sign in needed")) : p.status === "active" ? L("已接入", "Integrated") : L("需关注", "Attention"))}</span></div>${platformSetupHint(p.id) ? `<p class="provider-setup-note">${e(platformSetupHint(p.id))}</p>` : ""}<div class="provider-resources"><div><span>${e(L("模型目录", "Models"))}</span><strong>${count == null ? "—" : n(count)}<small>${e(L("个模型", "models"))}</small></strong></div><div><span>${e(L("就绪账号 / 已启用", "Ready / enabled accounts"))}</span><strong>${knownAccounts ? `${health.ready}<small>/ ${health.enabled}</small>` : "—"}</strong></div><div><span>${e(L("账号总数", "Total accounts"))}</span><strong>${knownAccounts ? n(health.total) : "—"}</strong></div><div class="provider-actions">${platformSetup(p) ? `<button type="button" class="button" data-action="platform-setup" data-platform="${e(p.id)}">${e(L("配置连接", "Set up connection"))}</button>` : ""}<button class="button" data-action="platform-accounts" data-value="${e(p.id)}">${e(accountConnection({ platform: p.id }).pooled ? L("管理账号", "Accounts") : L("连接状态", "Connection status"))}</button><button class="button provider-model-action" data-action="platform-models" data-value="${e(p.id)}">${e(L("浏览模型", "Models"))}${icon("arrow")}</button></div></div><div class="provider-footer"><span class="provider-origin"><span>${e(L("上游地址", "Upstream"))}</span><code>${e(p.base_url || "—")}</code></span><span class="provider-prefix"><span>${e(L("路由前缀", "Route prefix"))}</span><code>${e(p.id)}/</code>${iconButton("copy", L("复制路由前缀", "Copy route prefix"), "copy-model", `data-model="${e(p.id)}/"`)}</span></div></article>`;
+  }).join("")}</div></section><section class="routing-section"><div class="resource-section-head"><div><h2>${e(L("模型路由", "Model routing"))}</h2></div><span>${e(L("同名模型，按调用方式选择来源", "Choose the source through the model ID"))}</span></div>${routePolicy()}</section>${available.length ? `<section class="card available-platforms">${cardHead(L("可添加的平台", "Available integrations"), L("启用后即可配置账号连接", "Enable a platform to configure its connection"))}<div class="card-body">${available.map(p => `<div class="available-platform"><div><strong>${e(p.name)}</strong><p>${e(p.note)}</p></div><button type="button" class="button" data-action="platform-setup" data-platform="${e(p.id)}">${e(L("查看接入方式", "View setup"))}</button></div>`).join("")}</div></section>` : ""}${planned.length ? `<details class="planned-platforms"><summary>${e(L("后续平台接入", "Upcoming integrations"))}<span>${planned.map((p) => e(p.name)).join(" · ")}</span></summary>${planned.map((p) => `<p><strong>${e(p.name)}</strong> · ${e(p.note || p.id)}</p>`).join("")}</details>` : ""}`;
 }
 
 function protocolName(protocol) {
@@ -1105,7 +1177,7 @@ function showModelDetail(id) {
   const capacities = [m.supports_images ? L("视觉", "Vision") : "",m.supports_tools ? L("工具调用", "Tools") : "",m.supports_thinking ? L("思考", "Reasoning") : ""].filter(Boolean).join(" / ");
   showDrawer(L("模型详情", "Model details"), `<div class="detail-hero"><div class="platform-avatar">${icon("models")}</div><div><h2>${e(m.display_name || m.id)}</h2><p>${e(platformName(m.platform))}</p></div></div>
     <div class="endpoint-box model-route-box"><code>${e(routeId(m))}</code>${iconButton("copy",L("复制完整模型 ID", "Copy full model ID"),"copy-model",`data-model="${e(id)}"`)}</div>
-    <div class="detail-status model-detail-status">${tag(pricingName(p.status),p.status==="free"?"green":"outline")}${p.stale || p.refreshFailed ? tag(L("费率待更新", "Rate update needed"),"amber") : ""}</div>
+    <div class="detail-status model-detail-status">${tag(pricingName(pricingCategory(m)),p.status==="free"||p.freeAllowance?"green":"outline")}${p.stale || p.refreshFailed ? tag(L("费率待更新", "Rate update needed"),"amber") : ""}</div>
     <div class="inspection-kpis"><div><span>${e(L("积分倍率", "Credit multiplier"))}</span><strong>${e(rate)}</strong></div><div><span>${e(L("上下文", "Context"))}</span><strong title="${e(m.context_tokens ? n(m.context_tokens) + " tokens" : L("未提供", "Unreported"))}">${m.context_tokens?compact(m.context_tokens):"—"}</strong></div><div><span>${e(L("最大输出", "Max output"))}</span><strong title="${e(m.max_output_tokens ? n(m.max_output_tokens) + " tokens" : L("未提供", "Unreported"))}">${m.max_output_tokens?compact(m.max_output_tokens):"—"}</strong></div></div>
     ${section(L("模型与路由", "Model and routing"),detailItem(L("原始模型名", "Original model name"),m.id,"mono")+detailItem(L("模型能力", "Capabilities"),capacities||L("未提供", "Unreported"))+detailItem(L("裸模型名路由", "Bare model routing"),m.default_route?L("默认优先使用此平台", "This platform is preferred"):L("由平台优先级决定", "Determined by platform priority"))+detailItem(L("固定平台", "Pinned platform"),m.platform,"mono"))}
     ${section(L("费率信息", "Rate information"),detailItem(L("上游费率标注", "Original rate label"),p.raw||L("未提供", "Unreported"))+detailItem(L("读取时间", "Observed at"),p.observedAt?timestamp(p.observedAt,true):L("未知", "Unknown"))+detailItem(L("数据来源", "Source"),L("上游模型配置", "Upstream model configuration"))+detailItem(L("当前状态", "Current state"),p.refreshFailed?L("本次读取未确认", "Latest read unverified"):p.stale?L("已过期", "Stale"):p.status==="unknown"?L("费率未知", "Rate unknown"):L("已同步", "Synced")))}
@@ -1272,6 +1344,7 @@ async function saveAuth(event) {
     await refresh([
       ...new Set([...pageKeys[s.page], "models", "accounts", "config"]),
     ]);
+    await syncRates(true);
   } catch (error) {
     s.key = old;
     if ($("authMessage")) {
@@ -1312,17 +1385,70 @@ async function saveCheckinSettings(form) {
   } catch (error) { status.textContent = error.message; status.className = "login-status negative"; }
   finally { submit.disabled = false; }
 }
-function addAccountDialog() {
-  const available = platforms().filter((p) => ["workbuddy", "workbuddy-global"].includes(p.id));
-  const selected = available.some((p) => p.id === s.accounts.platform)
-    ? s.accounts.platform : available[0]?.id;
+let setupPlatforms = [];
+function setupMethodName(p) {
+  return { cli_oauth: L("官网授权 · 官方 CLI", "Web authorization · official CLI"), device_code: L("浏览器授权 · 多账号", "Browser authorization · account pool"), web_oauth: L("网页登录 · 单账号", "Web sign-in · single account"), api_key: L("API Key · 单连接", "API key · single connection"), desktop: L("桌面登录态 · 单账号", "Desktop login · single account") }[platformSetup(p)?.method] || "";
+}
+function addAccountDialog(preferred = "") {
+  setupPlatforms = connectionPlatforms(s.cache.platforms?.active || platforms(), s.cache.platforms?.available || []);
+  const selected = [preferred, s.accounts.platform].find(id => setupPlatforms.some(p => p.id === id)) || setupPlatforms[0]?.id;
+  $("detailDialog").close();
   modal(
     L("添加账号", "Add account"),
-    `<p>${e(L("选择账号所属的平台，然后在浏览器中完成授权。", "Choose the account's platform, then authorize in your browser."))}</p><form id="addAccountForm"><fieldset class="login-platforms"><legend>${e(L("选择登录平台", "Choose a login platform"))}</legend>${available.map((p) => `<label class="login-platform"><input type="radio" name="loginPlatform" value="${e(p.id)}" ${p.id === selected ? "checked" : ""} required><span class="platform-mark" aria-hidden="true">${e(platformMark(p.id))}</span><span class="login-platform-copy"><strong>${e(platformName(p.id))}</strong><small>${e(p.id)}${p.status === "unauthenticated" ? e(L(" · 尚未登录", " · Not signed in")) : ""}</small></span>${icon("check")}</label>`).join("")}</fieldset><p class="login-platform-note">${e(available.length ? L("国内版与国际版分别授权，账号会加入所选平台的独立账号池。", "China and Global require separate authorization. Accounts join the selected platform's own pool.") : L("尚未取得可登录的平台，请关闭窗口并刷新账号页面后重试。", "No login platforms are available. Close this dialog and refresh the accounts page to retry."))}</p><div class="modal-actions">${button(L("取消", "Cancel"), "close-modal")}<button class="button primary" type="submit" ${available.length ? "" : "disabled"}>${icon("external")}${e(L("开始登录", "Start login"))}</button></div></form>`,
+    `<p>${e(L("选择平台，按它的接入方式添加账号或配置连接。", "Choose a platform to add an account or configure its connection."))}</p><form id="addAccountForm"><fieldset class="login-platforms"><legend>${e(L("选择平台", "Choose a platform"))}</legend>${setupPlatforms.map(p => `<label class="login-platform"><input type="radio" name="loginPlatform" value="${e(p.id)}" ${p.id === selected ? "checked" : ""} required><span class="platform-mark" aria-hidden="true">${e(platformMark(p.id))}</span><span class="login-platform-copy"><strong>${e(platformName(p.id))}</strong><small>${e(setupMethodName(p))}${!p.enabled ? e(L(" · 未启用", " · Not enabled")) : ""}</small></span></label>`).join("")}</fieldset><div id="platformSetupPanel"></div><p id="connectionStatus" class="login-status" role="status" aria-live="polite"></p><div class="modal-actions">${button(L("取消", "Cancel"), "close-modal")}<button id="connectionSubmit" class="button primary" type="submit"></button></div></form>`,
   );
+  updateSetupPanel(selected);
+}
+function updateSetupPanel(id) {
+  const p = setupPlatforms.find(p => p.id === id), setup = platformSetup(p), submit = $("connectionSubmit");
+  if (!submit) return;
+  $("connectionStatus").textContent = "";
+  submit.disabled = !p?.enabled || !setup;
+  submit.textContent = !p?.enabled ? L("请先启用平台", "Enable this platform first") : setup?.method === "api_key" ? L("验证并保存密钥", "Validate and save key") : setup?.method === "desktop" ? L("重新检测登录态", "Check desktop login") : L("开始登录", "Start sign-in");
+  let content = `<p class="login-platform-note">${e(platformSetupHint(id))}</p>`;
+  if (!p?.enabled) {
+    content += `<div class="setup-notice"><strong>${e(L("此平台已实现，当前网关尚未启用", "Implemented, but not enabled in this gateway"))}</strong><p>${e(L("在网关配置的 platforms 列表中追加以下条目，保留原有平台，然后重启网关。", "Append this entry to platforms in the gateway configuration, keep existing platforms, then restart the gateway."))}</p><pre><code>${e(JSON.stringify({ id }, null, 2))}</code></pre></div>`;
+  } else if (setup.method === "api_key") {
+    content += `<label class="field"><span>OpenRouter API Key</span><input id="connectionAPIKey" name="apiKey" type="password" autocomplete="off" spellcheck="false" maxlength="4096" required placeholder="${e(L("输入新密钥，现有密钥不会显示", "Enter a new key; existing keys are never displayed"))}"></label><p class="muted">${e(L("验证成功后替换当前单连接，并保存在网关本机；重启后继续生效。已保存的密钥优先于启动配置。", "A validated key replaces this single connection and is saved on the gateway computer, including after restart. Saved keys take precedence over startup settings."))}</p><div class="setup-links"><a class="text-link" href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">${e(L("前往官网创建密钥", "Create a key on OpenRouter"))}${icon("external")}</a>${button(L("检测现有连接", "Check existing connection"), "check-connection").replace('data-action="check-connection"', `data-action="check-connection" data-platform="${e(id)}"`)}</div>`;
+  } else if (setup.method === "desktop") {
+    content += `<div class="setup-notice">${e(L("先在运行网关的这台电脑上打开 Cursor，登录个人 Free 账号并关闭按量付费，再点击检测。网页账号登录不能替代桌面登录态。", "Open Cursor on the gateway computer, sign in to a personal Free account and disable usage-based billing, then check. Website sign-in alone does not create desktop credentials."))}</div>`;
+  } else if (setup.method === "cli_oauth") {
+    content += `<label class="field"><span>${e(L("登录方式", "Sign-in method"))}</span><select name="kiroProvider">${options([["google", "Google"], ["github", "GitHub"], ["builderid", "AWS Builder ID"]], "google")}</select></label><p class="muted">${e(L("官网将在网关电脑的系统浏览器打开。凭证由官方 CLI 保存，重新登录会更新当前单账号。已登录时可直接检测现有连接。", "The official site opens in the gateway computer's system browser. The CLI stores credentials; signing in updates this single account. If already signed in, check the existing connection."))}</p><div class="setup-links"><a class="text-link" href="https://kiro.dev/docs/getting-started/installation/" target="_blank" rel="noopener noreferrer">${e(L("安装官方 CLI", "Install official CLI"))}${icon("external")}</a>${button(L("检测现有连接", "Check existing connection"), "check-connection").replace('data-action="check-connection"', `data-action="check-connection" data-platform="${e(id)}"`)}</div>`;
+  } else if (setup.method === "web_oauth") {
+    content += `<p class="muted">${e(L("使用一个网页授权账号；重新授权会更新当前连接。浏览器需要运行在网关所在电脑。", "Uses one web-authorized account; signing in again updates this connection. Use a browser on the gateway computer."))}</p>${button(L("检测现有连接", "Check existing connection"), "check-connection").replace('data-action="check-connection"', `data-action="check-connection" data-platform="${e(id)}"`)}`;
+  } else if (setup.method === "device_code") {
+    content += `<p class="muted">${e(L("在浏览器完成对应区域授权，新账号将自动加入该区域的账号池。", "Authorize the selected region in your browser. The new account will join that region's pool automatically."))}</p>`;
+  }
+  $("platformSetupPanel").innerHTML = content;
+}
+async function connectPlatform(platform, action, key = "") {
+  const form = $("addAccountForm"), status = $("connectionStatus");
+  if (!form || !status || form.dataset.busy) return;
+  form.dataset.busy = "true";
+  const controls = [...form.querySelectorAll("input, button")];
+  controls.forEach(control => control.disabled = true);
+  status.className = "login-status";
+  status.textContent = action === "save_key" ? L("正在验证并保存密钥…", "Validating and saving key…") : L("正在检测登录态与免费模型…", "Checking credentials and free models…");
+  try {
+    const result = await api(`/api/accounts/connect?platform=${encodeURIComponent(platform)}`, { action, ...(action === "save_key" ? { api_key: key } : {}) });
+    if (form.isConnected) {
+      status.className = "login-status positive";
+      status.textContent = L(`连接已确认，可用模型 ${result.model_count} 个。`, `Connection verified; ${result.model_count} models available.`);
+    }
+    await refresh(["accounts", "models", "platforms"]);
+  } catch (error) {
+    if (form.isConnected) { status.className = "login-status negative"; status.textContent = error.message; }
+    await refresh(["accounts", "platforms"]);
+  } finally {
+    key = "";
+    const field = form.querySelector('[name="apiKey"]');
+    if (field) field.value = "";
+    delete form.dataset.busy;
+    controls.forEach(control => control.disabled = false);
+  }
 }
 let loginGeneration = 0;
-async function startLogin(platform, name = "") {
+async function startLogin(platform, name = "", provider = "google") {
   $("detailDialog").close();
   const generation = ++loginGeneration;
   modal(
@@ -1333,7 +1459,7 @@ async function startLogin(platform, name = "") {
   let session;
   try {
     session = await api(
-      `/api/accounts/manage?platform=${encodeURIComponent(platform)}${name ? `&name=${encodeURIComponent(name)}` : ""}`,
+      `/api/accounts/manage?platform=${encodeURIComponent(platform)}${name ? `&name=${encodeURIComponent(name)}` : ""}${platform === "kiro" ? `&provider=${encodeURIComponent(provider)}` : ""}`,
       {},
     );
   } catch (error) {
@@ -1344,9 +1470,9 @@ async function startLogin(platform, name = "") {
   }
   if (!alive()) return;
   $("loginBody").className = "";
-  $("loginBody").innerHTML =
-    `<label class="field"><span>${e(L("授权地址", "Authorization URL"))}</span><input id="loginURL" readonly value="${e(session.auth_url || "")}"></label><div class="modal-actions">${button(L("复制链接", "Copy link"), "copy-login", "", "copy")}<button class="button primary" data-action="open-login" id="loginOpen" ${session.auth_url ? "" : "disabled"}>${icon("external")}${e(L("打开授权页面", "Open authorization"))}</button></div><div id="loginStatus" class="login-status" role="status">${e(L("等待授权，最长 5 分钟。", "Waiting for authorization, up to 5 minutes."))}</div>`;
-  for (let i = 0; i < 150 && alive(); i++) {
+  const renderChallenge = () => `<div id="loginChallenge">${session.external_browser ? `<p>${e(L("官方授权页已请求在系统浏览器打开，请完成登录并核对设备码。", "The official authorization page was requested in your system browser. Finish signing in and verify the device code."))}</p><label class="field"><span>${e(L("设备码", "Device code"))}</span><input readonly value="${e(session.user_code || L("正在获取…", "Loading…"))}"></label>` : ""}${session.auth_url || !session.external_browser ? `<label class="field"><span>${e(L("授权地址", "Authorization URL"))}</span><input id="loginURL" readonly value="${e(session.auth_url || "")}"></label><div class="modal-actions">${button(L("复制链接", "Copy link"), "copy-login", "", "copy")}<button class="button primary" data-action="open-login" id="loginOpen" ${session.auth_url ? "" : "disabled"}>${icon("external")}${e(L("打开授权页面", "Open authorization"))}</button></div>` : ""}</div>`;
+  $("loginBody").innerHTML = `${renderChallenge()}<div id="loginStatus" class="login-status" role="status">${e(["trae-cn", "kiro"].includes(platform) ? L("等待授权，最长 30 分钟。", "Waiting for authorization, up to 30 minutes.") : L("等待授权，最长 5 分钟。", "Waiting for authorization, up to 5 minutes."))}</div>`;
+  for (let i = 0; i < (["trae-cn", "kiro"].includes(platform) ? 900 : 150) && alive(); i++) {
     if (session.status === "success" || session.status === "failed") break;
     await new Promise((resolve) => setTimeout(resolve, 2000));
     if (!alive()) return;
@@ -1358,17 +1484,14 @@ async function startLogin(platform, name = "") {
       continue;
     }
     if (!alive()) return;
-    if (session.auth_url) {
-      $("loginURL").value = session.auth_url;
-      $("loginOpen").disabled = false;
-    }
+    $("loginChallenge").outerHTML = renderChallenge();
   }
   if (!alive()) return;
   $("loginStatus").textContent =
     session.status === "success"
       ? L(
-          "登录成功，新账号会自动加入账号池。",
-          "Signed in. Your account will join the pool automatically.",
+          "授权已保存，正在更新账号与免费模型目录。",
+          "Authorization saved; updating the account and free model catalog.",
         )
       : session.status === "failed"
         ? `${L("登录失败", "Login failed")}: ${session.error || ""}`
@@ -1378,6 +1501,17 @@ async function startLogin(platform, name = "") {
           );
   if (session.status === "success") {
     toast(L("账号登录成功", "Account signed in"));
+    if (["trae-cn", "kiro"].includes(platform)) {
+      try {
+        await api(`/api/accounts/connect?platform=${encodeURIComponent(platform)}`, { action: "check" });
+      } catch (error) {
+        if (alive()) {
+          $("loginStatus").textContent = L("授权已保存，连接检测未通过：", "Authorization saved; connection check failed: ") + error.message;
+          $("loginStatus").className = "login-status negative";
+        }
+      }
+      await refresh(["models", "platforms"]);
+    }
     await refresh(["accounts"]);
     setTimeout(() => {
       if (alive()) refresh(["accounts"]);
@@ -1521,6 +1655,11 @@ async function sendChat(event) {
         ? { reasoning_effort: params.reasoning_effort }
         : {}),
     };
+    if (models().some(m => routeId(m) === model && ["trae-cn","kiro"].includes(m.platform))) {
+      delete request.temperature;
+      delete request.max_tokens;
+      delete request.reasoning_effort;
+    }
     const response = await fetch("/v1/chat/completions", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -1583,9 +1722,10 @@ async function sendChat(event) {
 }
 function chatSettings() {
   const params = s.chat.params;
+  const fixed = models().some(m => routeId(m) === s.chat.model && ["trae-cn","kiro"].includes(m.platform));
   modal(
     L("生成参数", "Generation settings"),
-    `<form id="chatSettingsForm"><div class="fields-grid"><label class="field"><span>Temperature</span><input id="chatTemperature" type="number" min="0" max="2" step="0.1" required value="${params.temperature}"></label><label class="field"><span>Max tokens</span><input id="chatMaxTokens" type="number" min="1" max="1000000" required value="${params.max_tokens}"></label></div><label class="field"><span>${e(L("思考强度", "Reasoning effort"))}</span><select id="chatEffort">${options(
+    `<form id="chatSettingsForm">${fixed ? `<p class="muted">${e(L("当前平台的输出长度、采样和思考由上游控制，以下参数不生效。", "This provider controls output length, sampling and reasoning; these settings do not apply."))}</p>` : ""}<div class="fields-grid"><label class="field"><span>Temperature</span><input id="chatTemperature" ${fixed ? "disabled" : ""} type="number" min="0" max="2" step="0.1" required value="${params.temperature}"></label><label class="field"><span>Max tokens</span><input id="chatMaxTokens" ${fixed ? "disabled" : ""} type="number" min="1" max="1000000" required value="${params.max_tokens}"></label></div><label class="field"><span>${e(L("思考强度", "Reasoning effort"))}</span><select id="chatEffort" ${fixed ? "disabled" : ""}>${options(
       [
         ["", L("模型默认", "Model default")],
         ["low", L("低", "Low")],
@@ -1911,6 +2051,27 @@ document.addEventListener("click", async (event) => {
         return showRequestDetail(key);
       case "add-account":
         return addAccountDialog();
+      case "sync-client":
+        return syncClient(kind);
+      case "sync-clients":
+        return syncClients();
+      case "client-platform": {
+        const state = s.clientSync[kind];
+        if (!state || state.busy || s.clientBatchBusy) return;
+        const selected = selectedClientPlatforms(state, models());
+        state.platforms = selected.includes(value) ? selected.filter(id => id !== value) : [...selected, value];
+        state.error = ""; state.result = null;
+        return draw();
+      }
+      case "client-app": {
+        const state = s.clientSync[kind];
+        if (kind !== "cc-switch" || state.busy || s.clientBatchBusy) return;
+        state.apps = state.apps.includes(value) ? state.apps.filter(id => id !== value) : [...state.apps, value];
+        state.error = ""; state.result = null;
+        return draw();
+      }
+      case "sync-zcode":
+        return syncZCode();
       case "account-benefits-refresh":
         return refreshAccountBenefits(target);
       case "trae-checkin-settings":
@@ -1919,6 +2080,10 @@ document.addEventListener("click", async (event) => {
         return checkinAction(false, target);
       case "trae-checkin-manual":
         return checkinAction(true, target);
+      case "platform-setup":
+        return addAccountDialog(platform);
+      case "check-connection":
+        return connectPlatform(platform, "check");
       case "relogin":
         return startLogin(platform, label);
       case "account-control":
@@ -2000,6 +2165,7 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", async (event) => {
   const target = event.target,
     { id, value } = target;
+  if (target.name === "loginPlatform") return updateSetupPanel(value);
   if (id === "autoRefresh") {
     s.refreshEvery = Number(value);
     save("agent2api_refresh", value);
@@ -2093,7 +2259,11 @@ document.addEventListener("submit", (event) => {
   if (event.target.id === "addAccountForm") {
     event.preventDefault();
     const platform = new FormData(event.target).get("loginPlatform");
-    if (platform) startLogin(platform);
+    const p = setupPlatforms.find(p => p.id === platform), method = platformSetup(p)?.method;
+    if (!p?.enabled || event.target.dataset.busy) return;
+    if (method === "api_key") connectPlatform(platform, "save_key", new FormData(event.target).get("apiKey") || "");
+    else if (method === "desktop") connectPlatform(platform, "check");
+    else if (["device_code", "web_oauth", "cli_oauth"].includes(method)) startLogin(platform, "", new FormData(event.target).get("kiroProvider") || "google");
   }
   if (event.target.id === "chatSettingsForm") {
     event.preventDefault();
@@ -2226,7 +2396,7 @@ setInterval(() => {
   if (!m) return;
   const pricing = modelPricing(m);
   const values = new Map([
-    [L("费率类型", "Rate type"), pricingName(pricing.status)],
+    [L("费率类型", "Rate type"), pricingName(pricing.freeAllowance ? "allowance" : pricing.status)],
     [L("积分倍率", "Credit multiplier"), pricing.multiplier == null ? pricing.status === "dynamic" ? L("随所选模型变化", "Depends on selected model") : L("未知", "Unknown") : `${pricing.stale || pricing.refreshFailed ? L("上次 ", "Previously ") : ""}×${pricing.multiplier}`],
     [L("费率来源与时间", "Rate source and time"), pricing.observedAt ? `${L("上游模型配置 · ", "Upstream configuration · ")}${timestamp(pricing.observedAt, true)}${pricing.refreshFailed ? L(" · 本次读取未确认", " · Unverified in the latest check") : pricing.stale ? L(" · 已超过 5 分钟，需更新", " · Older than five minutes, refresh needed") : ""}` : L("无可核实信息", "No verified metadata")],
   ]);

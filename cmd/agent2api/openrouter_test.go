@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -36,7 +37,7 @@ func TestOpenRouterGatewayProtocols(t *testing.T) {
 	defer upstream.Close()
 	cfg := config.Default()
 	cfg.Auth.APIKey = "test-gateway"
-	cfg.Upstream.Platforms = []config.PlatformConfig{{ID: "openrouter", BaseURL: upstream.URL, APIKey: "test-upstream"}}
+	cfg.Upstream.Platforms = []config.PlatformConfig{{ID: "openrouter", BaseURL: upstream.URL, APIKey: "test-upstream", CredentialPath: filepath.Join(t.TempDir(), "openrouter.session.json")}}
 	logger := log.New(io.Discard, "", 0)
 	hub, err := buildHub(cfg, logger)
 	if err != nil {

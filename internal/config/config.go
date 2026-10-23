@@ -126,6 +126,7 @@ type UpstreamConfig struct {
 	// They are separate from Auth.APIKey, which protects the local gateway.
 	APIKey    string `json:"api_key,omitempty"`
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+	CLIPath   string `json:"cli_path,omitempty"` // Kiro 官方 CLI；为空时自动查找。
 
 	// CredentialPath 为空时自动探测本机已登录凭证。
 	CredentialPath string `json:"credential_path"`
@@ -164,6 +165,7 @@ type PlatformConfig struct {
 	BaseURL   string `json:"base_url,omitempty"`
 	APIKey    string `json:"api_key,omitempty"`
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+	CLIPath   string `json:"cli_path,omitempty"`
 	// Sanitize 该平台是否开启脱敏。
 	Sanitize bool `json:"sanitize"`
 	// 超时/缓存项：为 0 时回退到 UpstreamConfig 顶层同名项。
@@ -200,6 +202,7 @@ func (c Config) ResolvePlatforms() []PlatformConfig {
 			BaseURL:                  c.Upstream.BaseURL,
 			APIKey:                   c.Upstream.APIKey,
 			APIKeyEnv:                c.Upstream.APIKeyEnv,
+			CLIPath:                  c.Upstream.CLIPath,
 			Sanitize:                 c.Upstream.Sanitize,
 			StreamIdleTimeoutSec:     c.Upstream.StreamIdleTimeoutSec,
 			StreamTotalTimeoutSec:    c.Upstream.StreamTotalTimeoutSec,
@@ -226,9 +229,10 @@ func (c Config) CloneForPlatform(pc PlatformConfig) Config {
 	// API keys never inherit across platforms in a multi-platform configuration.
 	c.Upstream.APIKey = pc.APIKey
 	c.Upstream.APIKeyEnv = pc.APIKeyEnv
+	c.Upstream.CLIPath = pc.CLIPath
 	// Direct providers must not inherit another platform's endpoint or desktop
 	// credential path. Single-platform ResolvePlatforms already copies its values.
-	if pc.ID == "cursor" || pc.ID == "openrouter" {
+	if pc.ID == "cursor" || pc.ID == "openrouter" || pc.ID == "trae-cn" || pc.ID == "kiro" {
 		c.Upstream.BaseURL = pc.BaseURL
 		c.Upstream.CredentialPath = pc.CredentialPath
 		c.Upstream.AccountsDir = ""

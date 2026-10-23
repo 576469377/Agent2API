@@ -1,0 +1,10 @@
+{
+  "default_model":"deepseek-3.2",
+  "models":[
+    {"model_name":"deepseek-3.2","model_id":"deepseek-3.2","context_window_tokens":164000,"rate_multiplier":0.25,"rate_unit":"Credit"},
+    {"model_name":"minimax-m2.5","model_id":"minimax-m2.5","context_window_tokens":196000,"rate_multiplier":0.25,"rate_unit":"Credit"},
+    {"model_name":"minimax-m2.1","model_id":"minimax-m2.1","context_window_tokens":196000,"rate_multiplier":0.15,"rate_unit":"Credit"},
+    {"model_name":"glm-5","model_id":"glm-5","context_window_tokens":200000,"rate_multiplier":0.5,"rate_unit":"Credit"},
+    {"model_name":"qwen3-coder-next","model_id":"qwen3-coder-next","context_window_tokens":256000,"rate_multiplier":0.05,"rate_unit":"Credit"}
+  ]
+}

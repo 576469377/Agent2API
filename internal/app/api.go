@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/kiro"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/api/common"
 	"github.com/576469377/Agent2API/internal/config"
@@ -35,16 +37,19 @@ var builtinPlatforms = []struct {
 }{
 	{ID: "workbuddy", Name: "WorkBuddy / CodeBuddy", Note: "腾讯 CodeBuddy 桌面端登录态复用", Implemented: true},
 	{ID: "workbuddy-global", Name: "WorkBuddy International", Note: "WorkBuddy 国际版桌面端登录态复用", Implemented: true},
-	{ID: "openrouter", Name: "OpenRouter", Note: "配置 OPENROUTER_API_KEY，仅接入免费模型", Implemented: true},
+	{ID: "openrouter", Name: "OpenRouter", Note: "控制台验证并保存 API Key，仅接入免费模型", Implemented: true},
 	{ID: "devin", Name: "Devin", Note: "上游为私有 protobuf over Connect，需独立适配器", Implemented: false},
 	{ID: "cursor", Name: "Cursor", Note: "桌面个人 Free 账号，仅 Composer 2.5 免费额度，禁用按量付费", Implemented: true},
+	{ID: trae.Platform, Name: "TRAE 国内版", Note: "官方网页授权；个人 Free 月赠积分，文本与原生工具", Implemented: true},
+	{ID: kiro.Platform, Name: "Kiro Free", Note: "官方 CLI 网页登录；每月 50 免费积分，按账号实际目录自选模型", Implemented: true},
 }
 
 // platformEntry 是「规划中 / 可用（已实现但当前未运行）」两类平台共用的精简描述。
 type platformEntry struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Note string `json:"note"`
+	ID         string                   `json:"id"`
+	Name       string                   `json:"name"`
+	Note       string                   `json:"note"`
+	Connection *adapter.ConnectionSetup `json:"connection,omitempty"`
 }
 
 // ───────────────────────── 状态 ─────────────────────────
@@ -117,15 +122,13 @@ func (a *App) apiMetrics(w http.ResponseWriter, r *http.Request) {
 
 type platformsResponse struct {
 	// Active 是本进程实际集成并在运行的全部平台（多平台集成，不止一个）。
-	Active []adapter.Description `json:"active"`
+	Active    []adapter.Description `json:"active"`
+	Available []platformEntry       `json:"available"`
 	// Planned 是尚未实现的平台（规划中）。
 	Planned []platformEntry `json:"planned"`
 }
 
-// apiPlatforms 返回平台总览：已集成运行的平台 + 未实现的规划项。
-//
-// 「可用（已实现但未运行）」这一类随多平台集成而消失——现在一个控制台
-// 集成所有已配置平台，配置了就在跑；想多一个平台，往配置里加一项并重启。
+// apiPlatforms also exposes implemented platforms that need configuration.
 func (a *App) apiPlatforms(w http.ResponseWriter, r *http.Request) {
 	active := a.hub.Describe()
 	running := map[string]bool{}
@@ -133,16 +136,23 @@ func (a *App) apiPlatforms(w http.ResponseWriter, r *http.Request) {
 		running[d.ID] = true
 	}
 
-	var planned []platformEntry
+	var planned, available []platformEntry
 	for _, p := range builtinPlatforms {
-		if !p.Implemented && !running[p.ID] {
-			planned = append(planned, platformEntry{ID: p.ID, Name: p.Name, Note: p.Note})
+		if running[p.ID] {
+			continue
+		}
+		entry := platformEntry{ID: p.ID, Name: p.Name, Note: p.Note, Connection: adapter.SetupFor(p.ID)}
+		if p.Implemented {
+			available = append(available, entry)
+		} else {
+			planned = append(planned, entry)
 		}
 	}
 
 	writeJSON(w, platformsResponse{
-		Active:  active,
-		Planned: planned,
+		Active:    active,
+		Available: available,
+		Planned:   planned,
 	})
 }
 
@@ -392,6 +402,50 @@ func (a *App) resolveAccountPlatform(w http.ResponseWriter, r *http.Request, lab
 func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 	rt, ok := a.platformOr400(w, r)
 	if !ok {
+		return
+	}
+	if rt.ID == kiro.Platform {
+		provider := r.URL.Query().Get("provider")
+		if provider == "" {
+			provider = "google"
+		}
+		if provider != "google" && provider != "github" && provider != "builderid" {
+			writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"message": "不支持的 Kiro 登录方式"}})
+			return
+		}
+		cliPath := rt.Cfg.CLIPath
+		if runtime, ok := rt.Adapter.(interface{ CLIPath() string }); ok {
+			cliPath = runtime.CLIPath()
+		}
+		sess, err := a.logins.startKiro(cliPath, provider)
+		if err != nil {
+			f := llm.Wrap(err)
+			writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+			return
+		}
+		writeJSON(w, sess)
+		return
+	}
+	if rt.ID == trae.Platform {
+		path := rt.Cfg.CredentialPath
+		if path == "" {
+			path = trae.DefaultCredentialPath()
+		}
+		sess, err := a.logins.Start(trae.Platform, path)
+		if err != nil {
+			f := llm.Wrap(err)
+			writeJSONWithStatus(w, f.HTTPStatus(), common.BuildErrorPayload(f))
+			return
+		}
+		writeJSON(w, struct {
+			*loginSnapshot
+			AccountsDir string `json:"accounts_dir_used"`
+		}{sess, filepath.Dir(path)})
+		return
+	}
+	setup := adapter.SetupFor(rt.ID)
+	if setup == nil || setup.Method != "device_code" {
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"message": "该平台不使用浏览器授权，请使用对应的密钥配置或桌面登录态检测入口"}})
 		return
 	}
 	dir := rt.AccountsDir()
@@ -739,7 +793,7 @@ func (a *App) apiModels(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if r.URL.Query().Get("refresh") == "1" {
-		_, _ = a.hub.ListModels(ctx)
+		_ = a.hub.RefreshAllPlatforms(ctx)
 	} else {
 		a.hub.RefreshCatalogIfDue()
 	}

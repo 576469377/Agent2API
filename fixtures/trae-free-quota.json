@@ -1,0 +1,67 @@
+{
+  "is_credits_billing": true,
+  "is_dollar_usage_billing": false,
+  "trial_status": {
+    "is_eligible_for_trial": false,
+    "is_in_trial": false
+  },
+  "usage_summary": {
+    "consumed_amount": 0,
+    "consumption_ratio": 0,
+    "total_amount": 500
+  },
+  "user_entitlement_pack_list": [
+    {
+      "expire_time": 4102444800,
+      "is_hide": false,
+      "is_last_period": false,
+      "status": 1,
+      "usage": {},
+      "entitlement_base_info": {
+        "available_endpoint": 0,
+        "charge_amount": 0,
+        "currency": 0,
+        "end_time": 4102444800,
+        "ent_status": 0,
+        "product_type": 0,
+        "quota": {
+          "enable_solo_agent": true,
+          "enable_solo_builder": true,
+          "enable_solo_coder": true,
+          "enable_solo_lite": true,
+          "enable_solo_web": true,
+          "no_bonus_quota": true,
+          "solo_agent_parallel_limit": 2
+        },
+        "start_time": 1
+      }
+    },
+    {
+      "expire_time": 4102444800,
+      "group_type": 3,
+      "is_hide": false,
+      "is_last_period": false,
+      "status": 1,
+      "usage": {},
+      "entitlement_base_info": {
+        "available_endpoint": 0,
+        "charge_amount": 0,
+        "currency": 1,
+        "end_time": 4102444800,
+        "ent_status": 0,
+        "product_type": 2,
+        "quota": {
+          "credits_limit": 500,
+          "enable_solo_agent": true,
+          "enable_solo_builder": true,
+          "enable_solo_coder": true,
+          "enable_solo_lite": true,
+          "enable_solo_web": true,
+          "no_bonus_quota": true,
+          "solo_agent_parallel_limit": 2
+        },
+        "start_time": 1
+      }
+    }
+  ]
+}

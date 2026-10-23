@@ -9,13 +9,24 @@ import (
 
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/cursor"
+	"github.com/576469377/Agent2API/internal/adapter/kiro"
 	"github.com/576469377/Agent2API/internal/adapter/openrouter"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/config"
 )
 
 // platformDefaultPaths 返回平台各自的默认凭证位置。
 func platformDefaultPaths(platform string) []string {
+	if platform == kiro.Platform {
+		return nil
+	}
+	if platform == trae.Platform {
+		return []string{trae.DefaultCredentialPath()}
+	}
+	if platform == openrouter.Platform {
+		return []string{openrouter.DefaultCredentialPath()}
+	}
 	return workbuddy.DefaultCredentialPathsForPlatform(platform)
 }
 
@@ -30,7 +41,7 @@ func platformDefaultPaths(platform string) []string {
 // 任一账号加载失败只记日志不阻断启动——多账号场景下坏一个文件不该拖死网关；
 // 没有可用凭证时保留空池，供控制台首次登录和目录监视器后续入池。
 func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) }) (adapter.Adapter, *adapter.Pool, error) {
-	if cfg.Upstream.Platform == openrouter.Platform || cfg.Upstream.Platform == cursor.Platform {
+	if cfg.Upstream.Platform == openrouter.Platform || cfg.Upstream.Platform == cursor.Platform || cfg.Upstream.Platform == trae.Platform || cfg.Upstream.Platform == kiro.Platform {
 		a, err := newPlatformAdapter(cfg, "", nil)
 		return a, nil, err
 	}
@@ -109,13 +120,24 @@ func accountLabel(path string, adp adapter.Adapter) string {
 // 平台差异全部收在这个工厂里：号池与下游协议都只依赖 adapter.Adapter 接口，
 // 新增平台时只需在这里加一个分支。
 func newPlatformAdapter(cfg config.Config, credPath string, logf func(string, ...any)) (adapter.Adapter, error) {
+	if cfg.Upstream.Platform == kiro.Platform {
+		return kiro.New(kiro.Config{CLIPath: cfg.Upstream.CLIPath, RequestTimeout: cfg.RequestTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL()})
+	}
+	if cfg.Upstream.Platform == trae.Platform {
+		return trae.New(trae.Config{BaseURL: cfg.Upstream.BaseURL, CredentialPath: cfg.Upstream.CredentialPath, RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL()})
+	}
 	if cfg.Upstream.Platform == cursor.Platform {
 		return cursor.New(cursor.Config{BaseURL: cfg.Upstream.BaseURL, CredentialPath: cfg.Upstream.CredentialPath,
 			RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout()})
 	}
 	if cfg.Upstream.Platform == openrouter.Platform {
+		path := cfg.Upstream.CredentialPath
+		if path == "" {
+			path = openrouter.DefaultCredentialPath()
+		}
 		return openrouter.New(openrouter.Config{
 			BaseURL: cfg.Upstream.BaseURL, APIKey: cfg.Upstream.APIKey, APIKeyEnv: cfg.Upstream.APIKeyEnv,
+			CredentialPath: path,
 			RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(),
 			StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL(),
 		})

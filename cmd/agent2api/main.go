@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/576469377/Agent2API/internal/adapter/kiro"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
@@ -50,7 +52,7 @@ func printUsage() {
 
 用法:
   agent2api [flags]            启动网关服务
-  agent2api login [flags]      设备码登录，获取上游凭证
+  agent2api login [flags]      WorkBuddy 设备登录 / TRAE 网页授权
   agent2api models [flags]     列出当前账号可用模型
   agent2api dedupe [flags]     清理凭证目录里的重复与无效凭证
 
@@ -89,7 +91,7 @@ func addServerFlags(fs *flag.FlagSet) *serverFlags {
 	fs.StringVar(&sf.accountsDir, "accounts-dir", "", "多账号号池目录；目录下每个 *.json 视为一个账号（agent2api login -out 攒凭证）")
 	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认按平台选择")
 	fs.BoolVar(&sf.noSanitize, "no-sanitize", false, "关闭内容脱敏（接入 Claude Code/Codex 时不建议关闭）")
-	fs.StringVar(&sf.platform, "platform", "", "上游平台（workbuddy / workbuddy-global / openrouter / cursor；缺省自动探测 WorkBuddy）")
+	fs.StringVar(&sf.platform, "platform", "", "上游平台（workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro；缺省自动探测 WorkBuddy）")
 	fs.StringVar(&sf.metricsFile, "metrics-file", "", "指标落盘路径；默认写到配置文件同目录的 metrics.json")
 	fs.BoolVar(&sf.noPersist, "no-persist", false, "关闭指标落盘（重启后统计清零）")
 	return sf
@@ -173,7 +175,7 @@ func runServer(args []string) {
 	// 平台合法性在 buildHub 里逐个校验（自动集成模式下 Platform 为空是正常的）。
 	// 这里只拦「显式写了不支持平台」的低级错误，快速失败。
 	if cfg.Upstream.Platform != "" && !supportedPlatforms[cfg.Upstream.Platform] {
-		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / workbuddy-global / openrouter / cursor）", cfg.Upstream.Platform)
+		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro）", cfg.Upstream.Platform)
 	}
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
@@ -390,7 +392,7 @@ func printBanner(cfg config.Config, hub *app.Hub) {
 
 // supportedPlatforms 是 buildHub 能装配的平台集合（与 newPlatformAdapter 工厂一致）。
 // 新增平台适配器后在此追加。
-var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlatform: true, "openrouter": true, "cursor": true}
+var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlatform: true, "openrouter": true, "cursor": true, trae.Platform: true, kiro.Platform: true}
 
 // buildHub 按配置装配多平台枢纽。
 //
@@ -405,7 +407,7 @@ func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
 	for _, pc := range pcs {
 		if !supportedPlatforms[pc.ID] {
 			failures = append(failures, pc.ID+": 不支持的平台")
-			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy / workbuddy-global / openrouter / cursor）", pc.ID)
+			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro）", pc.ID)
 			continue
 		}
 		clone := cfg.CloneForPlatform(pc)
@@ -446,11 +448,54 @@ func runLogin(args []string) {
 	out := fs.String("out", "", "凭证输出路径，默认按区域选择")
 	base := fs.String("base-url", "", "上游地址，默认按区域选择")
 	region := fs.String("region", "cn", "账号区域: cn / global")
-	platform := fs.String("platform", "", "上报给上游的客户端标识，默认按区域选择")
+	platform := fs.String("platform", "", "trae-cn 使用网页授权；WorkBuddy 可指定客户端标识")
+	provider := fs.String("provider", "google", "Kiro 登录方式: google / github / builderid")
+	cliPath := fs.String("cli-path", "", "Kiro 官方 CLI 路径，缺省自动查找")
 	_ = fs.Parse(args)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	loginTimeout := 6 * time.Minute
+	if *platform == trae.Platform || *platform == kiro.Platform {
+		loginTimeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
 	defer cancel()
+	if *platform == kiro.Platform {
+		if *base != "" || *out != "" {
+			log.Fatal("Kiro 由官方 CLI 管理授权，不接受 base-url 或 out")
+		}
+		err := kiro.Login(ctx, kiro.LoginOptions{CLIPath: *cliPath, Provider: *provider, OnChallenge: func(code, url string) {
+			if code != "" {
+				fmt.Println("请核对官网设备码：" + code)
+			}
+			if url != "" {
+				fmt.Println(url)
+			} else {
+				fmt.Println("请在系统浏览器完成 Kiro 官网授权")
+			}
+		}})
+		if err != nil {
+			log.Fatalf("Kiro 登录失败: %v", err)
+		}
+		fmt.Println("Kiro CLI 账号已登录；运行网关后检测 Free 模型连接")
+		return
+	}
+	if *platform == trae.Platform {
+		if *base != "" {
+			log.Fatal("TRAE 网页授权使用官方域名，不接受自定义 base-url")
+		}
+		if *region != "cn" {
+			log.Fatal("trae-cn 仅支持国内区域，请使用 -region cn")
+		}
+		_, err := trae.Login(ctx, trae.LoginOptions{OutputPath: *out, OnAuthURL: func(u string) {
+			fmt.Println("请打开以下链接，在 TRAE 官方网站完成授权：")
+			fmt.Println(u)
+		}})
+		if err != nil {
+			log.Fatalf("TRAE 登录失败: %v", err)
+		}
+		fmt.Println("TRAE 网页授权已完成，凭据已保存在本机")
+		return
+	}
 
 	pid := "workbuddy"
 	if *region == "global" {
@@ -510,6 +555,14 @@ func runModels(args []string) {
 		return
 	}
 
+	if *platform != "" {
+		if !supportedPlatforms[*platform] {
+			log.Fatalf("未知平台: %s", *platform)
+		}
+		if len(cfg.Upstream.Platforms) == 0 {
+			cfg.Upstream.Platform = *platform
+		}
+	}
 	logger := log.New(os.Stderr, "", 0)
 	hub, err := buildHub(cfg, logger)
 	if err != nil {

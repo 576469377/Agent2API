@@ -25,18 +25,20 @@ const Platform = "openrouter"
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
 
 type Config struct {
-	BaseURL, APIKey, APIKeyEnv                                           string
+	BaseURL, APIKey, APIKeyEnv, CredentialPath                           string
 	RequestTimeout, StreamIdleTimeout, StreamTotalTimeout, ModelCacheTTL time.Duration
 }
 
 type Adapter struct {
-	benefits adapter.BenefitCache
-	cfg      Config
-	client   *http.Client
-	mu       sync.Mutex
-	fetchMu  sync.Mutex
-	models   []adapter.ModelInfo
-	expires  time.Time
+	benefits      adapter.BenefitCache
+	cfg           Config
+	client        *http.Client
+	mu            sync.Mutex
+	fetchMu       sync.Mutex
+	models        []adapter.ModelInfo
+	expires       time.Time
+	storedKey     string
+	storedPresent bool
 }
 
 func New(cfg Config) (*Adapter, error) {
@@ -65,12 +67,20 @@ func New(cfg Config) (*Adapter, error) {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = cfg.RequestTimeout
-	return &Adapter{cfg: cfg, client: &http.Client{Transport: transport}}, nil
+	a := &Adapter{cfg: cfg, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	a.loadSavedKey()
+	return a, nil
 }
 
 func (a *Adapter) Name() string { return Platform }
 
 func (a *Adapter) key() string {
+	a.mu.Lock()
+	key, present := a.storedKey, a.storedPresent
+	a.mu.Unlock()
+	if present {
+		return key
+	}
 	if key := strings.TrimSpace(os.Getenv(a.cfg.APIKeyEnv)); key != "" {
 		return key
 	}
@@ -81,7 +91,7 @@ func (a *Adapter) Describe() adapter.Description {
 	d := adapter.Description{ID: Platform, Name: "OpenRouter", BaseURL: a.cfg.BaseURL, Status: "active", Account: "API Key", Notes: "仅允许目录确认的免费模型"}
 	if a.key() == "" {
 		d.Status = "unauthenticated"
-		d.Notes = "请设置 " + a.cfg.APIKeyEnv + "，然后重启网关"
+		d.Notes = "请在添加账号中配置 API Key，或设置 " + a.cfg.APIKeyEnv + " 后重启网关"
 	}
 	a.mu.Lock()
 	d.Models = len(a.models)

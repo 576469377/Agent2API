@@ -11,6 +11,7 @@
 | [ZCode 配置结构](03-ZCode供应商配置逆向.md) | schema、载入、热更新与历史故障 | 日常接入用[客户端指南](../clients.md)和同步脚本 |
 | [WorkBuddy 国际版接入](04-WorkBuddy国际版接入.md) | 区域差异、加密凭证与兼容性 | 登录和恢复见[账号管理](../accounts.md) |
 | [Cursor 接入验证](05-Cursor接入调研.md) | 当时客户端版本、Free 权益和工具转发 | 当前限制见[配置](../configuration.md#cursor个人-free-额度) |
+| [免费账号平台接入调研](06-免费账号平台接入调研.md) | 2026-10-23 固定版本开源项目、现行免费权益、失效渠道与接入顺序 | TRAE 与 Kiro 已实测接入；其余候选待验证，见 [TRAE](../trae.md) / [Kiro 指南](../kiro.md) |
 | [网关稳定性对照](../reviews/2026-10-23-gateway-stability-review.md) | 固定版本项目对照、预算、队列及大请求回归修正 | 当前有效值见[配置](../configuration.md#请求预算和等待队列gateway) |
 | [控制台与全仓审查](../reviews/2026-10-23-console-and-repository-review.md) | 六仓库源码、官方指标指南、界面与文档改进 | 本轮实施状态、验证及剩余限制 |
 

@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "data": {
+    "planName": "KIRO FREE",
+    "billingCycleReset": "2030-01-01",
+    "overagesEnabled": false,
+    "isEnterprise": false,
+    "overageCapable": false,
+    "usageBreakdowns": [{"resourceType":"CREDIT","used":1.25,"limit":50,"currentOverages":0,"overageRate":0.04,"overageCharges":0,"hasLimit":true}],
+    "bonusCredits": [],
+    "addOnCredits": []
+  }
+}

@@ -24,6 +24,17 @@ type ModelInfo struct {
 	SupportsThinking bool          `json:"supports_thinking"`
 	IsDefault        bool          `json:"is_default"`
 	Pricing          *ModelPricing `json:"pricing,omitempty"`
+	Access           *ModelAccess  `json:"access,omitempty"`
+}
+
+// 免费赠送积分与模型费率是两件事，不能把正倍率改成零来表示免费档。
+type ModelAccess struct {
+	Basis            string  `json:"basis"`
+	Plan             string  `json:"plan"`
+	OverageEnabled   bool    `json:"overage_enabled"`
+	RemainingCredits float64 `json:"remaining_credits"`
+	Source           string  `json:"source"`
+	CheckedAt        string  `json:"checked_at"`
 }
 
 // ModelPricing reports upstream catalogue metadata, never an account balance
@@ -63,9 +74,10 @@ type Description struct {
 	BaseURL string `json:"base_url"`
 	Account string `json:"account,omitempty"`
 	// Status: active / unauthenticated (empty pool) / degraded / error
-	Status string `json:"status"`
-	Models int    `json:"models,omitempty"`
-	Notes  string `json:"notes,omitempty"`
+	Status     string           `json:"status"`
+	Models     int              `json:"models,omitempty"`
+	Notes      string           `json:"notes,omitempty"`
+	Connection *ConnectionSetup `json:"connection,omitempty"`
 }
 
 // Configurable 是适配器可选实现的运行时配置接口。

@@ -185,6 +185,93 @@ class SyncPreservationTest(unittest.TestCase):
 
 
 class FreeOnlySyncTest(unittest.TestCase):
+    def test_kiro_preserves_real_credit_rates_and_unknown_output_metadata(self):
+        model = self.trae_model()
+        model.update(platform='kiro', max_output_tokens=0, supports_thinking=False)
+        model['pricing']['source'] = 'kiro_cli_catalog'
+        model['access']['source'] = 'kiro_cli_free_plan'
+        self.assertTrue(sync.confirmed_free(model))
+        self.assertEqual(sync.output_limit(model), 8192)
+        self.assertEqual(model['max_output_tokens'], 0)
+        for key, value in [('plan','pro'), ('source','trae_free_plan'), ('remaining_credits',0), ('overage_enabled',True)]:
+            changed = json.loads(json.dumps(model))
+            changed['access'][key] = value
+            self.assertFalse(sync.confirmed_free(changed))
+
+    def trae_model(self):
+        model = self.model('deepseek-v4.1-flash', 'credits', 'trae-cn')
+        model['supports_thinking'] = True
+        model['pricing']['source'] = 'trae_account_catalog'
+        model['access'] = {'source': 'trae_free_plan', 'basis': 'recurring_free_allowance',
+                           'plan': 'free', 'overage_enabled': False, 'remaining_credits': 500,
+                           'checked_at': model['pricing']['observed_at']}
+        return model
+
+    def test_trae_requires_fresh_recurring_free_account_evidence(self):
+        model = self.trae_model()
+        self.assertTrue(sync.confirmed_free(model))
+        for access in ({'plan': 'pro'}, {'basis': 'trial'}, {'source': 'unknown'},
+                       {'overage_enabled': True}, {'overage_enabled': None},
+                       {'remaining_credits': 0}, {'remaining_credits': '500'},
+                       {'checked_at': '2020-01-01T00:00:00Z'}):
+            with self.subTest(access=access):
+                self.assertFalse(sync.confirmed_free({**model, 'access': {**model['access'], **access}}))
+        for patch in ({'access': {}}, {'pricing_from_snapshot': True}, {'pricing_sync_failed': True}):
+            self.assertFalse(sync.confirmed_free({**model, **patch}))
+
+    def test_trae_sync_preserves_price_and_does_not_advertise_thinking_control(self):
+        model = self.trae_model()
+        self.models.append(model)
+        result = self.run_sync('--models', model['routing_id'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        rule = next(r for r in cfg['modelConfigRules']['manualProviderModelRules'] if r['modelId'] == model['routing_id'])
+        self.assertEqual(rule['config']['optionSpecs']['reasoningLevel'], {'values': ['enabled'], 'map': '{}'})
+        self.assertEqual(model['pricing']['credit_multiplier'], 1)
+        rule['config']['enabled'] = False
+        rule['config']['optionSpecs']['reasoningLevel'] = {'values': ['disabled', 'enabled'], 'map': 'old'}
+        self.doc['config'] = cfg
+        self.save()
+        result = self.run_sync('--models', 'free')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        rule = next(r for r in cfg['modelConfigRules']['manualProviderModelRules'] if r['modelId'] == model['routing_id'])
+        self.assertFalse(rule['config']['enabled'])
+        self.assertEqual(rule['config']['optionSpecs']['reasoningLevel'], {'values': ['enabled'], 'map': '{}'})
+
+    def test_trae_upgrades_legacy_windows_and_preserves_custom_settings(self):
+        for model_id in ('deepseek-v4.1-flash', 'glm-5.3-flash'):
+            model = self.trae_model()
+            model.update(id=model_id, routing_id='trae-cn/' + model_id, context_tokens=1000000, max_output_tokens=64000)
+            self.models.append(model)
+            self.doc['config']['modelConfigRules']['manualProviderModelRules'].append({
+                'providerId': 'agent2api', 'modelId': model['routing_id'],
+                'config': {'enabled': False, 'keep': 'custom', 'properties': {'contextWindow': 200000},
+                           'optionSpecs': {'maxOutputTokens': {'max': 32000}}},
+            })
+        self.save()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        for rule in cfg['modelConfigRules']['manualProviderModelRules']:
+            if not rule['modelId'].startswith('trae-cn/'):
+                continue
+            self.assertFalse(rule['config']['enabled'])
+            self.assertEqual(rule['config']['keep'], 'custom')
+            self.assertEqual(rule['config']['properties']['contextWindow'], 1000000)
+            self.assertEqual(rule['config']['optionSpecs']['maxOutputTokens']['max'], 64000)
+            rule['config']['properties']['contextWindow'] = 123456
+            rule['config']['optionSpecs']['maxOutputTokens']['max'] = 4096
+        self.doc['config'] = cfg
+        self.save()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cfg = json.loads(self.path.read_text())['config']
+        for rule in cfg['modelConfigRules']['manualProviderModelRules']:
+            if rule['modelId'].startswith('trae-cn/'):
+                self.assertEqual(rule['config']['properties']['contextWindow'], 123456)
+                self.assertEqual(rule['config']['optionSpecs']['maxOutputTokens']['max'], 4096)
+
     def test_cursor_free_plan_requires_fresh_verified_metadata(self):
         model = self.model('composer-2.5', 'free', 'cursor')
         model['pricing']['source'] = 'cursor_free_plan'

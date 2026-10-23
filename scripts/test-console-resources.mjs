@@ -7,6 +7,15 @@ test("Matrix refresh and retry include account states; background polling refres
   assert.deepEqual(refreshResources("models", true, true), ["accounts", "matrix"]);
   assert.deepEqual(refreshResources("models", false, true), ["accounts"]);
 });
+
+test("platform polling updates connection health and counts alongside its catalogue", () => {
+  assert.deepEqual(refreshResources("platforms", false, true), ["platforms", "accounts", "models"]);
+  assert.ok(refreshResources("accounts").includes("platforms"));
+});
+
+test("client setup loads local ZCode, cc-switch and pi availability before enabling sync", () => {
+  assert.deepEqual(refreshResources("connection"), ["config", "models", "zcode", "cc-switch", "pi"]);
+});
 test("Local statistics render before a slow catalogue, including when the catalogue fails", async () => {
   let release;
   const slow = new Promise((_, reject) => { release = reject; });

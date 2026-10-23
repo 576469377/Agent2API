@@ -67,11 +67,28 @@ func (h *Hub) RefreshCatalogIfDue() {
 // Coalesce concurrent refreshes; fetch regions in parallel and retain each
 // region's last good data independently when another region is unavailable.
 func (h *Hub) refreshCatalog(ctx context.Context) error {
+	return h.refreshCatalogFor(ctx, "", false)
+}
+
+// RefreshPlatform 只重新检测指定连接，避免影响其他平台的缓存和状态。
+func (h *Hub) RefreshPlatform(ctx context.Context, platform string) error {
+	return h.refreshCatalogFor(ctx, platform, true)
+}
+
+// RefreshAllPlatforms 等待旧刷新结束后再使缓存失效，确保手动检查取得本次费率。
+func (h *Hub) RefreshAllPlatforms(ctx context.Context) error {
+	return h.refreshCatalogFor(ctx, "", true)
+}
+
+func (h *Hub) refreshCatalogFor(ctx context.Context, only string, fresh bool) error {
 	h.mu.Lock()
 	if flight := h.catalogFlight; flight != nil {
 		h.mu.Unlock()
 		select {
 		case <-flight:
+			if fresh {
+				return h.refreshCatalogFor(ctx, only, fresh)
+			}
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -89,6 +106,14 @@ func (h *Hub) refreshCatalog(ctx context.Context) error {
 	results := make(chan result, len(runtimes))
 	pending := map[string]bool{}
 	for _, rt := range runtimes {
+		if only != "" && rt.ID != only {
+			continue
+		}
+		if fresh {
+			if c, ok := rt.Adapter.(interface{ InvalidateModels() }); ok {
+				c.InvalidateModels()
+			}
+		}
 		pending[rt.ID] = true
 		go func(rt *PlatformRuntime) {
 			models, err := rt.Adapter.ListModels(ctx)
@@ -134,5 +159,8 @@ func (h *Hub) refreshCatalog(ctx context.Context) error {
 	h.catalogFlight = nil
 	close(flight)
 	h.mu.Unlock()
+	if only != "" {
+		return updates[only].err
+	}
 	return ctx.Err()
 }

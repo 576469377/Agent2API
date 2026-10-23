@@ -15,7 +15,11 @@ def git(*args):
 def forbidden_path(path):
     p = PurePosixPath(path.lower())
     name = p.name
-    if set(p.parts) & {"auths", ".workbuddy", "bin", ".zcode"}:
+    if set(p.parts) & {"auths", ".workbuddy", "bin", ".zcode", ".cc-switch"}:
+        return True
+    if name.startswith("cc-switch.db"):
+        return True
+    if ".pi" in p.parts and (name.startswith(("models.json", "auth.json")) or "/.pi/agent/" in "/" + p.as_posix()):
         return True
     if name in {"config.example.json", ".env.example", ".env.sample"}:
         return False

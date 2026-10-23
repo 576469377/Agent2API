@@ -1,0 +1,24 @@
+event: metadata
+data: {"model":"","prompt_completion_id":103}
+
+event: output
+data: {"response":"The lookup_test","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"_value tool","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":" returned the","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":" value 7 for tag","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":" \"demo\".","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: token_usage
+data: {"prompt_tokens":376,"completion_tokens":16,"total_tokens":392,"cache_creation_input_tokens":0,"cache_read_input_tokens":256,"reasoning_tokens":0,"prompt_tokens_total":0,"completion_tokens_total":0,"total_tokens_total":0,"cache_creation_input_tokens_total":0,"cache_read_input_tokens_total":0,"reasoning_tokens_total":0}
+
+event: done
+data: {"finish_reason":"stop"}
+

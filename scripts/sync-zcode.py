@@ -16,6 +16,26 @@ import urllib.request
 
 def confirmed_free(model):
     pricing = model.get("pricing") or {}
+    if model.get("platform") in ("trae-cn", "kiro"):
+        is_kiro = model.get("platform") == "kiro"
+        if is_kiro and (not isinstance(model.get("context_tokens"), int) or isinstance(model.get("context_tokens"), bool)
+                        or model["context_tokens"] <= 0 or not isinstance(model.get("max_output_tokens"), int)
+                        or isinstance(model.get("max_output_tokens"), bool) or model["max_output_tokens"] < 0):
+            return False
+        access = model.get("access") or {}
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            times = [datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00")) for value in (pricing["observed_at"], access["checked_at"])]
+            rate, remaining = pricing.get("credit_multiplier"), access.get("remaining_credits")
+            return (not model.get("pricing_sync_failed") and not model.get("pricing_from_snapshot")
+                    and pricing.get("source") == ("kiro_cli_catalog" if is_kiro else "trae_account_catalog") and pricing.get("status") == "credits"
+                    and isinstance(rate, (int, float)) and not isinstance(rate, bool) and 0 < rate < float("inf")
+                    and access.get("source") == ("kiro_cli_free_plan" if is_kiro else "trae_free_plan") and access.get("basis") == "recurring_free_allowance"
+                    and access.get("plan") == "free" and access.get("overage_enabled") is False
+                    and isinstance(remaining, (int, float)) and not isinstance(remaining, bool) and 0 < remaining < float("inf")
+                    and all(-60 <= (now - value).total_seconds() <= 300 for value in times))
+        except (KeyError, TypeError, ValueError):
+            return False
     if pricing.get("status") != "free" or model.get("pricing_sync_failed"):
         return False
     if pricing.get("source") not in ("upstream_config", "openrouter_models", "cursor_free_plan"):
@@ -32,6 +52,8 @@ def confirmed_free(model):
 
 def output_limit(model):
     maximum = model.get("max_output_tokens", 0)
+    if model.get("platform") == "kiro" and maximum == 0:
+        return 8192  # Recommended client budget, not a published/enforced ACP limit.
     # ZCode uses this maximum as its requested generation budget. Some free
     # providers reject their own advertised catalogue ceiling (Dots: 460800).
     # Keep the full context window, but use a tested, practical output budget.
@@ -246,12 +268,26 @@ def main():
     for kind in ("providerModelRules", "manualProviderModelRules"):
         for rule in rules[kind]:
             model = by_id.get(rule["modelId"], {})
-            if rule["providerId"] == args.provider_id and model.get("platform") == "openrouter":
+            if rule["providerId"] == args.provider_id and model.get("platform") in ("openrouter", "kiro"):
                 spec = rule.setdefault("config", {}).setdefault("optionSpecs", {}).setdefault("maxOutputTokens", {})
                 limit = output_limit(model)
                 previous_max = spec.get("max")
                 if previous_max is None or previous_max > limit:
                     spec["max"] = limit
+                if model.get("platform") == "kiro":
+                    rule["config"]["optionSpecs"]["reasoningLevel"] = {"values": ["disabled"], "map": "{}"}
+            if rule["providerId"] == args.provider_id and model.get("platform") == "trae-cn":
+                rule.setdefault("config", {}).setdefault("optionSpecs", {})["reasoningLevel"] = {
+                    "values": ["enabled"], "map": "{}",
+                }
+                if (model.get("id") in ("deepseek-v4.1-flash", "glm-5.3-flash")
+                        and model.get("context_tokens") == 1000000 and model.get("max_output_tokens") == 64000):
+                    properties = rule["config"].setdefault("properties", {})
+                    if properties.get("contextWindow") == 200000:
+                        properties["contextWindow"] = 1000000
+                        maximum = rule["config"]["optionSpecs"].setdefault("maxOutputTokens", {})
+                        if maximum.get("max") == 32000:
+                            maximum["max"] = 64000
     default = config.get("defaultModelSelection") or {}
     if default.get("providerId") == args.provider_id:
         default["modelId"] = qualified_id(default["modelId"])
@@ -287,11 +323,13 @@ def main():
                 },
             },
         })
-        if model.get("platform") == "cursor":
-            # Cursor emits thinking but does not expose an effort/on-off knob.
+        if model.get("platform") in ("cursor", "trae-cn"):
+            # These providers emit thinking without an effort/on-off knob.
             rules["manualProviderModelRules"][-1]["config"]["optionSpecs"]["reasoningLevel"] = {
                 "values": ["enabled"], "map": "{}",
             }
+        if model.get("platform") == "kiro":
+            rules["manualProviderModelRules"][-1]["config"]["optionSpecs"]["reasoningLevel"] = {"values": ["disabled"], "map": "{}"}
     if args.default_model:
         config["defaultModelSelection"] = {"providerId": args.provider_id, "modelId": args.default_model}
     elif default.get("providerId") == args.provider_id and default.get("modelId") not in merged_ids:

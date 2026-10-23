@@ -1,6 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms } from "../internal/web/static/operations.js";
+import { requestIssue, imageRecordSummary, activeFilterKeys, credentialState, accountConnection, sanitizePlatforms, platformSetup, connectionPlatforms } from "../internal/web/static/operations.js";
+
+test("all implemented platforms have an onboarding path independent of connection health", () => {
+  const ids = ["workbuddy", "workbuddy-global", "trae-cn", "openrouter", "cursor", "kiro"];
+  const all = connectionPlatforms(ids.map(id => ({ id, status: "unauthenticated" })));
+  assert.equal(all.length, 6);
+  assert.deepEqual(all.map(p => platformSetup(p).method), ["device_code", "device_code", "web_oauth", "api_key", "desktop", "cli_oauth"]);
+  assert.ok(all.every(p => p.enabled));
+  assert.equal(platformSetup({ id: "planned" }), null);
+  assert.equal(platformSetup({ id: "openrouter", connection: { method: "unknown" } }), null);
+});
+
+test("backend capabilities expose new integrations while disabled platforms stay distinct", () => {
+  const active = [{ id: "openrouter" }, { id: "new", connection: { method: "api_key", account_mode: "single" } }];
+  const all = connectionPlatforms(active, [{ id: "openrouter" }, { id: "cursor" }, { id: "devin" }]);
+  assert.deepEqual(all.map(p => [p.id, p.enabled]), [["openrouter", true], ["new", true], ["cursor", false]]);
+});
 
 test("sanitization settings follow explicit backend capabilities and safe legacy platform fallback", () => {
   const custom = { id: "custom", supports_sanitize: true };
@@ -42,6 +58,18 @@ test("direct API-key and desktop integrations never expose WorkBuddy pool contro
   assert.deepEqual(accountConnection({ platform: "cursor" }), { source: "desktop", pooled: false });
   assert.deepEqual(accountConnection({ platform: "future" }), { source: "unknown", pooled: false });
   assert.deepEqual(accountConnection(null), { source: "unknown", pooled: false });
+});
+
+test("TRAE uses web login without enabling WorkBuddy account pool controls", () => {
+  assert.deepEqual(accountConnection({ platform: "trae-cn" }), { source: "web", pooled: false, login: true });
+  assert.deepEqual(sanitizePlatforms([{ id: "trae-cn" }]), []);
+});
+
+test("Kiro uses official CLI web login with no WorkBuddy pool or sanitize controls", () => {
+  assert.deepEqual(accountConnection({platform:"kiro"}), {source:"cli",pooled:false,login:true});
+  assert.deepEqual(sanitizePlatforms([{id:"kiro"}]), []);
+  assert.equal(credentialState({platform:"kiro",healthy:true,state:"ready"}), "signed_in");
+  assert.equal(credentialState({platform:"kiro",healthy:false,state:"error"}), "unknown");
 });
 
 test("WorkBuddy retains pool controls and the actual credential source", () => {

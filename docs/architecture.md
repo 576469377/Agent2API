@@ -14,7 +14,7 @@ Agent2API 把多种上游服务转换为 Chat Completions、Responses 和 Anthro
 | WorkBuddy 号池 | `internal/adapter/Pool` | 同一区域的账号、亲和、容量、模型冷却和健康度 |
 | 指标 | `internal/obs` | 请求计数、实际用量、实时观测和可恢复快照 |
 
-默认启动保留 WorkBuddy 两区入口。声明平台列表后，可同时启用 OpenRouter 和 Cursor；具体能力与认证见[平台支持](platforms.md)。
+默认启动保留 WorkBuddy 两区入口。声明平台列表后，可同时启用 OpenRouter、Cursor 和 TRAE 国内；具体能力与认证见[平台支持](platforms.md)。
 
 ## 请求路径
 
@@ -27,9 +27,13 @@ flowchart TB
   A --> WB[WorkBuddy 区域号池]
   A --> OR[OpenRouter 免费 API]
   A --> CU[Cursor 桌面 Free 登录态]
+  A --> TR[TRAE 官方网页 Free 登录态]
+  A --> KI[Kiro 官方 CLI ACP 与调用方 MCP]
   WB --> S[统一事件流]
   OR --> S
   CU --> S
+  TR --> S
+  KI --> S
   S --> O[实时观测与上游用量]
   O --> E{客户端输出方式}
   E --> SSE[协议 SSE 编码]
@@ -45,7 +49,7 @@ flowchart TB
 - `平台ID/模型ID` 固定来源；同名裸 ID 按平台配置顺序处理。别名在模型路由前解析。
 - 国内与国际版分别持有凭证、模型目录、登录会话、账号池、亲和及冷却，不能混用账号文件。
 - 可选同名回退只在建流前、且错误类型允许时发生；明确平台路由不会跨区。响应被接受后不再切平台。
-- OpenRouter 的 API Key、Cursor 桌面权益检查与 WorkBuddy 设备登录各自实现，不用同一种凭证结构解释所有平台。
+- OpenRouter 的 API Key、Cursor 桌面权益检查、TRAE 网页 PKCE 授权与 WorkBuddy 设备登录各自实现，不用同一种凭证结构解释所有平台。
 - 账号就绪只表示当前本地调度判断；目录、免费费率、账号额度和上游服务状态分别处理。
 
 路由入口见 [hub.go](../internal/app/hub.go)、[aliases.go](../internal/app/aliases.go)和 [routing.go](../internal/app/routing.go)。

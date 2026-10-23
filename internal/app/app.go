@@ -58,6 +58,11 @@ type App struct {
 	// logins 管理进行中的设备码登录（控制台「添加账号」「重新登录」）。
 	// 会话按平台标记；不同平台的登录方式在 loginManager 内部分派。
 	logins            *loginManager
+	zcodeMu           sync.Mutex
+	zcodePath         string
+	clientSyncMu      sync.Mutex
+	piPath            string
+	ccSwitchPath      string
 	accountBackground sync.Once
 }
 
@@ -136,12 +141,16 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/platforms", a.withAuth(a.apiPlatforms))
 	mux.HandleFunc("/api/accounts", a.withAuth(a.apiAccounts))
 	mux.HandleFunc("/api/accounts/manage", a.withAuth(a.apiAccountsManage))
+	mux.HandleFunc("/api/accounts/connect", a.withAuth(a.apiAccountsConnect))
 	mux.HandleFunc("/api/accounts/checkin", a.withAuth(a.apiAccountCheckin))
 	mux.HandleFunc("/api/accounts/benefits", a.withAuth(a.apiAccountBenefits))
 	mux.HandleFunc("/api/accounts/login-status", a.withAuth(a.apiLoginStatus))
 	mux.HandleFunc("/api/accounts/models", a.withAuth(a.apiAccountModels))
 	mux.HandleFunc("/api/models", a.withAuth(a.apiModels))
 	mux.HandleFunc("/api/config", a.withAuth(a.apiConfig))
+	mux.HandleFunc("/api/clients/zcode", a.withAuth(a.apiZCode))
+	mux.HandleFunc("/api/clients/pi", a.withAuth(a.apiPi))
+	mux.HandleFunc("/api/clients/cc-switch", a.withAuth(a.apiCCSwitch))
 	// /metrics 用 Prometheus 文本格式暴露同一份指标（见 apiPrometheus）。
 	// 与控制台接口一样走 withAuth：抓取端用 Authorization: Bearer <api_key> 即可。
 	mux.HandleFunc("/metrics", a.withAuth(a.apiPrometheus))

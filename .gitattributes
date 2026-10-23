@@ -4,6 +4,7 @@
 
 # 金帧样本一律按二进制处理，禁止任何文本转换
 fixtures/*.jsonl -text -diff
+fixtures/*.sse -text -diff
 
 # 编译产物
 *.exe binary

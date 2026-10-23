@@ -1,0 +1,33 @@
+event: metadata
+data: {"model":"","prompt_completion_id":101}
+
+event: output
+data: {"response":"","reasoning_content":"We","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":" need answer exactly","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":" OK. Need not","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":" explain","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":". Must","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":" comply. Final","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"","reasoning_content":" \"OK\".","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: output
+data: {"response":"OK","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+event: token_usage
+data: {"prompt_tokens":38,"completion_tokens":19,"total_tokens":57,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_tokens":17,"prompt_tokens_total":0,"completion_tokens_total":0,"total_tokens_total":0,"cache_creation_input_tokens_total":0,"cache_read_input_tokens_total":0,"reasoning_tokens_total":0}
+
+event: done
+data: {"finish_reason":"stop"}
+

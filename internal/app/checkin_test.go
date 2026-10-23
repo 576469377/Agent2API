@@ -8,18 +8,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/config"
 )
 
 type checkinAPIFixture struct {
 	fakeAdapter
-	state                         adapter.CheckinView
+	state                         trae.CheckinView
 	claims, refreshes, configures int
 	err                           error
 }
 
-func (f *checkinAPIFixture) CheckinStatus() adapter.CheckinView   { return f.state }
+func (f *checkinAPIFixture) CheckinStatus() trae.CheckinView      { return f.state }
 func (f *checkinAPIFixture) RefreshCheckin(context.Context) error { f.refreshes++; return f.err }
 func (f *checkinAPIFixture) ClaimCheckin(context.Context) error   { f.claims++; return f.err }
 func (f *checkinAPIFixture) ConfigureCheckin(enabled bool, at string) error {
@@ -30,8 +30,8 @@ func (f *checkinAPIFixture) ConfigureCheckin(enabled bool, at string) error {
 
 func checkinAPIApp(t *testing.T) (*App, *checkinAPIFixture) {
 	t.Helper()
-	f := &checkinAPIFixture{state: adapter.CheckinView{Enabled: true, Time: "09:00", Timezone: "Asia/Shanghai"}}
-	h, err := NewHub([]*PlatformRuntime{{ID: "workbuddy", Adapter: f}}, nil)
+	f := &checkinAPIFixture{state: trae.CheckinView{Enabled: true, Time: "09:00", Timezone: "Asia/Shanghai"}}
+	h, err := NewHub([]*PlatformRuntime{{ID: trae.Platform, Adapter: f}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func checkinAPIApp(t *testing.T) (*App, *checkinAPIFixture) {
 
 func TestCheckinReadDoesNotClaimAndManagedAccountIncludesCachedBalance(t *testing.T) {
 	a, f := checkinAPIApp(t)
-	for _, path := range []string{"/api/accounts/checkin?platform=workbuddy", "/api/accounts/manage"} {
+	for _, path := range []string{"/api/accounts/checkin?platform=trae-cn", "/api/accounts/manage"} {
 		w := httptest.NewRecorder()
 		a.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"checkin"`) || !strings.Contains(w.Body.String(), `"09:00"`) {
@@ -53,7 +53,7 @@ func TestCheckinReadDoesNotClaimAndManagedAccountIncludesCachedBalance(t *testin
 		t.Fatal("viewing accounts caused an upstream operation")
 	}
 	w := httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/accounts/checkin?platform=workbuddy&refresh=1", nil))
+	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/accounts/checkin?platform=trae-cn&refresh=1", nil))
 	if w.Code != 200 || f.refreshes != 1 || f.claims != 0 {
 		t.Fatal("refresh unexpectedly claimed credits")
 	}
@@ -62,7 +62,7 @@ func TestCheckinReadDoesNotClaimAndManagedAccountIncludesCachedBalance(t *testin
 func TestCheckinWritesRequireAuthenticatedJSONAndStrictActions(t *testing.T) {
 	a, f := checkinAPIApp(t)
 	post := func(body, contentType string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "/api/accounts/checkin?platform=workbuddy", strings.NewReader(body))
+		r := httptest.NewRequest("POST", "/api/accounts/checkin?platform=trae-cn", strings.NewReader(body))
 		r.Header.Set("Content-Type", contentType)
 		w := httptest.NewRecorder()
 		a.Handler().ServeHTTP(w, r)

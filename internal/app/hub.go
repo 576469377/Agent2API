@@ -46,6 +46,8 @@ var platformDefaultBaseURLs = map[string]string{
 	"workbuddy-global": "https://www.workbuddy.ai",
 	"openrouter":       "https://openrouter.ai/api/v1",
 	"cursor":           "https://api2.cursor.sh",
+	"trae-cn":          "https://trae-api-cn.mchost.guru",
+	"kiro":             "kiro-cli://acp",
 }
 
 // Hub 是多平台集成的核心：一个进程里管着所有上游平台，
@@ -206,6 +208,7 @@ func (h *Hub) Describe() []adapter.Description {
 		if desc.BaseURL == "" {
 			desc.BaseURL = rt.baseURL()
 		}
+		desc.Connection = adapter.SetupFor(rt.ID)
 		out = append(out, desc)
 	}
 	return out

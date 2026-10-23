@@ -37,9 +37,16 @@ provider_config.json*
 *.bak
 *.bak-*
 *.backup
+*.checkin-state
+*.checkin.json
 *.info.*
 *.session.json.*
 .zcode/
+.cc-switch/
+cc-switch.db*
+.pi/agent/
+.pi/models.json*
+.pi/auth.json*
 
 # ── 指标落盘（运行期自动生成，含真实调用统计）────────────────
 metrics.json
@@ -71,7 +78,3 @@ __pycache__/
 # ── 系统 ──────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# Per-account daily reward state
-*.checkin-state
-*.checkin.json

@@ -14,8 +14,9 @@
 | WorkBuddy 国内 / 国际 | 已有桌面登录态，或启动后在控制台首次登录 | 不带配置默认启用两区 |
 | OpenRouter | 自己的 `OPENROUTER_API_KEY` | `-platform openrouter` 或平台列表 |
 | Cursor | 同一系统用户登录个人 Free 账号，关闭按量付费 | `-platform cursor` 或平台列表 |
+| TRAE 国内 | `login -platform trae-cn` 完成官方网页授权；个人 Free 月赠积分 | `-platform trae-cn` 或平台列表 |
 
-完整能力与限制见[平台支持](platforms.md)。下方第 3 步以 WorkBuddy 为例；其他平台构建后按 [OpenRouter 配置](configuration.md#openrouter仅免费模型)或 [Cursor 配置](configuration.md#cursor个人-free-额度)启动，再进行第 4 步验证。
+完整能力与限制见[平台支持](platforms.md)。下方第 3 步以 WorkBuddy 为例；其他平台构建后按 [OpenRouter 配置](configuration.md#openrouter仅免费模型)、[Cursor 配置](configuration.md#cursor个人-free-额度)或 [TRAE 网页登录](trae.md)启动，再进行第 4 步验证。
 
 普通网关不需要 Node.js 或前端构建工具。ZCode 同步脚本需要 Python 3.9+；Cursor 在 macOS / Linux 读取桌面登录态需要 Python 3，Windows 使用系统 SQLite。Windows 已验证国际桌面加密凭证；macOS / Linux 可构建网关，但这一凭证路径尚未端到端验证。
 

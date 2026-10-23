@@ -13,11 +13,33 @@ import (
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
 	"github.com/576469377/Agent2API/internal/llm"
 )
+
+func TestTraeColdStartupHasIndependentWebAccount(t *testing.T) {
+	sandboxHome(t)
+	cfg := config.Default()
+	cfg.Upstream.Platform = trae.Platform
+	cfg.Upstream.AccountsDir = filepath.Join(t.TempDir(), "workbuddy-pool")
+	hub, err := buildHub(cfg, log.New(io.Discard, "", 0))
+	if err != nil || len(hub.Platforms()) != 1 {
+		t.Fatalf("cold TRAE startup failed: %v", err)
+	}
+	rt := hub.Platform(trae.Platform)
+	if rt == nil || rt.Pool != nil || rt.Adapter.Name() != trae.Platform {
+		t.Fatal("TRAE incorrectly entered WorkBuddy account-pool discovery")
+	}
+	if _, err := os.Stat(cfg.Upstream.AccountsDir); !os.IsNotExist(err) {
+		t.Fatal("TRAE created or read a WorkBuddy pool directory")
+	}
+	if d := rt.Adapter.(adapter.Describer).Describe(); d.Status != "unauthenticated" {
+		t.Fatal("unsigned TRAE account claimed ready")
+	}
+}
 
 func TestColdStartupKeepsLoginPlatforms(t *testing.T) {
 	sandboxHome(t)

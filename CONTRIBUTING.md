@@ -6,7 +6,7 @@
 
 - **Go 1.23+**（`go.mod` 声明 `go 1.23.0`）
 - 无需任何前端工具链（静态资源通过 `go:embed` 编进二进制）
-- 依赖只有 `golang.org/x/text`（用于 GBK 兜底解码）
+- 运行依赖包括 `golang.org/x/text`（GBK 解码）、`modernc.org/sqlite`（cc-switch 原生事务与在线备份，无需 CGO）和 `go-toml/v2`（保留 Codex TOML 配置字段）
 - 前端离线测试需要支持 `node --test` 的 Node.js；ZCode、诊断脚本与测试需要 Python 3.9+。普通网关构建不需要这两项；Cursor 在 macOS / Linux 读取登录态时需要 Python 3。
 - 提交凭证检查同样需要 Python 3.9+。安装 `scripts/pre-commit` 后会检查暂存内容；CI 还会扫描可达历史，诊断只显示文件、位置和类型，不打印密钥值。
 
@@ -89,9 +89,9 @@ python -m unittest discover -s scripts -p test_check_secrets.py
    - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `newPlatformAdapter` 工厂（按平台构造适配器的分支）
    - [`cmd/agent2api/main.go`](cmd/agent2api/main.go) 的 `supportedPlatforms` 集合（启动校验）
    - [`cmd/agent2api/accounts.go`](cmd/agent2api/accounts.go) 的 `platformDefaultPaths`（该平台的默认凭证位置，自动探测用）
-   - [`internal/config/config.go`](internal/config/config.go) 的 `autoPlatforms` 列表（零配置自动集成；列表顺序即默认平台优先级）
+   - [`internal/config/config.go`](internal/config/config.go) 的平台字段继承规则；只有明确需要零配置自动启用时才修改 `autoPlatforms`，当前默认保持 WorkBuddy 两区
    - [`internal/app/hub.go`](internal/app/hub.go) 的 `platformDefaultBaseURLs`（该平台默认上游地址）
-4. 根据平台实现认证、刷新及账号描述；当前 CLI 与控制台设备登录、账号凭证识别和重新登录针对 WorkBuddy，其他认证方式需要同步扩展相关装配与管理流程。控制台可复用通用列表与模型目录，但平台名称和特有操作也要补齐。
+4. 根据平台实现认证、刷新及账号描述，并在 [`internal/adapter/setup.go`](internal/adapter/setup.go) 注册接入方式（设备授权、网页授权、API Key 或桌面登录态）与单账号 / 号池模式。控制台添加入口、平台页、账号详情、管理 API 和文档需要一起验证。`TestEveryImplementedPlatformHasDiscoverableOnboarding` 会检查所有已实现平台的入口，避免新增适配器后遗漏账号接入。其他认证方式不可落入 WorkBuddy 号池分支。
 
 模型路由、`/v1/models` 合并、控制台多平台展示都由 Hub 通用处理，**三个下游协议编码器一行都不用改** —— 这是 IR 分层设计的核心收益。
 

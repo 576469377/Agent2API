@@ -17,10 +17,14 @@ class SecretCheckTest(unittest.TestCase):
                      'provider_config.json.bak-20261012', 'provider_config.json.candidate',
                      'credentials.json', 'credential.json.tmp', 'config.json.tmp',
                      'metrics.json.tmp', '.zcode/v2/data/settings.json',
+                     '.cc-switch/cc-switch.db', 'cc-switch.db-wal',
+                     '.pi/agent/models.json', '.pi/agent/sessions/a.jsonl',
+                     '.pi/auth.json', '.pi/models.json.bak-20261023',
                      'workbuddy-desktop-ai.info'):
             self.assertTrue(checker.forbidden_path(path), path)
         self.assertFalse(checker.forbidden_path('config.example.json'))
         self.assertFalse(checker.forbidden_path('internal/adapter/workbuddy/credential_crypto.go'))
+        self.assertFalse(checker.forbidden_path('.pi/settings.json'))
 
     def test_patterns_do_not_print_secret_values(self):
         samples = ['ghp_' + 'A' * 36, 'sk-' + 'B' * 40,

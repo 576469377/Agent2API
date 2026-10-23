@@ -15,7 +15,7 @@
 | 工具调用 `id` | 同上 |
 | 若干 UUID | 插件 / 市场产物 ID |
 
-**结构与文本内容保持原样**（消息体、工具 schema、字段顺序均未改动），因此协议证据完整有效。
+生成事件的内容结构与字段类型保留；标识值使用同类型占位值。TRAE 样本另按下文允许字段列表剔除私有元数据，不将数字标识改成字符串。
 
 模型 ID（`glm-5.3`、`deepseek-v4.1-flash` 等）是上游公开的模型清单，未做处理。
 
@@ -28,9 +28,20 @@
 | `workbuddy-stream-text-then-toolcall.jsonl` | ⭐ 文本 + 工具调用**并存**，用于回归「工具调用被文本吞掉」的下标冲突 bug |
 | `workbuddy-v3-config.sample.json` | `/v3/config` 响应样本（模型清单 / 分级 / 阈值），目前仅作归档，无测试引用 |
 | `doubao_sse_stream.txt` | 豆包 `/samantha/chat/completion` 的一次完整流式响应（8 帧：2002 开始 / 2010 意图 ×1 / 2001 增量×5 / 2003 结束）。**豆包平台已下线**，目前仅作归档，无测试引用 |
+| `trae-stream-text.sse` | 2026-10-23 TRAE 原生 SSE；文本、思考、实际用量与 done |
+| `trae-stream-toolcall.sse` | 同日真实原生工具流；function_call 与分片参数 |
+| `trae-stream-tool-result.sse` | 工具结果续轮；实际输入 376，其中缓存读取 256，不重复累计 |
+| `trae-free-quota.json` | 同日普通 Free 月赠 500 积分权益的最小脱敏结构；时间改为固定有效区间 |
+| `trae-model-catalog.json` | 同日 `solo_agent` 目录的最小字段集；含 DeepSeek / GLM 的 dev、1M max 配对，Seed 256K 配对及会员专属排除样本 |
+
+TRAE 样本仅保留解析所需字段，移除账号 / 设备、会话和 pack 标识、内部提示词、加密模型参数。`timing_cost` 和携带缓存材料的 `extra_info` 帧整体省略。`prompt_completion_id` 使用数字占位，工具调用 ID 使用字符串占位；正文是固定测试提示的响应，不含用户项目内容。授权凭据与原始抓包只留在被忽略的本机目录。
 
 ## ⚠️ 贡献提醒
 
 **请勿用未经处理的真实抓包覆盖这些文件** —— 会重新引入个人数据。
 
 若上游协议有变更需要更新样本，请先按上表脱敏，再提交；并确保 `go test ./internal/adapter/workbuddy/ -run TestReplay` 仍通过。
+
+`trae-checkin-status.json` 为 2026-10-23 官方签到状态接口的只读响应，保留 enable / checked_in / credits 的实际类型与奖励数值；不含账号、设备或认证材料。领取与异常分支在测试中使用合成响应，未将其冒充真实领取金帧。
+
+Kiro 离线样本：`kiro-free-usage.json` 为合成 Free 月度额度与关闭按量计费结构（日期和余额为测试值）；`kiro-model-catalog.json` 保留已验证账号目录的公开模型、上下文和真实积分倍率。均不含账号、令牌、会话或原始私有请求。ACP / MCP 续接、取消和付费拦截通过隔离的 CLI 子进程测试回放。

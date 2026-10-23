@@ -119,11 +119,26 @@ func TestDirectProvidersDoNotInheritOtherPlatformEndpoints(t *testing.T) {
 	cfg.Upstream.BaseURL = "https://workbuddy.example.invalid"
 	cfg.Upstream.CredentialPath = "other-platform.json"
 	cfg.Upstream.AccountsDir = "other-accounts"
-	for _, id := range []string{"cursor", "openrouter"} {
+	for _, id := range []string{"cursor", "openrouter", "trae-cn", "kiro"} {
 		clone := cfg.CloneForPlatform(PlatformConfig{ID: id})
 		if clone.Upstream.BaseURL != "" || clone.Upstream.CredentialPath != "" || clone.Upstream.AccountsDir != "" {
 			t.Fatalf("%s inherited another provider's settings", id)
 		}
+	}
+}
+
+func TestCLIPathDoesNotInheritAcrossPlatforms(t *testing.T) {
+	cfg := Default()
+	cfg.Upstream.CLIPath = "native-cli"
+	if cfg.CloneForPlatform(PlatformConfig{ID: "kiro"}).Upstream.CLIPath != "" {
+		t.Fatal("CLI path inherited from unrelated platform")
+	}
+	cfg.Upstream.Platform = "kiro"
+	if cfg.ResolvePlatforms()[0].CLIPath != "native-cli" {
+		t.Fatal("single platform CLI override lost")
+	}
+	if cfg.CloneForPlatform(PlatformConfig{ID: "kiro", CLIPath: "explicit"}).Upstream.CLIPath != "explicit" {
+		t.Fatal("CLI override ignored")
 	}
 }
 

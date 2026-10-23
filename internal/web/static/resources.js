@@ -2,13 +2,14 @@
 // of a backend snapshot, never to a redraw of cached data.
 export const pageResources = {
   overview: ["status", "metrics", "accounts", "models"], requests: ["metrics"],
-  analytics: ["metrics"], connection: ["config", "models"],
-  accounts: ["accounts", "metrics"], platforms: ["platforms", "accounts", "models"],
+  analytics: ["metrics"], connection: ["config", "models", "zcode", "cc-switch", "pi"],
+  accounts: ["accounts", "metrics", "platforms"], platforms: ["platforms", "accounts", "models"],
   models: ["models", "accounts"], chat: ["models"], settings: ["config"],
 };
 export function refreshResources(page, matrix = false, background = false) {
   if (page === "models" && matrix) return background ? ["accounts", "matrix"] : ["models", "accounts", "matrix"];
   if (!background) return pageResources[page] || ["status"];
+  if (page === "platforms") return ["platforms", "accounts", "models"];
   return page === "overview" ? ["status", "metrics", "accounts"] : ["requests", "analytics"].includes(page) ? ["metrics"] : page === "accounts" ? ["accounts", "metrics"] : page === "models" ? ["accounts"] : ["status"];
 }
 

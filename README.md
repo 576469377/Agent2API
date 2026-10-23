@@ -2,7 +2,7 @@
 
 **一个本地入口，连接多个 AI 平台，提供标准 LLM API。**
 
-通过平台适配器接入不同上游，对外提供 Chat Completions、Responses 和 Anthropic Messages，共用模型路由、流式转换与管理控制台。支持 **WorkBuddy / CodeBuddy 国内版、WorkBuddy 国际版、OpenRouter 免费模型与 Cursor Free 额度**，无需前端构建。
+通过平台适配器接入不同上游，对外提供 Chat Completions、Responses 和 Anthropic Messages，共用模型路由、流式转换与管理控制台。支持 **WorkBuddy / CodeBuddy 国内版、WorkBuddy 国际版、OpenRouter 免费模型、Cursor Free 与 TRAE 国内 Free 额度**，无需前端构建。
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -35,8 +35,12 @@
 | `workbuddy-global` | 国际桌面登录态 / 控制台设备登录 | 独立区域与号池；国际加密桌面凭证已在 Windows 验证 |
 | `openrouter` | 自己的 `OPENROUTER_API_KEY` | 动态免费目录；拒绝收费及价格未知的模型，不使用 WorkBuddy 号池 |
 | `cursor` | 同一系统用户的 Cursor 个人 Free 登录态 | 仅 `cursor/composer-2.5`；每次生成核验免费权益，暂不支持图片及采样参数 |
+| `trae-cn` | 官方网页登录，CLI / 控制台授权 | 个人 Free 月赠与已核验签到积分；DeepSeek / GLM 1M 上下文、Seed 256K；文本、思考与原生工具；[参数限制](docs/trae.md#参数和用量限制) |
+| `kiro` | 官方 CLI 网页登录，支持 Google / GitHub / AWS Builder ID | 个人 Free 每月 50 credits；按账号自选 5 个已验证模型；文本与客户端工具；[接入与限制](docs/kiro.md) |
 
-**不带配置启动只启用 WorkBuddy 两区；[示例配置](config.example.json)启用以上四个平台。** 按需保留平台，使用 `-config config.json` 显式加载。三种下游协议不表示所有平台具有相同能力，详见[平台支持与能力边界](docs/platforms.md)。
+**不带配置启动只启用 WorkBuddy 两区；[示例配置](config.example.json)启用以上六个平台。** 按需保留平台，使用 `-config config.json` 显式加载。三种下游协议不表示所有平台具有相同能力，详见[平台支持与能力边界](docs/platforms.md)。
+
+TRAE 可执行 `login -platform trae-cn` 在官方网页授权，然后用 `-platform trae-cn` 单独启动；无需购买套餐或提供 API Key。每次生成核验月赠与已确认的签到免费积分，额度耗尽或套餐不明即停止。更多免费账号来源的证据与后续顺序见[详细调研](docs/research/06-免费账号平台接入调研.md)。
 
 ## 快速开始
 
@@ -81,6 +85,8 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 
 未设置网关密钥时不校验 API Key，客户端要求必填可使用 `agent2api-local`。设置密钥后，各客户端必须填写同一个网关密钥。接入客户端时保留默认的内容脱敏设置。
 
+控制台「客户端接入」支持一键配置 **ZCode、cc-switch、pi Coding Agent**。cc-switch / pi 可勾选多个上游平台并批量写入；cc-switch 支持 Claude Code 与 Codex。写入前核验免费权益、自动备份，保留其他供应商和默认选择。[配置说明](docs/clients.md#cc-switch-与-pi-快捷配置)。
+
 ZCode 可用仓库脚本同步已接入平台中明确免费的模型，清理付费、浮动及价格未知的旧条目，并保留免费模型的排序、启用状态与能力设置。先启动网关，并准备本地配置：
 
 ```powershell
@@ -110,7 +116,9 @@ python scripts/sync-zcode.py --config config.json
 
 ## 网页控制台
 
-概览、调用日志、用量分析、账号管理、平台连接、模型目录、模型测试、客户端接入和设置共享已配置平台的数据。交互趋势、运行诊断与累计排行可联动查看调用日志；WorkBuddy 账号支持登录与号池管理，OpenRouter 和 Cursor 按各自方式配置。接入页提供三种协议的真实网关地址与请求示例。
+概览、调用日志、用量分析、账号管理、平台接入、模型目录、模型测试、客户端接入和设置共享已配置平台的数据。交互式趋势、诊断线索与累计排行可联动查看筛选日志。「添加账号」统一提供 WorkBuddy 授权与号池接入、TRAE 官方网页登录、OpenRouter 密钥验证保存、Cursor 桌面登录态检测；未启用的平台会显示配置指引。客户端接入页可一键核验并备份配置本机 ZCode 的免费模型，也提供三种协议的真实网关地址和请求示例。
+
+TRAE 在账号页显示积分余额与签到状态，默认每天北京时间 09:00 自动签到，并保留失败后的手动兜底；详见 [TRAE 指南](docs/trae.md#每日自动签到与余额)。
 
 界面随网关嵌入，无前端构建步骤。已有网关正在使用时，独立控制台可从磁盘加载新版界面，**无需重启原反代或修改客户端地址**。见[控制台使用说明](docs/console.md)。常规页面使用本地资源；数学公式按需加载 KaTeX，离线时显示原文。
 
@@ -153,17 +161,18 @@ WorkBuddy 中本人已授权的多个账号可以按健康度调度，支持会�
 
 ## 架构
 
-协议编解码通过零依赖的 IR 与上游适配器通信；Hub 负责多平台路由，WorkBuddy 两区使用独立号池，OpenRouter 与 Cursor 使用各自认证。详见[当前实现架构](docs/architecture.md)，历史设计稿另存于文档导航。
+协议编解码通过零依赖的 IR 与上游适配器通信；Hub 负责多平台路由，WorkBuddy 两区使用独立号池，OpenRouter、Cursor 与 TRAE 使用各自认证。详见[当前实现架构](docs/architecture.md)，历史设计稿另存于文档导航。
 
 ## 已知限制
 
 - 上游私有接口没有稳定性承诺，模型可用范围及额度由上游和账号决定。
 - 非流式回复由上游流聚合后返回；网关不实现完整 OpenAI / Anthropic 产品 API。
-- 未实现余额查询；账号显示「可调度」不等于仍有额度。
+- 尚无跨平台统一余额查询；TRAE 单独提供已核验月赠积分余量，其他账号显示「可调度」不等于仍有额度。
 - 账号冷却、会话亲和及并发槽位属于单进程，多实例不会共享这些状态。
 - 思考输出没有上游签名；文本态 DSML 工具调用兜底尚未实现。
 - 国际桌面加密凭证目前仅在 Windows 完成端到端验证。
 - Cursor 保留原生 Agent 规则，客户端 system 作为上下文传递；不支持图片、采样、effort、JSON 输出模式与 stop 参数。输出预算在网关侧截断，详见[平台支持](docs/platforms.md)。
+- TRAE 当前仅接受已验证的个人 Free 月赠与已核对到账的签到积分；其他赠送来源仍会拒绝。图片、JSON 模式与 stop 不支持，max_tokens、采样与思考控制不生效；凭据到期需重新网页登录，见 [TRAE 限制](docs/trae.md)。
 
 ## 测试
 

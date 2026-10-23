@@ -15,6 +15,7 @@
 | `internal/adapter/workbuddy` | 两区认证、会话标识、请求和 SSE | [adapter.go](../internal/adapter/workbuddy/adapter.go)、[conversation.go](../internal/adapter/workbuddy/conversation.go) |
 | `internal/adapter/openrouter` | 免费目录、零价格路由与官方 API | [adapter.go](../internal/adapter/openrouter/adapter.go) |
 | `internal/adapter/cursor` | 桌面登录态、Free 权益、HTTP/2 Connect 与客户端工具 | [adapter.go](../internal/adapter/cursor/adapter.go) |
+| `internal/adapter/trae` | 官方网页授权、Free 积分来源、原生消息与 SSE | [adapter.go](../internal/adapter/trae/adapter.go)、[protocol_test.go](../internal/adapter/trae/protocol_test.go) |
 | `internal/api` | Chat、Responses、Messages 的请求与输出转换 | [protocols.go](../internal/app/protocols.go)中的装配入口 |
 | `internal/app` | HTTP、Hub 路由、图片策略、管理 API 和指标协调 | [app.go](../internal/app/app.go)、[routing.go](../internal/app/routing.go)、[api.go](../internal/app/api.go) |
 | `internal/obs` | 累计量、实时窗口、历史日期和快照导入 | [metrics.go](../internal/obs/metrics.go)、[live.go](../internal/obs/live.go)、[history.go](../internal/obs/history.go) |
@@ -40,7 +41,7 @@ flowchart LR
   Events -.实际用量.-> Metrics
 ```
 
-OpenRouter 与 Cursor 使用各自认证逻辑，不经过 WorkBuddy 的号池与设备登录。错误在仍有类型信息的地方转换为 `llm.Failure`；不要把业务码压成自由文本后再依靠页面正则判断原因。
+OpenRouter、Cursor 与 TRAE 使用各自认证逻辑，不经过 WorkBuddy 的号池与设备登录。错误在仍有类型信息的地方转换为 `llm.Failure`；不要把业务码压成自由文本后再依靠页面正则判断原因。
 
 ## 控制台模块
 
@@ -91,3 +92,5 @@ OpenRouter 与 Cursor 使用各自认证逻辑，不经过 WorkBuddy 的号池�
 - 现有工作集中到 `main`；提交应说明用户遇到的具体问题、最终行为与验证范围，保留真实限制。
 
 本轮仍保留的工程债务及建议顺序见[全仓审查](reviews/2026-10-23-console-and-repository-review.md#仍需独立评估的工作)，没有把未实现的能力写成当前功能。
+
+客户端快捷配置由 `internal/clientconfig/` 统一筛选已核验免费模型，并处理 pi JSON、cc-switch SQLite / Codex TOML；`internal/zcode/` 复用同一筛选规则。管理端点位于 `internal/app/clients.go`，交互与批量结果位于 `internal/web/static/client-setup.js`。新增客户端须覆盖配置保留、并发修改拒绝、重复同步不写入、备份和本机访问约束。

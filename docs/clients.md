@@ -13,6 +13,7 @@
 | Anthropic Messages HTTP | `POST http://127.0.0.1:8787/v1/messages` |
 | Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` |
 | cc-switch | Anthropic，Base URL `http://127.0.0.1:8787`（不带 `/v1`） |
+| pi Coding Agent | OpenAI Chat Completions，Base URL `http://127.0.0.1:8787/v1` |
 | ZCode 自定义供应商 | Anthropic Messages，Base URL `http://127.0.0.1:8787/v1` |
 
 SDK 对 Base URL 是否自动追加 `/v1` 的行为可能不同；以最终请求打到上述端点为准，避免 `/v1/v1/messages` 或缺失 `/v1`。
@@ -22,6 +23,39 @@ SDK 对 Base URL 是否自动追加 `/v1` 的行为可能不同；以最终请�
 - 使用网关访问密钥，不要将 WorkBuddy 账号 token 填入客户端。
 - 模型使用控制台复制的完整路由 ID；沿用客户端已有模型名时，可配置[模型别名](configuration.md#模型别名modelsaliases)。
 - 客户端仅配置目录中**刚确认免费**的模型；付费、浮动费率和价格未知的条目不要导入。目录可见不代表账号有免费额度。
+
+## ZCode 一键配置
+
+在**运行网关的这台电脑**打开[控制台的客户端接入页](http://127.0.0.1:8787/#connection)，点击「一键配置免费模型」。网关会检测本机 `~/.zcode/v2/provider_config.json`，重新核验平台连接与免费目录，备份后更新 Agent2API 提供商，并显示新增、保留、移除的模型和备份位置。按钮由网关直接提供，不需要安装 Python。
+
+同步使用真实网关地址与 `/v1` 路径，自动配置模型前缀、上下文、输出预算和思考选项。原有仍免费的模型排序、停用状态与能力偏好、其他提供商以及有效的默认模型都会保留；已不在免费集合中的本提供商条目会清理，失效的本提供商默认选择会修正。不会写入会话或使用统计数据库。
+
+TRAE 的 DeepSeek / GLM 已使用经真实免费账号验证的 1M 档位。同步会升级这两款模型早期自动生成的 200K / 32K 默认设置为 1M / 64K，保留其他自定义上下文与更小输出预算；Seed 仍为 256K / 32K。详见[上下文与输出上限](trae.md#上下文窗口与输出上限)。
+
+配置没有变化时不会重复写入或生成备份。若目录检查失败、配置版本不支持，或等待期间文件被 ZCode 修改，同步会停止并保留原文件。未检测到配置时，先启动 ZCode 一次，再刷新控制台。同步完成后重新打开 ZCode 的模型选择器；列表仍未更新时重新打开 ZCode。
+
+按钮只配置**网关所在电脑**的 ZCode，远程访问不会改写服务端文件。若 ZCode 位于另一台电脑，请在那台电脑使用下方手动配置或增量同步脚本。
+
+## cc-switch 与 pi 快捷配置
+
+在网关所在电脑打开[客户端接入页](http://127.0.0.1:8787/#connection)，在「更多客户端快捷配置」中勾选上游平台，点击「配置到 cc-switch」或「配置到 pi」。也可以点击「同时配置 cc-switch 和 pi」，依次写入两个客户端，每个结果和失败原因分别显示。批量操作不会回滚已经成功的另一个客户端。
+
+可选 WorkBuddy 国内 / 国际、OpenRouter、Cursor、TRAE 国内以及已核验 Free 权益的 Kiro。点击后重新验证**所选平台**的认证和免费目录，只有刚确认免费、明确支持工具调用且上下文与输出预算可配置的模型才能写入；某个所选平台无合格模型时整个客户端操作停止。未选平台的配置保留，其故障不会阻止已选平台同步。TRAE 使用已验证的 Free 赠送额度，仍消耗积分；付费、试用、浮动费率和未知来源不导入。所有模型均使用完整的 `平台/模型` 路由，OpenRouter 输出预算不超过 8192。Kiro 未公布最大输出值，导入时的 8192 为客户端建议预算，ACP 不提供硬截断承诺，详见 [Kiro 限制](kiro.md)。
+
+| 客户端 | 写入位置与组织方式 | 使用方法 |
+|---|---|---|
+| cc-switch | `~/.cc-switch/cc-switch.db`；每个免费模型一个 `Agent2API · 平台 · 模型` 供应商，可选择 Claude Code、Codex 或两者 | 重新打开 cc-switch，在相应应用下选择供应商并启用 |
+| pi Coding Agent | `~/.pi/agent/models.json`；每个平台一个 `agent2api-平台` 供应商，包含该平台的完整免费模型列表 | 用 `/model` 选择；需要时 `/reload` 或重新启动 pi |
+
+**cc-switch** 需要先启动一次以建立数据库。同步使用 SQLite 事务，先生成包含已提交 WAL 数据的在线备份（`cc-switch.db.bak-…`），仅增量管理确定性标识的 Agent2API 免费模型条目；其他供应商、排序、当前选择、故障转移和历史数据保留。不会自动启用新供应商，也不会改写 Claude Code / Codex 的实时配置。待更新的供应商正在使用，或待移除条目仍为当前 / 故障转移供应商时，停止同步并提示先切换。Claude Code 使用根地址，Codex 使用 `/v1` 的 Responses 协议。
+
+Codex 配置采用官方支持的 `model_context_window` 与 HTTP Responses 选项，关闭本网关尚未提供的 WebSocket 传输。同步不新增 `model_max_output_tokens` 或 `disable_response_storage` 这类当前官方配置参考未列出的字段，也不声称通过它们限制输出；现有自定义字段继续保留。[OpenAI 官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)
+
+**pi** 未安装或尚无配置时，也可以先生成 `models.json`。已有配置会原样备份为 `models.json.bak-…`，增量更新所选平台的模型，保留其他供应商、自定义标签和更小的上下文 / 输出预算；不写 `auth.json`、`settings.json` 或会话。若本次移除了原默认模型，结果会提示在 pi 中重新选择。遵循网关进程的 `PI_CODING_AGENT_DIR` 环境变量。Cursor / TRAE 为固定思考，不生成无法兑现的强度开关。pi 会将 `!` 开头的密钥解释为命令、将 `$` 解释为环境插值，这类网关密钥会拒绝写入并给出原因。
+
+两个入口都只接受本机访问，写入地址由实际网关配置决定，浏览器不能指定任意路径或密钥接收地址。配置在核验期间被客户端修改时停止操作；重复点击无变化时不重写、不重复添加或生成备份。cc-switch 当前检测默认用户目录下的数据库；使用自定义数据目录的实例需手动配置，按钮不会搜索或接管其他目录。
+
+实现依据：[cc-switch 供应商与配置格式](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/provider.rs)、[数据库事务写入](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/database/dao/providers.rs)、[pi 模型配置](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models-configuration.md)、[pi 配置目录](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md)。
 
 ## ZCode 手动配置
 
@@ -36,9 +70,11 @@ SDK 对 Base URL 是否自动追加 `/v1` 的行为可能不同；以最终请�
 | 国内模型 | `workbuddy/模型名` |
 | 国际模型 | `workbuddy-global/模型名` |
 | Cursor Free 额度 | `cursor/composer-2.5` |
+| TRAE 国内 Free 月赠积分 | `trae-cn/deepseek-v4.1-flash`、`trae-cn/glm-5.3-flash`、`trae-cn/Doubao-Seed-2.1-Turbo` |
+| Kiro Free 月度积分 | `kiro/qwen3-coder-next`、`kiro/deepseek-3.2` 等，以账号目录为准；[限制](kiro.md) |
 | OpenRouter 免费模型 | `openrouter/作者/模型名:free`（以目录完整 ID 为准） |
 
-四个平台放在同一个供应商内，用模型前缀区分。OpenRouter 先按[接入说明](configuration.md#openrouter仅免费模型)配置自己的 API Key；客户端仍填写网关密钥。上下文窗口、输出上限与能力使用网关返回的元数据。
+六个平台可放在同一个供应商内，用模型前缀区分。OpenRouter 先按[接入说明](configuration.md#openrouter仅免费模型)配置自己的 API Key；客户端仍填写网关密钥。TRAE 先完成[官方网页授权](trae.md)，其 max_tokens、采样与思考控制不生效。上下文窗口与能力使用网关元数据，输出上限需同时参考各平台的执行限制。
 
 先在控制台“模型测试”验证所选免费路由。测试页不会使用同名裸 ID 自动选地区，也不会继续沿用已变为付费或价格未知的旧选择。完整目录可见不代表该模型应该加入客户端。
 
@@ -56,7 +92,7 @@ python scripts/sync-zcode.py --config config.json
 
 脚本默认连接 `http://127.0.0.1:8787`，读写 `~/.zcode/v2/provider_config.json`。它会：
 
-- 强制刷新上游目录，只同步费率在最近 5 分钟确认免费、且有上下文与输出上限的条目，包括 OpenRouter 和当前个人 Free 的 Cursor Composer 2.5。
+- 强制刷新上游目录，只同步费率 / 权益在最近 5 分钟确认免费、且有上下文与输出上限的条目，包括 OpenRouter、当前个人 Free 的 Cursor Composer 2.5 和已核验月赠积分的 TRAE。TRAE 保留真实积分倍率，固定思考选项，不将额度模型误写为零费率。Kiro 也要求刚核验的 Free 月度权益；最大输出未知时使用 8192 建议客户端预算，不能解释为上游最大输出或严格限制，已有更小预算保留。
 - 删除本供应商原有的付费、浮动、价格未知、已下架条目及相关模型规则；保留免费条目的排序、启用状态、能力与推理设置，保留其他供应商。
 - OpenRouter 的 ZCode 输出预算最多设为 8192 Token，上游公布的上限更小时使用较小值；已有过大的规则也会修正，保留用户设定的更小预算及完整上下文窗口。部分免费端点会拒绝目录自身标称的超大输出值，2026-10-19 已在 Dots 复现此问题。网关目录仍报告上游原始元数据。
 - 一并迁移旧模型引用。免费默认模型保持原选择；默认模型被删除时，改选本供应商首个未停用的免费模型；若全停用则清除该默认选择。

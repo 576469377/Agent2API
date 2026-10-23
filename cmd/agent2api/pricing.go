@@ -36,7 +36,7 @@ func exportPricingSnapshot(cfg config.Config, platform, output string) error {
 		}
 		selected++
 		var models []adapter.ModelInfo
-		if pc.ID == openrouter.Platform || pc.ID == "cursor" {
+		if pc.ID == openrouter.Platform || pc.ID == "cursor" || pc.ID == "trae-cn" || pc.ID == "kiro" {
 			a, _, err := buildAdapter(cfg.CloneForPlatform(pc), quietPricingLogger{})
 			if err != nil {
 				return err

@@ -40,7 +40,7 @@
 | `-metrics-file` | — | 指标落盘路径；缺省写配置文件同目录的 `metrics.json`，无配置文件时写工作目录的 `agent2api-metrics.json` |
 | `-no-persist` | — | 关闭指标落盘 |
 | `-no-sanitize` | — | 关闭内容脱敏 |
-| `-platform` | — | 固定单平台（`workbuddy` / `workbuddy-global` / `openrouter` / `cursor`）；缺省自动集成 WorkBuddy 两区 |
+| `-platform` | — | 固定单平台（`workbuddy` / `workbuddy-global` / `openrouter` / `cursor` / `trae-cn`）；缺省自动集成 WorkBuddy 两区 |
 
 ## 多平台配置（upstream.platforms）
 
@@ -53,7 +53,8 @@
       { "id": "workbuddy", "accounts_dir": "auths/cn", "sanitize": true },
       { "id": "workbuddy-global", "accounts_dir": "auths/global", "sanitize": true },
       { "id": "openrouter", "api_key_env": "OPENROUTER_API_KEY" },
-      { "id": "cursor" }
+      { "id": "cursor" },
+      { "id": "trae-cn" }
     ]
   }
 }
@@ -61,9 +62,15 @@
 
 - **路由语义**：裸模型名按配置中的平台顺序选取，同名时优先第一个平台；`workbuddy/模型名` 与 `workbuddy-global/模型名` 固定区域。`/v1/models` 返回唯一的裸模型名和各平台限定名，`/api/models` 提供 `routing_id` 与 `default_route`。未知裸模型名透传默认平台。
 - **同名回退**：`models.fallback_on_unavailable: true` 时，裸名在建流前遇到额度不足、限流或 HTTP 5xx，可尝试其他平台目录中的同名模型。默认为关闭；显式平台限定名或指定平台的别名始终固定区域，响应开始后不回退。用 `models.aliases: {"hy3":"workbuddy-global/hy3"}` 可覆盖某个裸名的默认路由。
-- **字段回退**：平台内的 `credential_path` / `accounts_dir` / `base_url` / 各超时项缺省时回退到顶层同名配置；平台之间完全隔离（各自独立的号池、冷却与登录会话）
+- **字段回退**：WorkBuddy 平台的 `credential_path` / `accounts_dir` / `base_url` 缺省时回退到顶层同名配置；OpenRouter、Cursor 和 TRAE 不继承其他平台的这些字段。超时仍可回退到顶层配置。认证、号池和登录会话按平台隔离。
 - **`sanitize` 例外**：显式声明 platforms 时，每个平台单独填写 `"sanitize": true` 才会开启内容脱敏；未填视为关闭，不继承顶层值。建议接入客户端时保持开启。
 - **零配置（缺省）**：保留国内版与国际版；没有可用凭证的平台保留空账号池与登录入口，完成首次登录后自动入池
+
+## TRAE 国内版（个人 Free 月赠积分）
+
+在 `upstream.platforms` 追加 `{"id":"trae-cn"}`，或不加载配置时用 `-platform trae-cn` 单独启动。执行 `agent2api login -platform trae-cn` 在同一台电脑的官方网页授权；默认凭据为 `~/.agent2api/trae-cn.session.json`。自定义凭据使用登录参数 `-out` 和平台字段 `credential_path`。控制台也提供 TRAE 网页登录入口。
+
+三个模型、免费来源判定、官方网页回调及失败恢复见 [TRAE 接入指南](trae.md)。当前只接受已验证的个人 Free 月赠积分；图片、JSON 模式与 stop 不支持，max_tokens、采样和思考控制不生效。凭据到期需重新网页登录。TRAE 不使用 WorkBuddy 号池或脱敏设置。
 
 ## Cursor（个人 Free 额度）
 
@@ -79,11 +86,17 @@ Cursor Agent 不开放采样、effort、JSON 输出模式及 stop 参数，传�
 
 诊断命令：`python scripts/diagnose-cursor.py`，只检查账号、计费状态、实际版本与目录，不调用生成。实现依据、实测范围及旧协议失败原因见 [Cursor 接入验证](research/05-Cursor接入调研.md)。
 
+## Kiro Free（官方 CLI）
+
+在 `upstream.platforms` 增加 `{ "id": "kiro", "model_cache_ttl_sec": 60 }`，可用 `cli_path` 指定官方 CLI。该路径按平台隔离，不继承其他平台的凭证或地址。控制台可完成官网授权、检测现有登录和同步 ZCode。每次调用核验 Free 月度积分；未知输出上限、工具会话与参数语义见 [Kiro 指南](kiro.md)。
+
 ## OpenRouter（仅免费模型）
 
 在现有 `upstream.platforms` 中追加 `{"id":"openrouter","api_key_env":"OPENROUTER_API_KEY"}`。不使用配置文件时，可用 `agent2api -platform openrouter` 单独启动。默认上游为 `https://openrouter.ai/api/v1`，自定义 `base_url` 应包含 `/api/v1`。
 
-从 [OpenRouter 密钥管理](https://openrouter.ai/settings/keys)创建自己的 API Key，然后在启动网关的终端里设置 `OPENROUTER_API_KEY`。PowerShell 示例：
+从 [OpenRouter 密钥管理](https://openrouter.ai/settings/keys)创建自己的 API Key，在控制台「添加账号 → OpenRouter」中验证并保存即可立即生效。密钥使用官方 [GET /key](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) 验证，不发起模型生成。默认保存到 `~/.agent2api/openrouter.session.json`，可通过该平台的 `credential_path` 指定位置；保存文件优先于启动凭据，重启后继续生效。
+
+也可以在没有控制台保存凭据时，通过启动终端设置 `OPENROUTER_API_KEY`。PowerShell 示例：
 
 ```powershell
 $env:OPENROUTER_API_KEY = '<YOUR_OPENROUTER_API_KEY>'
@@ -103,7 +116,7 @@ $env:OPENROUTER_API_KEY = '<YOUR_OPENROUTER_API_KEY>'
 | 命令 | 用途 |
 |---|---|
 | `agent2api` | 启动网关 |
-| `agent2api login` | 设备码登录 |
+| `agent2api login` | WorkBuddy 设备码登录；加 `-platform trae-cn` 为 TRAE 官方网页登录 |
 | `agent2api models` | 列出可用模型（多平台时合并列出，`-platform` 可只看某一个） |
 | `agent2api dedupe` | 清理凭证目录里的重复与无效凭证；默认只预览，加 `-yes` 实际删除 |
 

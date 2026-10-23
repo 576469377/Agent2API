@@ -1,9 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergePricingSnapshot, modelPricing, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, RATE_MAX_AGE_MS } from "../internal/web/static/pricing.js";
+import { mergePricingSnapshot, modelPricing, pricingCategory, confirmedFreeModels, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, RATE_MAX_AGE_MS } from "../internal/web/static/pricing.js";
 
 const now = Date.UTC(2026, 9, 12, 1, 0);
 const pricing = (rate, status = "credits") => ({ status, credit_multiplier: rate, source: "upstream_config", observed_at: new Date(now).toISOString() });
+
+test("Kiro Free requires its own fresh account evidence and keeps the actual positive rate", () => {
+  const model = { platform:"kiro", id:"qwen3-coder-next", max_output_tokens:0, pricing:{...pricing(.05),source:"kiro_cli_catalog"}, access:{source:"kiro_cli_free_plan",basis:"recurring_free_allowance",plan:"free",overage_enabled:false,remaining_credits:49,checked_at:new Date(now).toISOString()} };
+  assert.equal(modelPricing(model,now).multiplier,.05);
+  assert.equal(pricingCategory(model,now),"allowance");
+  assert.deepEqual(confirmedFreeModels([model],now),[model]);
+  for(const patch of [{source:"trae_free_plan"},{plan:"pro"},{remaining_credits:0},{overage_enabled:true}]) assert.notEqual(pricingCategory({...model,access:{...model.access,...patch}},now),"allowance");
+  assert.notEqual(pricingCategory({...model,pricing_from_snapshot:true},now),"allowance");
+});
+test("TRAE free allowance preserves its credit price and requires current account evidence", () => {
+  const model = { platform: "trae-cn", id: "deepseek-v4.1-flash", pricing: { ...pricing(.5), source: "trae_account_catalog" }, access: { source: "trae_free_plan", basis: "recurring_free_allowance", plan: "free", overage_enabled: false, remaining_credits: 500, checked_at: new Date(now).toISOString() } };
+  assert.equal(modelPricing(model, now).status, "credits");
+  assert.equal(modelPricing(model, now).multiplier, .5);
+  assert.equal(pricingCategory(model, now), "allowance");
+  assert.deepEqual(confirmedFreeModels([model], now), [model]);
+  for (const patch of [
+    { access: undefined }, { platform: "workbuddy" }, { platform: "(别名)" },
+    { pricing_from_snapshot: true }, { pricing_sync_failed: true },
+    ...[{ plan: "pro" }, { overage_enabled: true }, { overage_enabled: undefined }, { source: "guess" }, { basis: "trial" }, { remaining_credits: 0 }, { remaining_credits: "500" }, { remaining_credits: Infinity }, { checked_at: "invalid" }, { checked_at: new Date(now - RATE_MAX_AGE_MS - 1).toISOString() }].map(access => ({ access: { ...model.access, ...access } })),
+    { pricing: { ...model.pricing, credit_multiplier: 0 } },
+    { pricing: { ...model.pricing, status: "unknown" } },
+    { pricing: { ...model.pricing, observed_at: new Date(now - RATE_MAX_AGE_MS - 1).toISOString() } },
+  ]) {
+    assert.deepEqual(confirmedFreeModels([{ ...model, ...patch }], now), [], JSON.stringify(patch));
+    assert.notEqual(pricingCategory({ ...model, ...patch }, now), "allowance");
+  }
+});
 test("OpenRouter free pricing keeps freshness checks without inventing credit multipliers", () => {
   const model = { platform: "openrouter", id: "author/model:free", pricing: { status: "free", source: "openrouter_models", observed_at: new Date(now).toISOString() } };
   assert.equal(modelPricing(model, now).status, "free");

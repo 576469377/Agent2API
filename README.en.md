@@ -2,7 +2,7 @@
 
 **One local gateway for multiple AI platforms, with standard LLM APIs.**
 
-Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China, WorkBuddy International, free OpenRouter models and Cursor Free allowance.**
+Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China, WorkBuddy International, free OpenRouter models, Cursor Free and TRAE China Free allowance.**
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -35,8 +35,12 @@ Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local 
 | `workbuddy-global` | International desktop login or console device authorization | Independent region and pool; encrypted desktop credentials verified on Windows |
 | `openrouter` | Your own `OPENROUTER_API_KEY` | Live free catalogue; paid and unknown-price models rejected; no WorkBuddy pool |
 | `cursor` | Personal Free desktop login under the same OS user | Only `cursor/composer-2.5`; entitlement checks before each generation; no images or sampling parameters |
+| `trae-cn` | Official browser authorization through CLI or console | Verified personal Free monthly and check-in credits; DeepSeek / GLM 1M context and Seed 256K; text, reasoning and native client tools; [limits](docs/trae.md) |
+| `kiro` | Official CLI web sign-in with Google / GitHub / AWS Builder ID | Personal Free monthly credits; five verified account-selectable models; text and client-executed tools; [setup and limits](docs/kiro.md) |
 
-**Starting without a config enables only the two WorkBuddy regions. [config.example.json](config.example.json) enables all four platforms.** Keep the platforms you need and load it explicitly with `-config config.json`. API compatibility does not imply identical upstream capabilities. See [platform support and limits](docs/platforms.md) (Chinese).
+**Starting without a config enables only the two WorkBuddy regions. [config.example.json](config.example.json) enables all six platforms.** Keep the platforms you need and load it explicitly with `-config config.json`. API compatibility does not imply identical upstream capabilities. See [platform support and limits](docs/platforms.md) (Chinese).
+
+For TRAE, run `login -platform trae-cn`, authorize in the official browser page, then start with `-platform trae-cn`. No paid plan or API key is required. Each generation checks verified Free monthly and check-in grants and stops on exhausted or unverified entitlements. See the [detailed free-account research](docs/research/06-免费账号平台接入调研.md) for other candidates and implementation priorities.
 
 ## Quick start
 
@@ -83,6 +87,8 @@ Clients use gateway port **8787**. The separate console's default port **8788** 
 
 Without a gateway key, authentication is disabled; use `agent2api-local` if a client requires a value. With a gateway key configured, every client must use that same key. Keep default content sanitization enabled for client integration.
 
+Client setup configures **ZCode, cc-switch and pi Coding Agent** locally. Select multiple upstream platforms for cc-switch / pi, write both clients in one batch, and choose Claude Code and/or Codex in cc-switch. Each write verifies free access, creates a backup, and preserves other providers and defaults. See the [client guide](docs/clients.md#cc-switch-与-pi-快捷配置).
+
 Sync confirmed free models from connected platforms into one ZCode provider. Paid, dynamic, unknown and unavailable entries are removed; retained free models keep their preferences and ordering. A removed default is replaced with an enabled free model. Start the gateway and prepare a local config first:
 
 ```powershell
@@ -110,7 +116,9 @@ The catalog is account-dependent. **Catalog support, scheduling readiness and re
 
 ## Web console
 
-Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share data from configured platforms. Interactive trends, diagnostics and cumulative rankings link to filtered logs. WorkBuddy supports account sign-in and pool management; OpenRouter and Cursor use their own setup methods. Copy real gateway endpoints and request examples for all three protocols.
+Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share data from configured platforms. Interactive trends, diagnostics and cumulative rankings link to filtered logs. Add account offers WorkBuddy authorization and pools, TRAE official web sign-in, OpenRouter key validation and saving, and Cursor desktop login checks. Disabled integrations include configuration guidance. Client setup can verify and configure free models in local ZCode with automatic backups, and provides real gateway endpoints and request examples for all three protocols.
+
+TRAE accounts show credit balances and check-in status. Automatic check-in runs daily at 09:00 Beijing time; manual check-in is a fallback after a failed automatic run. See the [TRAE guide](docs/trae.md#每日自动签到与余额).
 
 The UI is embedded in the gateway; no frontend build is required. A standalone console can load updated assets **without restarting a gateway in use or changing client endpoints**. See the [console guide](docs/console.md). Ordinary pages use local resources; math loads KaTeX on demand and falls back to source text offline.
 
@@ -143,7 +151,7 @@ See the [configuration guide](docs/configuration.md) for CLI flags, environment 
 
 ## Multi-account pools
 
-WorkBuddy pools schedule your authorized accounts by health, with affinity, optional concurrency limits and model cooldowns. Concurrency is unlimited by default. Keep the regions in separate credential directories. OpenRouter and Cursor do not use this pool. See [Accounts](docs/accounts.md).
+WorkBuddy pools schedule your authorized accounts by health, with affinity, optional concurrency limits and model cooldowns. Concurrency is unlimited by default. Keep the regions in separate credential directories. OpenRouter, Cursor and TRAE do not use this pool. See [Accounts](docs/accounts.md).
 
 ## Supported APIs
 
@@ -155,17 +163,18 @@ Credentials grant account access. Do not publish local config, account files, ZC
 
 ## Architecture
 
-Protocol codecs communicate with upstream adapters through a dependency-free IR. The Hub routes between WorkBuddy's regional pools and independently authenticated OpenRouter / Cursor adapters. See the [current architecture](docs/architecture.md); original design proposals remain in the documentation index.
+Protocol codecs communicate with upstream adapters through a dependency-free IR. The Hub routes between WorkBuddy's regional pools and independently authenticated OpenRouter, Cursor and TRAE adapters. See the [current architecture](docs/architecture.md); original design proposals remain in the documentation index.
 
 ## Known Limitations
 
 - Private upstream interfaces have no stability promise; models and quota depend on the upstream and account.
 - Non-streaming responses aggregate an upstream stream. This gateway does not implement the full OpenAI / Anthropic product API.
-- Balance queries are not implemented; a schedulable account may have no usable quota.
+- No unified cross-platform balance API; TRAE separately reports verified monthly credits. A schedulable account on other platforms may have no usable quota.
 - Cooldowns, affinity and concurrency slots are process-local; instances do not share state.
 - Reasoning has no upstream signature. Text-mode DSML tool-call fallback is not implemented.
 - International encrypted desktop credentials have only been verified end to end on Windows.
 - Cursor retains native Agent rules and receives client system instructions as context. Images, sampling, effort, JSON output mode and stop parameters are unsupported. Output budgets are enforced by the gateway; see [platform limits](docs/platforms.md).
+- TRAE accepts verified personal Free monthly grants and check-in rewards with confirmed receipts. Other grant sources are rejected until validated. Images, JSON mode and stop are unsupported; max_tokens, sampling and thinking controls do not take effect. Expired credentials require web authorization again. See [TRAE limits](docs/trae.md).
 
 ## Testing
 

@@ -10,7 +10,9 @@
       { "id": "workbuddy", "sanitize": true },
       { "id": "workbuddy-global", "sanitize": true },
       { "id": "openrouter", "api_key_env": "OPENROUTER_API_KEY" },
-      { "id": "cursor" }
+      { "id": "cursor" },
+      { "id": "trae-cn" },
+      { "id": "kiro", "model_cache_ttl_sec": 60 }
     ],
     "sanitize": true,
     "stream_idle_timeout_sec": 120,

@@ -1,12 +1,25 @@
 # 账号与调度
 
-[账号积分、额度与自动签到](account-benefits.md)
-
 [文档导航](README.md) · [配置](configuration.md) · [控制台](console.md)
+
+各平台的积分余额、额度单位、逐账号自动签到与刷新行为见[积分与自动签到](account-benefits.md)。
 
 本页的设备登录、凭证目录与号池调度适用于 **WorkBuddy 国内版 / 国际版**。可将本人已授权的多个账号放入同一区域的号池，按健康度调度，并根据错误类型换号。账号池不会改变上游额度或权限。
 
-OpenRouter 使用配置中的单个 API Key，Cursor 只读复用桌面个人 Free 登录态。控制台可展示它们的连接状态，但不支持 WorkBuddy 的添加账号、停用、清除冷却和设备码重新登录。认证与恢复方式见[平台支持](platforms.md)。
+「账号管理 → 添加账号」覆盖所有已实现的平台，并根据平台显示对应接入方式：
+
+| 平台 | 添加或恢复连接 |
+|---|---|
+| WorkBuddy 国内 / 国际 | 浏览器设备授权；新账号自动加入对应区域号池 |
+| TRAE 国内版 | 官方网页授权、余额与签到状态；每天北京时间 09:00 自动签到，手动入口仅作失败兜底 |
+| OpenRouter | 填写自己的 API Key，验证后保存并立即生效；也可检测现有连接 |
+| Cursor | 在网关所在电脑的 Cursor 桌面端登录个人 Free 账号，再点击「重新检测登录态」 |
+
+OpenRouter、Cursor 和 TRAE 是单连接，不使用 WorkBuddy 的停用、清除冷却和设备码重新登录操作。OpenRouter 保存位置默认为 `~/.agent2api/openrouter.session.json`，可用平台的 `credential_path` 指定；保存的密钥优先于环境变量和配置中的密钥，重启后继续生效。新密钥未通过验证或保存失败时保留原连接，界面不返回已保存密钥。Cursor 的网页登录不能替代桌面登录态。认证与恢复方式见[平台支持](platforms.md)。
+
+TRAE 国内版使用独立单账号网页授权：执行 `agent2api login -platform trae-cn`，或在已启用 TRAE 的控制台中选择「添加账号 → TRAE 国内版」。完成授权后刷新目录即可使用，不加入 WorkBuddy 号池；到期需重新网页登录。免费积分来源与参数限制见 [TRAE 指南](trae.md)。
+
+Kiro Free 使用官方 CLI 的当前单账号：「添加账号 → Kiro Free」提供 Google、GitHub 和 AWS Builder ID 网页登录，以及检测现有连接。也可运行 `agent2api login -platform kiro -provider google`。凭证留在官方 CLI，每次调用核验 Free 月度额度，不使用 WorkBuddy 号池。详见 [Kiro 指南](kiro.md)。
 
 ```bash
 agent2api login -region cn -out auths/cn/account-a.json
@@ -14,7 +27,7 @@ agent2api login -region cn -out auths/cn/account-b.json
 agent2api -platform workbuddy -accounts-dir auths/cn
 ```
 
-也可以在控制台「账号管理 → 添加账号」中，直接选择 **WorkBuddy 国内版** 或 **WorkBuddy 国际版**，再点击「开始登录」完成浏览器授权（设备码登录）。两个入口分别对应 `workbuddy` / `workbuddy-global`，国内与国际账号不会混入同一个号池；在账号页面先筛选平台时，弹窗会默认选中该平台。登录入口不依赖已有账号：默认启动时即使从未登录过国际版，也会保留国际版空账号池与入口。显式单平台或平台列表配置只展示所选平台，缺少某个入口时请检查[多平台配置](configuration.md#多平台配置upstreamplatforms)。凭证自动落盘，号池每 10 秒扫描一次目录，无需重启。未配置目录时分别使用 `~/.workbuddy` / `~/.workbuddy-ai`。
+也可以在控制台「账号管理 → 添加账号」中，直接选择 **WorkBuddy 国内版** 或 **WorkBuddy 国际版**，再点击「开始登录」完成浏览器授权（设备码登录）。两个入口分别对应 `workbuddy` / `workbuddy-global`，国内与国际账号不会混入同一个号池；在账号页面先筛选平台时，弹窗会默认选中该平台。登录入口不依赖已有账号：默认启动时即使从未登录过国际版，也会保留国际版空账号池与入口。尚未启用的已实现平台也会列出接入说明，需按提示追加[平台配置](configuration.md#多平台配置upstreamplatforms)并重启后才能连接。凭证自动落盘，号池每 10 秒扫描一次目录，无需重启。未配置目录时分别使用 `~/.workbuddy` / `~/.workbuddy-ai`。
 
 国际版设备登录使用 `agent2api login -region global -out auths/global/account-a.json`。同时管理两个区域时，请显式配置不同的 `accounts_dir`，见[双平台配置](configuration.md#多平台配置upstreamplatforms)。不要混放两种区域的凭证。
 

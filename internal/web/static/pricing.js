@@ -5,7 +5,17 @@ export const RATE_MAX_AGE_MS = 5 * 60_000;
 // Use concrete platform routes: a free model in one region says nothing about
 // the price of a same-name model selected by automatic routing elsewhere.
 export function confirmedFreeModels(models = [], now = Date.now()) {
-  return models.filter(model => model.platform && model.platform !== "(别名)" && !model.pricing_from_snapshot && modelPricing(model, now).status === "free");
+  return models.filter(model => {
+    const price = modelPricing(model, now);
+    return model.platform && model.platform !== "(别名)" && !model.pricing_from_snapshot && (price.status === "free" || price.freeAllowance === true);
+  });
+}
+
+// Account grants keep the real credit multiplier; show them separately from
+// models whose upstream price is zero.
+export function pricingCategory(model, now = Date.now()) {
+  const price = modelPricing(model, now);
+  return price.freeAllowance ? "allowance" : price.status;
 }
 
 export function rateRefreshDue(lastAttempt, now = Date.now(), manual = false) {
@@ -31,7 +41,7 @@ export function mergePricingSnapshot(models, snapshot) {
 export function modelPricing(model, now = Date.now()) {
   const p = model?.pricing;
   const time = Date.parse(p?.observed_at || "");
-  if (!p || !["upstream_config", "openrouter_models", "cursor_free_plan"].includes(p.source) || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
+  if (!p || !["upstream_config", "openrouter_models", "cursor_free_plan", "trae_account_catalog", "kiro_cli_catalog"].includes(p.source) || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
   const result = { status: "unknown", observedAt: p.observed_at, raw: typeof p.upstream_label === "string" ? p.upstream_label.slice(0, 128) : "", stale: now - time > RATE_MAX_AGE_MS, refreshFailed: model.pricing_sync_failed === true };
   if (p.source === "openrouter_models" || p.source === "cursor_free_plan") {
     if (p.status === "free" && !result.stale && !result.refreshFailed) result.status = "free";
@@ -42,6 +52,13 @@ export function modelPricing(model, now = Date.now()) {
     result.multiplier = rate;
     if (!result.stale && !result.refreshFailed) result.status = rate === 0 ? "free" : "credits";
   } else if (p.status === "dynamic" && !result.stale && !result.refreshFailed) result.status = "dynamic";
+  if (["trae_account_catalog", "kiro_cli_catalog"].includes(p.source)) {
+    const access = model.access, checked = Date.parse(access?.checked_at || "");
+    const kiro = p.source === "kiro_cli_catalog";
+    result.freeAllowance = model.platform === (kiro ? "kiro" : "trae-cn") && !model.pricing_from_snapshot && p.status === "credits" && result.status === "credits" && !result.stale && !result.refreshFailed && access?.source === (kiro ? "kiro_cli_free_plan" : "trae_free_plan") && access.basis === "recurring_free_allowance" && access.plan === "free" && access.overage_enabled === false && Number.isFinite(access.remaining_credits) && access.remaining_credits > 0 && Number.isFinite(checked) && checked <= now + 60000 && now - checked <= RATE_MAX_AGE_MS;
+    // A zero credit rate does not prove account access on this provider.
+    if (result.status === "free") result.status = "unknown";
+  }
   return result;
 }
 

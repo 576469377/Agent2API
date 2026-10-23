@@ -13,9 +13,23 @@ import (
 	"time"
 
 	"github.com/576469377/Agent2API/internal/adapter"
+	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/llm"
 )
+
+func TestTraeLoginReusesPendingSessionWithoutASecondAuthorization(t *testing.T) {
+	m := newLoginManager(t.Logf)
+	path := filepath.Join(t.TempDir(), "trae.session.json")
+	m.sessions["existing"] = &loginSession{ID: "existing", Platform: trae.Platform, OutPath: path, Status: loginPending, AuthURL: "http://127.0.0.1:1234/login?state=fixture", StartedAt: time.Now()}
+	snapshot, err := m.Start(trae.Platform, path)
+	if err != nil || snapshot.ID != "existing" || len(m.sessions) != 1 {
+		t.Fatalf("pending web authorization was replaced: %v", err)
+	}
+	if snapshot.OutPath != path || snapshot.AuthURL != m.sessions["existing"].AuthURL {
+		t.Fatal("pending TRAE session lost its independent credential path")
+	}
+}
 
 func writeLoginFixture(t *testing.T, path, uid, token string) {
 	t.Helper()

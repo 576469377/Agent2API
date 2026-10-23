@@ -25,6 +25,8 @@
 
 新版本的 WorkBuddy 目录还包含 `pricing`：`status`（`free` 表示零积分倍率、`credits`、`dynamic`、`unknown`）、可选的 `credit_multiplier`、`upstream_label`、`source` 和 `observed_at`。来源为上游模型配置，按平台区分，不代表账号余额或金额单价；缺失倍率不能当作零。其他适配器或内置兜底目录可省略此字段。详见[控制台费率说明](console.md#模型费率)。
 
+TRAE 保留 `pricing.status: "credits"` 与正积分倍率，并独立返回 `access`：`basis: "recurring_free_allowance"`、`plan: "free"`、`overage_enabled: false`、`remaining_credits`、`source: "trae_free_plan"`、`checked_at`。它表示近期核验的账号免费额度，不能推广到同名其他平台，也不能由历史费率快照补造。生成前仍重新检查。TRAE 的输出上限仅为目录值，max_tokens、采样与思考控制不生效，详见 [TRAE 限制](trae.md#参数和用量限制)。
+
 `/api/models` 还会为已知护栏返回 `image_limit`（扁平目录和分平台目录均提供）：`max_images`、`enabled`、`source`（`builtin_empirical` / `config`），内置实测还包含 `observed_on`。未配置时省略该字段，不代表上游无限制；`max_images: 0, enabled: false` 表示本地显式关闭护栏。它描述的是网关当前有效规则，详见[图片护栏配置](configuration.md#单请求图片数量护栏modelsimage_limits)。
 
 调用记录中的 `image_count` 是原请求图片内容块总数，含历史与工具结果；`max_images` 是当次实际平台的护栏值。旧记录没有这些字段，不应解释为 0 张。默认 `reject` 模式下，超限请求在上游调用前返回 `image_count_exceeded` / HTTP 400，并且不裁剪内容。
@@ -51,7 +53,7 @@
 
 OpenRouter 适配器保留客户端显式设置的顶层 / 文本块 / 图片块 / 工具 `cache_control`（含 TTL），以及 `prompt_cache_key`。同一会话的路由键经哈希后传入上游 `session_id`，避免暴露本地用户标识。缓存仍取决于模型、供应端、最小长度和上游策略，网关不会自动为用户开启收费缓存或取消免费模型与零价格路由限制。规则见 [OpenRouter 提示缓存](https://openrouter.ai/docs/guides/best-practices/prompt-caching)。
 
-WorkBuddy 与 Cursor 未确认存在可由普通 API 客户端强制控制的缓存断点接口：不要把传入 `cache_control` 当作这些平台已开启缓存的证明。网关维持稳定内容并转回上游实际报告的用量。换账号、换模型 / 供应端、前缀改动或缓存过期，都可能需要重新预热。
+WorkBuddy、Cursor 与 TRAE 未确认存在可由普通 API 客户端强制控制的缓存断点接口：不要把传入 `cache_control` 当作这些平台已开启缓存的证明。网关维持稳定内容并转回上游实际报告的用量。换账号、换模型 / 供应端、前缀改动或缓存过期，都可能需要重新预热。
 
 ## 请求示例
 
@@ -132,7 +134,11 @@ HTTP 响应开始前，错误为 `{"error":{"message":"说明","type":"server_er
 | `/api/metrics` | 累计量、分组、分钟桶、最近 200 条、日历史及存储状态 |
 | `/api/live` | 同一快照的在途数、当前请求阶段、接收字符与估算速率 |
 | `/api/accounts/manage` | 账号调度和凭证状态；来源与操作能力分平台 |
+| `/api/accounts/connect?platform=ID` | POST JSON：`{"action":"check"}` 检测 OpenRouter / Cursor / TRAE；OpenRouter 支持 `{"action":"save_key","api_key":"…"}` 验证并保存单连接密钥；返回模型数，不返回密钥 |
+| `/api/accounts/checkin?platform=trae-cn` | GET 返回缓存的余额与签到状态，`refresh=1` 只刷新查询；POST `{"action":"configure","enabled":true,"time":"09:00"}` 保存北京时间的自动签到设置；`{"action":"claim"}` 仅在自动失败且等待间隔结束后补救 |
 | `/api/accounts/models` | 账号与模型能力 / 冷却矩阵 |
+| `/api/clients/pi`、`/api/clients/cc-switch` | 本机 GET 检测；POST `{"platforms":["workbuddy","trae-cn"],"apps":["claude","codex"]}` 验证所选平台免费权益并备份写入；`apps` 仅用于 cc-switch，可省略为 `claude`。需 JSON 与 `X-Agent2API-Local-Action: pi-sync` / `cc-switch-sync`；返回模型、供应商、新增 / 保留 / 移除及备份摘要。pi 缺失配置可创建，cc-switch 缺失数据库不可创建；拒绝远程访问、任意路径 / URL、并发覆盖与当前供应商失效清理 |
+| `/api/clients/zcode` | 本机 GET 检测 ZCode 配置；POST `{}` 重新核验免费目录、备份并增量同步，需 `Content-Type: application/json` 与 `X-Agent2API-Local-Action: zcode-sync`；返回模型与备份摘要，不返回凭据 |
 
 新增字段应兼容缺失值，不能将旧后端未提供的阶段、缓存或测量值默认为零。管理修改、设备登录及重新授权由控制台协调，不能把只读诊断当成登录或额度探测。
 
