@@ -501,7 +501,7 @@ function draw(force = false) {
     scroll = { left: scrollContainer?.scrollLeft || 0, top: scrollContainer?.scrollTop || 0 },
     scrollFocused = active === scrollContainer,
     advancedOpen = samePage ? $("requestAdvanced")?.open : undefined;
-  const liveDetailsOpen = samePage ? $("liveRequestDetails")?.open : false;
+  const liveFocus = samePage && s.page === "analytics" ? captureLiveView() : null;
   const usageDetails = samePage && s.page === "analytics" ? [...document.querySelectorAll(".usage-model-details")].filter(el => el.open).map(el => el.className) : [];
   const usageFocus = samePage && s.page === "analytics" ? active?.dataset : null;
   const usagePoint = usageFocus?.kind === "usage" ? { point: usageFocus.chartPoint, width: usageFocus.viewWidth } : null;
@@ -530,7 +530,7 @@ function draw(force = false) {
   if (s.page === "accounts") updateAccountCards();
   if (s.page === "analytics") {
     updateAnalyticsTable();
-    if ($("liveRequestDetails")) $("liveRequestDetails").open = liveDetailsOpen;
+    restoreLiveView(liveFocus);
     if ($("usageCalendarDetails")) $("usageCalendarDetails").open = s.usageInsights.calendarExpanded;
     usageDetails.forEach(name => { const el = document.querySelector("." + name); if (el) el.open = true; });
     if (usagePoint) [...document.querySelectorAll('[data-kind="usage"]')].find(el => el.dataset.chartPoint === usagePoint.point && el.dataset.viewWidth === usagePoint.width)?.focus({ preventScroll: true });
@@ -2405,14 +2405,36 @@ async function refreshLive(force=false) {
   s.live.lastAttempt=Date.now();
   await liveLoader.load(["live"], { replace: force });
 }
+const liveViewState = { expanded: false, top: 0, left: 0 };
+function captureLiveView() {
+  const body = $("liveUsageBody"), details = $("liveRequestDetails"), list = body?.querySelector(".live-request-list");
+  if (details) liveViewState.expanded = details.open;
+  if (list && details?.open) {
+    liveViewState.top = list.scrollTop;
+    liveViewState.left = list.scrollLeft;
+  }
+  const active = document.activeElement;
+  if (list && active === list) return "list";
+  if (active?.id === "liveRequestToggle") return "toggle";
+  if (active && active === body?.querySelector('[data-action="refresh-live"]')) return "refresh";
+  return null;
+}
+function restoreLiveView(focus) {
+  const body = $("liveUsageBody"), details = $("liveRequestDetails"), list = body?.querySelector(".live-request-list");
+  if (details) details.open = liveViewState.expanded;
+  if (list && details?.open) {
+    list.scrollTop = liveViewState.top;
+    list.scrollLeft = liveViewState.left;
+  }
+  const target = focus === "list" ? list : focus === "toggle" ? $("liveRequestToggle") : focus === "refresh" ? body?.querySelector('[data-action="refresh-live"]') : null;
+  target?.focus({ preventScroll: true });
+}
 function renderLive() {
   const body = $("liveUsageBody");
   if (body) {
-    const expanded = $("liveRequestDetails")?.open;
-    const focused = document.activeElement?.id === "liveRequestToggle";
+    const focus = captureLiveView();
     body.innerHTML = liveUsageView(s.live.data,s.live.error,s.live.points,liveUI());
-    if ($("liveRequestDetails")) $("liveRequestDetails").open = !!expanded;
-    if (focused) $("liveRequestToggle")?.focus({preventScroll:true});
+    restoreLiveView(focus);
   }
 }
 function liveUI() {
@@ -2420,7 +2442,7 @@ function liveUI() {
 }
 setInterval(()=>{
   if(s.page==="analytics"&&!document.hidden&&!$("modal").open&&!$("detailDialog").open&&liveUI().stale){
-    const body=$("liveUsageBody");if(body&&!body.querySelector(".usage-live-placeholder"))body.innerHTML=liveUsageView(s.live.data,s.live.error,s.live.points,liveUI());
+    const body=$("liveUsageBody");if(body&&!body.querySelector(".usage-live-placeholder"))renderLive();
   }
   refreshLive();
 },1000);
