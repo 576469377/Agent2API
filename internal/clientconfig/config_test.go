@@ -212,11 +212,13 @@ func TestCCSwitchPreservesEditsAndRejectsActiveRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, _ = ReadCC(ctx, path)
-	for _, row := range snapshot {
-		if strings.Contains(row.ID, "workbuddy") {
-			db.Exec("UPDATE providers SET is_current=1 WHERE id=?", row.ID)
-			break
-		}
+	// Select the domestic route; map iteration could pick workbuddy-global.
+	edit, err := db.Exec("UPDATE providers SET is_current=1 WHERE id=?", ccID(models[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := edit.RowsAffected(); err != nil || changed != 1 {
+		t.Fatal("domestic provider was not selected", changed, err)
 	}
 	if _, err := SyncCC(ctx, path, snapshot, models, []string{"workbuddy"}, []string{"claude"}, "http://127.0.0.1:8787", "", now); err == nil {
 		t.Fatal("concurrent edit ignored")
