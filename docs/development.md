@@ -1,6 +1,6 @@
 # 开发与仓库导览
 
-[文档导航](README.md) · [当前架构](architecture.md) · [贡献指南](../CONTRIBUTING.md) · [本轮全仓审查](reviews/2026-10-23-console-and-repository-review.md)
+[文档导航](README.md) · [当前架构](architecture.md) · [贡献指南](../CONTRIBUTING.md) · [本轮全仓审查](reviews/2026-10-24-project-optimization-review.md)
 
 先读请求路径，再选择需要修改的层。网关不要求前端打包器或数据库，Go 静态嵌入控制台；测试和维护脚本按需要使用 Node.js 与 Python。
 
@@ -16,6 +16,8 @@
 | `internal/adapter/openrouter` | 免费目录、零价格路由与官方 API | [adapter.go](../internal/adapter/openrouter/adapter.go) |
 | `internal/adapter/cursor` | 桌面登录态、Free 权益、HTTP/2 Connect 与客户端工具 | [adapter.go](../internal/adapter/cursor/adapter.go) |
 | `internal/adapter/trae` | 官方网页授权、Free 积分来源、原生消息与 SSE | [adapter.go](../internal/adapter/trae/adapter.go)、[protocol_test.go](../internal/adapter/trae/protocol_test.go) |
+| `internal/adapter/kiro` | 官方 CLI ACP、模型目录与调用方 MCP | [adapter.go](../internal/adapter/kiro/adapter.go)、[runtime.go](../internal/adapter/kiro/runtime.go) |
+| `internal/clientconfig`、`internal/zcode` | 免费模型筛选、客户端增量合并、备份及并发写入校验 | [models.go](../internal/clientconfig/models.go)、[files.go](../internal/clientconfig/files.go)、[store.go](../internal/zcode/store.go) |
 | `internal/api` | Chat、Responses、Messages 的请求与输出转换 | [protocols.go](../internal/app/protocols.go)中的装配入口 |
 | `internal/app` | HTTP、Hub 路由、图片策略、管理 API 和指标协调 | [app.go](../internal/app/app.go)、[routing.go](../internal/app/routing.go)、[api.go](../internal/app/api.go) |
 | `internal/obs` | 累计量、实时窗口、历史日期和快照导入 | [metrics.go](../internal/obs/metrics.go)、[live.go](../internal/obs/live.go)、[history.go](../internal/obs/history.go) |
@@ -81,7 +83,7 @@ OpenRouter、Cursor 与 TRAE 使用各自认证逻辑，不经过 WorkBuddy 的�
 | 控制台计算 | 对应 `test-console-*.mjs` | 浏览器核对显示、筛选联动、深浅主题和小屏 |
 | 文档 / 导航 | `check-docs.py` 与对应测试 | 示例命令、默认值、相对路径与当前代码交叉核对 |
 
-完整本地命令见[贡献指南](../CONTRIBUTING.md#构建与测试)。CI 同时检查 Go 1.23 与 stable，在 Linux / macOS 执行竞态检测；这不等于两个系统的桌面凭证读取已经实机验证。
+完整本地命令见[贡献指南](../CONTRIBUTING.md#构建与测试)。CI 在 Linux / macOS 检查 Go 1.23 与 stable 并执行竞态检测，Windows stable 执行构建、静态检查与测试；桌面凭证与真实上游仍需单独实机验证。
 
 ## 本地调试与提交
 
@@ -91,6 +93,6 @@ OpenRouter、Cursor 与 TRAE 使用各自认证逻辑，不经过 WorkBuddy 的�
 - 配置、凭证、客户端文件、日志与 `bin/` 都属于本地资料；不要强制加入 Git。
 - 现有工作集中到 `main`；提交应说明用户遇到的具体问题、最终行为与验证范围，保留真实限制。
 
-本轮仍保留的工程债务及建议顺序见[全仓审查](reviews/2026-10-23-console-and-repository-review.md#仍需独立评估的工作)，没有把未实现的能力写成当前功能。
+已实施改进、基准和后续优先级见[全仓审查](reviews/2026-10-24-project-optimization-review.md)。
 
 客户端快捷配置由 `internal/clientconfig/` 统一筛选已核验免费模型，并处理 pi JSON、cc-switch SQLite / Codex TOML；`internal/zcode/` 复用同一筛选规则。管理端点位于 `internal/app/clients.go`，交互与批量结果位于 `internal/web/static/client-setup.js`。新增客户端须覆盖配置保留、并发修改拒绝、重复同步不写入、备份和本机访问约束。

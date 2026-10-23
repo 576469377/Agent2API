@@ -1,7 +1,8 @@
 package obs
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"time"
 )
 
@@ -73,8 +74,9 @@ func (m *Metrics) recordHistory(r Record) {
 	c.DurationSum += r.DurationMs
 }
 
-// Caller holds m.mu. All values are copied, including each day's model rows.
-func (m *Metrics) historySnapshot() UsageHistory {
+// Caller holds m.mu. Copy all values, including each day's model rows, so the
+// snapshot can be sorted and encoded after releasing the metrics lock.
+func (m *Metrics) copyHistoryLocked() UsageHistory {
 	out := UsageHistory{Sources: append([]HistorySource(nil), m.historySources...), Timezone: "UTC", TrackingSince: m.trackingSince,
 		LegacyRequests: m.legacyRequests, RetentionDays: historyDays, Days: []UsageDay{}}
 	cutoff := time.Now().UTC().AddDate(0, 0, 1-historyDays).Format(time.DateOnly)
@@ -87,17 +89,21 @@ func (m *Metrics) historySnapshot() UsageHistory {
 		for _, c := range models {
 			day.Models = append(day.Models, *c)
 		}
-		sort.Slice(day.Models, func(i, j int) bool {
-			a, b := day.Models[i], day.Models[j]
-			if a.Platform != b.Platform {
-				return a.Platform < b.Platform
-			}
-			return a.Model < b.Model
-		})
 		out.Days = append(out.Days, day)
 	}
-	sort.Slice(out.Days, func(i, j int) bool { return out.Days[i].Date < out.Days[j].Date })
 	return out
+}
+
+func sortHistory(history *UsageHistory) {
+	for _, day := range history.Days {
+		slices.SortFunc(day.Models, func(a, b UsageModel) int {
+			if order := cmp.Compare(a.Platform, b.Platform); order != 0 {
+				return order
+			}
+			return cmp.Compare(a.Model, b.Model)
+		})
+	}
+	slices.SortFunc(history.Days, func(a, b UsageDay) int { return cmp.Compare(a.Date, b.Date) })
 }
 
 // Legacy files only contain the latest 200 requests. Preserve those actual
@@ -135,5 +141,10 @@ func (m *Metrics) loadHistory(history *UsageHistory, recent []Record, total int6
 		}
 		m.daily[day.Date] = models
 	}
-	m.historySnapshot() // prune expired persisted days
+	cutoff := time.Now().UTC().AddDate(0, 0, 1-historyDays).Format(time.DateOnly)
+	for date := range m.daily {
+		if date < cutoff {
+			delete(m.daily, date)
+		}
+	}
 }

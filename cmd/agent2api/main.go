@@ -184,17 +184,17 @@ func runServer(args []string) {
 	if err != nil {
 		logger.Fatalf("初始化上游适配器失败: %v", err)
 	}
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
 	// 号池热加载：控制台「添加账号」或手动放入号池目录的新凭证，
 	// 运行期自动入池，无需重启。
-	startPoolWatchers(hub, cfg, logger)
-	startKeepalive(hub, logger)
+	startPoolWatchers(backgroundCtx, hub, cfg, logger)
+	startKeepalive(backgroundCtx, hub, logger)
 	// 注意：这里刻意**不**打印「上游平台=… 账号=…」——那些信息在下面的横幅里
 	// 有更可读的呈现，重复一行带时间戳前缀的日志只会干扰阅读。
 
 	application := app.New(cfg, hub, logger)
 	application.StartMetricsPersistence(30 * time.Second)
-	backgroundCtx, stopBackground := context.WithCancel(context.Background())
-	defer stopBackground()
 	application.StartPlatformBackground(backgroundCtx)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

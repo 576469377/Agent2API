@@ -1,15 +1,17 @@
 // Package obs 提供网关运行指标采集。
 //
-// 设计取向：全部走原子计数器 + 一把互斥锁保护聚合结构，热路径无阻塞，
+// 设计取向：计数器和聚合结构在同一把锁内更新，快照排序在锁外完成，
 // 也不引入 Prometheus 这类外部依赖——同量级的自托管网关用 JSON 快照直接喂
 // 给内置控制台就够了。
 package obs
 
 import (
+	"cmp"
 	"encoding/json"
 	"github.com/576469377/Agent2API/internal/llm"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -321,7 +323,6 @@ func (m *Metrics) Snapshot() Snapshot {
 	// All counters, groups and recent records belong to one completed-request
 	// snapshot; reading independent atomics before the lock can mix generations.
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	total := m.total.Load()
 	ok := m.okCount.Load()
 	failed := m.failed.Load()
@@ -344,13 +345,12 @@ func (m *Metrics) Snapshot() Snapshot {
 		tps = float64(m.genTokSum.Load()) / (float64(genMs) / 1000.0)
 	}
 
-	byModel := toStats(m.byModel)
-	byProto := toStats(m.byProto)
-	byAccount := toStats(m.byAccount)
-	history := m.historySnapshot()
+	byModel := copyStats(m.byModel)
+	byProto := copyStats(m.byProto)
+	byAccount := copyStats(m.byAccount)
+	history := m.copyHistoryLocked()
 	rawSeries := make([]minuteBucket, len(m.series))
 	copy(rawSeries, m.series)
-	series := fillSeriesBuckets(rawSeries, seriesWindow)
 
 	recent := make([]Record, len(m.recent))
 	for i, r := range m.recent {
@@ -358,7 +358,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	}
 	rpm := m.lastMinuteRPMLocked(time.Now())
 
-	return Snapshot{
+	out := Snapshot{
 		UptimeSec:       int64(time.Since(m.started).Seconds()),
 		InFlight:        m.inFlight.Load(),
 		Total:           total,
@@ -375,13 +375,23 @@ func (m *Metrics) Snapshot() Snapshot {
 		ByModel:         byModel,
 		ByProtocol:      byProto,
 		ByAccount:       byAccount,
-		Series:          series,
+		Series:          rawSeries,
 		Recent:          recent,
 		UsageHistory:    history,
 	}
+	m.mu.Unlock()
+
+	// These slices own their data. Sorting a full year of history must not hold
+	// up request completion or per-chunk live progress updates.
+	sortStats(out.ByModel)
+	sortStats(out.ByProtocol)
+	sortStats(out.ByAccount)
+	sortHistory(&out.UsageHistory)
+	out.Series = fillSeriesBuckets(out.Series, seriesWindow)
+	return out
 }
 
-func toStats(store map[string]*groupCounter) []GroupStat {
+func copyStats(store map[string]*groupCounter) []GroupStat {
 	out := make([]GroupStat, 0, len(store))
 	for k, c := range store {
 		avg := 0.0
@@ -399,8 +409,16 @@ func toStats(store map[string]*groupCounter) []GroupStat {
 			SuccessRate:  ratio(c.OK, c.Total),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Total > out[j].Total })
 	return out
+}
+
+func sortStats(groups []GroupStat) {
+	slices.SortFunc(groups, func(a, b GroupStat) int {
+		if order := cmp.Compare(b.Total, a.Total); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.Key, b.Key)
+	})
 }
 
 func ratio(a, b int64) float64 {
@@ -516,7 +534,7 @@ func (m *Metrics) Save(path string) error {
 		return nil
 	}
 	m.mu.Lock()
-	history := m.historySnapshot()
+	history := m.copyHistoryLocked()
 	p := persisted{
 		Total:        m.total.Load(),
 		OK:           m.okCount.Load(),
@@ -545,6 +563,7 @@ func (m *Metrics) Save(path string) error {
 	}
 	m.mu.Unlock()
 
+	sortHistory(&history)
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err

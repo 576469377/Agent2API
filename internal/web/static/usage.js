@@ -79,6 +79,22 @@ export function buildUsage(metrics, { range = "7", platform = "all", allocation,
     sources: history.sources || [], preview: !!history.preview, legacyRequests: count(history.legacy_requests),
     partial: days.some((d) => d.coverage !== "complete"), retention };
 }
+
+// Published API snapshots are replaced, never modified. Reuse their derived
+// calendar between chart hovers and renders; retain only the last filter for
+// each snapshot and release old snapshots through the weak key.
+const usageSnapshots = new WeakMap();
+export function cachedUsage(metrics, options = {}) {
+  if (!metrics) return null;
+  const now = options.now ?? Date.now();
+  const key = JSON.stringify([Math.floor(now / DAY), options.range ?? "7", options.platform ?? "all", options.allocation ?? null]);
+  const previous = usageSnapshots.get(metrics);
+  if (previous?.key === key) return previous.usage;
+  const usage = buildUsage(metrics, { ...options, now });
+  usageSnapshots.set(metrics, { key, usage });
+  return usage;
+}
+
 // Top models plus an explicit remainder keep the curve totals accountable.
 export function curveSeries(usage, metric = "tokens", hidden = new Set()) {
   const ranked = [...usage.models].sort((a, b) => b[metric] - a[metric] || a.key.localeCompare(b.key));

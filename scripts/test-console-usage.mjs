@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition, heatmapColumns, liveGeneration, sampleLive } from "../internal/web/static/usage.js";
+import { buildUsage, cachedUsage, curveSeries, curvePath, DAY, modelColor, modelKey, lifetimeUsage, usageComposition, heatmapColumns, liveGeneration, sampleLive } from "../internal/web/static/usage.js";
 import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageDayView, usageWeekView, usageTokenValue } from "../internal/web/static/usage-view.js";
 import { escapeHTML, number, compact, icon } from "../internal/web/static/core.js";
 const now=Date.parse("2026-10-15T10:00:00Z");
@@ -9,6 +9,28 @@ const fixture={total:99999,usage_history:{timezone:"UTC",tracking_since:"2026-10
  days:[{date:"2026-10-08",models:[row("workbuddy","hy3",20)]},{date:"2026-10-10",models:[row("workbuddy","hy3",60),row("workbuddy-global","hy3",90)]},{date:"2026-10-15",models:[row("workbuddy-global","hy3",5,0)]}]}};
 const state={range:"7",platform:"all",now,metric:"tokens",heatMetric:"tokens",hidden:new Set()};
 const ui={e:escapeHTML,n:number,compact,icon,L:(zh)=>zh};
+test("derived usage is reused per snapshot and refreshed for filters, allocations, midnight and new data",()=>{
+ const metrics=structuredClone(fixture), options={...state,allocation:{enabled:false,days:7}};
+ const first=cachedUsage(metrics,options);
+ assert.deepEqual(first,buildUsage(metrics,options));
+ assert.equal(cachedUsage(metrics,{...options,metric:"total",hidden:new Set(["m"])}),first);
+ const domestic=cachedUsage(metrics,{...options,platform:"workbuddy"});
+ assert.equal(domestic.tokens,60);assert.notEqual(domestic,first);
+ options.range="30";
+ assert.equal(cachedUsage(metrics,options).days.length,30);
+ options.allocation.enabled=true;
+ const allocated=cachedUsage(metrics,options);
+ assert.ok(allocated.hasEstimates);
+ options.allocation.days=3;
+ assert.notEqual(cachedUsage(metrics,options).allocation.start,allocated.allocation.start);
+ const nextDay=cachedUsage(metrics,{...options,now:Math.floor(now/DAY)*DAY+DAY});
+ assert.equal(nextDay.days.at(-1).date,"2026-10-16");
+ const updated=structuredClone(metrics);
+ updated.usage_history.days.at(-1).models[0].input_tokens=123;
+ assert.notEqual(cachedUsage(updated,state).tokens,first.tokens);
+ assert.equal(cachedUsage(null,state),null);
+ assert.deepEqual(metrics,fixture);
+});
 test("calendar totals use durable days, preserve regional identity and never use lifetime as daily usage",()=>{
  const usage=buildUsage(fixture,state);
  assert.equal(usage.days.length,7);assert.equal(usage.tokens,155);assert.equal(usage.total,2);

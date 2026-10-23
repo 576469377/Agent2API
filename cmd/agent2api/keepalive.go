@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -23,14 +24,8 @@ import (
 const keepaliveInterval = 15 * time.Minute
 
 // startKeepalive 启动保活 goroutine。
-func startKeepalive(hub *app.Hub, logger *log.Logger) {
-	go func() {
-		// 先等一个周期：启动瞬间不需要保活（凭证刚被 buildAdapter 验证过）。
-		time.Sleep(keepaliveInterval)
-		for range time.Tick(keepaliveInterval) {
-			refreshExpiring(hub, logger)
-		}
-	}()
+func startKeepalive(ctx context.Context, hub *app.Hub, logger *log.Logger) {
+	go runPeriodic(ctx, keepaliveInterval, func() { refreshExpiring(hub, logger) })
 }
 
 // refreshExpiring 让所有「凭证即将过期」的账号刷新一次。

@@ -11,6 +11,8 @@ package main
 // 加进运行中的号池。按 UID 去重，同一账号的多份凭证不会重复入池。
 
 import (
+	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +21,6 @@ import (
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
 	"github.com/576469377/Agent2API/internal/app"
 	"github.com/576469377/Agent2API/internal/config"
-	"log"
 )
 
 // poolWatchInterval 是号池目录的扫描周期。
@@ -28,7 +29,7 @@ const poolWatchInterval = 10 * time.Second
 // startPoolWatchers 为每个平台启动一个目录监视 goroutine。
 // 平台未配置 accounts_dir 时监视兜底目录（~/.workbuddy），
 // 保证控制台添加的凭证总能被捡到。
-func startPoolWatchers(hub *app.Hub, cfg config.Config, logger *log.Logger) {
+func startPoolWatchers(ctx context.Context, hub *app.Hub, cfg config.Config, logger *log.Logger) {
 	for _, rt := range hub.Platforms() {
 		if rt.Pool == nil {
 			continue
@@ -37,18 +38,17 @@ func startPoolWatchers(hub *app.Hub, cfg config.Config, logger *log.Logger) {
 		if dir == "" {
 			dir = workbuddy.AccountsDirForPlatform(rt.ID)
 		}
-		go watchAccountDir(rt, dir, cfg, logger)
+		go watchAccountDir(ctx, rt, dir, cfg, logger)
 	}
 }
 
 // watchAccountDir 周期扫描 dir，把新出现的凭证加入运行中的号池。
 // 失败的文件每个周期重试（可能是写到一半被抓到），但同一种错误只记一次日志。
-func watchAccountDir(rt *app.PlatformRuntime, dir string, cfg config.Config, logger *log.Logger) {
+func watchAccountDir(ctx context.Context, rt *app.PlatformRuntime, dir string, cfg config.Config, logger *log.Logger) {
 	lastErr := map[string]string{}
-
-	for range time.Tick(poolWatchInterval) {
+	runPeriodic(ctx, poolWatchInterval, func() {
 		scanAccountDir(rt, dir, cfg, logger, lastErr)
-	}
+	})
 }
 
 // scanAccountDir performs one watcher pass, including the first account in an empty pool.

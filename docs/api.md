@@ -17,6 +17,8 @@
 
 ## Responses 工具命名空间
 
+Responses 流提供递增的 `sequence_number`，以及文本内容块、思考摘要和工具参数的开始 / 增量 / 结束事件。达到输出上限或内容过滤时发送 `response.incomplete`，并分别设置 `incomplete_details.reason` 为 `max_output_tokens` 或 `content_filter`；正常完成使用 `response.completed`。非流式结果使用相同的结束状态。
+
 `/v1/responses` 接受一层 `type: "namespace"` 分组，内部为 `type: "function"` 工具。例如 Codex MCP 的 `mcp__acceptance` 分组中可以定义 `read_acceptance_file`。网关保留子工具的描述与 JSON Schema，使用稳定且无冲突的内部名称适配上游的扁平工具接口。
 
 响应的 `function_call` 返回原始 `name` 和 `namespace`；流式 `response.output_item.added`、`response.output_item.done`、最终 `response.completed` 以及非流式输出使用相同映射。把该调用连同 `function_call_output` 和原 `call_id` 放回 `input` 即可续轮，历史中的工具名称也会恢复为同一内部标识。不同分组可有同名函数，映射仅属于当前请求。
@@ -103,7 +105,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8787/v1/chat/completions' -Method Post 
 
 `stream: true` 使用 SSE；前置代理需及时刷新数据，客户端应处理错误事件与流结束。非流式由网关聚合上游事件后返回。网关返回协议对应的错误载荷；上游额度、限流和鉴权错误不会因模型存在于目录而消失。
 
-`/health` 的 `ok` 仅表示本地服务运行，不探测上游。`/metrics` 是 Prometheus 文本格式；控制台还提供真实调用记录。余额查询尚未实现。
+`/health` 的 `ok` 仅表示本地服务运行，不探测上游。`/metrics` 是 Prometheus 文本格式；控制台还提供真实调用记录。支持的账号额度与积分查询见[账号权益](account-benefits.md)。
 
 ## 响应头与错误码
 

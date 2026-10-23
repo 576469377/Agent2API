@@ -83,7 +83,7 @@ type rpcFrame struct {
 type rpcClient struct {
 	cmd       *exec.Cmd
 	in        io.WriteCloser
-	writeMu   sync.Mutex
+	writeGate chan struct{}
 	mu        sync.Mutex
 	pending   map[string]chan rpcReply
 	sequence  atomic.Uint64
@@ -96,7 +96,7 @@ type rpcClient struct {
 
 func startRPC(ctx context.Context, exe, cwd string, onNotify func(rpcFrame)) (*rpcClient, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &rpcClient{ctx: ctx, cancel: cancel, pending: map[string]chan rpcReply{}, done: make(chan struct{}), onNotify: onNotify}
+	c := &rpcClient{ctx: ctx, cancel: cancel, writeGate: make(chan struct{}, 1), pending: map[string]chan rpcReply{}, done: make(chan struct{}), onNotify: onNotify}
 	c.cmd = cliCommand(ctx, exe, cwd, "acp", "--agent", "agent2api-proxy")
 	var err error
 	if c.in, err = c.cmd.StdinPipe(); err != nil {
@@ -157,13 +157,46 @@ func startRPC(ctx context.Context, exe, cwd string, onNotify func(rpcFrame)) (*r
 	return c, nil
 }
 func (c *rpcClient) write(value any) error {
+	return c.writeContext(c.ctx, value)
+}
+
+func (c *rpcClient) writeContext(ctx context.Context, value any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	select {
+	case c.writeGate <- struct{}{}:
+		defer func() { <-c.writeGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Cancelling a queued writer leaves the active frame alone. Once a write
+	// begins, interruption may leave a partial JSON frame, so end this RPC
+	// connection and release every waiter instead of reusing its stdin.
+	interrupted := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		c.cancel()
+		_ = c.in.Close()
+		close(interrupted)
+	})
+	defer func() {
+		if !stop() {
+			<-interrupted
+		}
+	}()
 	_, err = c.in.Write(append(raw, '\n'))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return err
 }
 func (c *rpcClient) call(ctx context.Context, method string, params any, out any) error {
@@ -174,7 +207,10 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 	c.pending[key] = ch
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, key); c.mu.Unlock() }()
-	if err := c.write(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+	if err := c.writeContext(ctx, map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return upstreamFailure("kiro_rpc_write", "Kiro CLI 连接不可写")
 	}
 	select {
@@ -188,6 +224,11 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-c.ctx.Done():
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
 	case <-c.done:
 		return upstreamFailure("kiro_cli_closed", "Kiro CLI 连接已关闭")
 	}

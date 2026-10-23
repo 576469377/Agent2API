@@ -160,12 +160,19 @@ func TestStreamIdleAndCancellationCloseRead(t *testing.T) {
 		done := make(chan error, 1)
 		go func() { _, err := s.Recv(ctx); done <- err }()
 		if !idle {
+			// Enter the read loop before cancelling, so this covers a blocked read.
+			if _, err := w.Write([]byte(": heartbeat\n")); err != nil {
+				t.Fatal(err)
+			}
 			cancel()
 		}
 		select {
 		case err := <-done:
 			if err == nil {
 				t.Fatal("read succeeded")
+			}
+			if !idle && !errors.Is(err, context.Canceled) {
+				t.Fatalf("client cancellation became an upstream failure: %v", err)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("read did not cancel")

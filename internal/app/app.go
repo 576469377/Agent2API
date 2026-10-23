@@ -487,13 +487,11 @@ func (a *App) writeStream(w http.ResponseWriter, r *http.Request, proto Protocol
 	enc := proto.NewStreamEncoder(req.Model, req.IncludeUsage)
 	common.WriteSSEHeaders(w)
 
-	_, canFlush := w.(http.Flusher)
+	controller := http.NewResponseController(w)
 	flush := func() bool {
-		if canFlush {
-			if err := http.NewResponseController(w).Flush(); err != nil {
-				a.recordWriteFailure(rec)
-				return false
-			}
+		if err := controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			a.recordWriteFailure(rec)
+			return false
 		}
 		return true
 	}

@@ -17,9 +17,9 @@
 ```bash
 make build      # 编译到 bin/agent2api
 make run        # 编译并运行
-make test       # go test ./...
-make vet        # go vet ./...
-make fmt        # gofmt -w .
+make test       # go test ./cmd/... ./internal/...
+make vet        # go vet ./cmd/... ./internal/...
+make fmt        # gofmt -w cmd internal
 make check      # fmt + vet + test（提交前请跑这个）
 make cover      # 覆盖率
 make test-race  # 竞态检测（CI 也跑）
@@ -29,8 +29,8 @@ Windows 无需安装 Make，直接使用以下跨平台命令：
 
 ```powershell
 go build -trimpath -o bin/agent2api-dev.exe ./cmd/agent2api
-go test ./...
-go vet ./...
+go test ./cmd/... ./internal/...
+go vet ./cmd/... ./internal/...
 node --test scripts/test-console-*.mjs
 python -m unittest discover -s scripts -p 'test_*.py'
 python scripts/check-docs.py
@@ -38,7 +38,9 @@ python scripts/check-secrets.py --staged
 python -m unittest discover -s scripts -p test_check_secrets.py
 ```
 
-已有网关在使用时，不覆盖或启动当前服务的可执行文件。前端开发使用[独立控制台](docs/console.md)，与原网关共存；后端测试使用离线样本或独立端口。`make run` 会启动网关，`make clean` 会删除 `bin/`，运行服务期间不要执行这些操作。
+已有网关在使用时，不覆盖或启动当前服务的可执行文件。前端开发使用[独立控制台](docs/console.md)，与原网关共存；后端测试使用离线样本或独立端口。`make run` 会启动网关；`make clean` 只删除 Make 构建的程序和覆盖率文件，保留 `bin/` 内其他候选程序、诊断和研究资料。
+
+本地测试与格式化限定在 `cmd/`、`internal/`，避免扫描 `bin/` 中临时研究程序。干净检出的 CI 使用 `go test ./...`：Linux / macOS 同时验证 Go 1.23 和 stable 并执行竞态检测，Windows stable 验证文件替换、SQLite 和进程行为。`make lint` 会将已安装检查器的失败状态传给调用方。
 
 `check-docs.py` 离线检查根目录、`docs/`、`fixtures/` 和 `.github/` 的 Markdown 本地目标、页内标题与代码块；CI 同时验证检查器。它不验证外部站点在线状态，也不能替代命令、默认值和能力说明与代码的交叉核对。当前用户指南与带日期的历史研究分开维护，保留已有文档路径，避免破坏引用。
 
@@ -74,7 +76,7 @@ python -m unittest discover -s scripts -p test_check_secrets.py
 
 可优先补充以下覆盖；覆盖率会随代码变化，请先运行 `make cover` 获取当前结果：
 
-- [`internal/web`](internal/web/) —— 静态入口；前端流式处理与监控统计分别有 `scripts/test-console-core.mjs`、`scripts/test-console-monitor.mjs` 离线测试，页面交互仍需浏览器验证
+- [`internal/web`](internal/web/) —— 已覆盖静态资源的内容 ETag、304、HEAD、Range 与升级失效；前端流式处理与监控统计分别有 `scripts/test-console-core.mjs`、`scripts/test-console-monitor.mjs` 离线测试，页面交互仍需浏览器验证
 - [`internal/app`](internal/app/) —— 编排核心（`serve` / `writeStream` / `aggregate` 路径）
 - [`cmd/agent2api`](cmd/agent2api/) —— 启动装配、子命令、号池监视与保活
 - [`cmd/console`](cmd/console/) —— 独立控制台的代理、路径与 SSE；已有离线测试，可补充异常网络场景

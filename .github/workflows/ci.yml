@@ -53,6 +53,9 @@ jobs:
         # go.mod 声明 go 1.23.0 —— 测声明下限才能真正保证兼容
         go: ['1.23.x', 'stable']
         os: [ubuntu-latest, macos-latest]
+        include:
+          - go: stable
+            os: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -71,9 +74,15 @@ jobs:
         run: go vet ./...
 
       - name: 测试（含竞态检测）
+        if: runner.os != 'Windows'
         run: go test ./... -race -coverprofile=coverage.txt -covermode=atomic
 
+      - name: Windows 文件、SQLite 与进程集成测试
+        if: runner.os == 'Windows'
+        run: go test ./... -coverprofile=coverage.txt
+
       - name: 覆盖率摘要
+        shell: bash
         run: go tool cover -func=coverage.txt | tail -1
 
   # 单独跑一次不含 -race 的覆盖率，方便本地对比

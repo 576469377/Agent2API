@@ -97,6 +97,8 @@ func (s *upstreamStream) Close() error {
 func (s *upstreamStream) AccountLabel() string { return "API Key" }
 
 func (s *upstreamStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
+	stop := context.AfterFunc(ctx, func() { s.Close() })
+	defer stop()
 	for {
 		if len(s.pending) > 0 {
 			ev := s.pending[0]
@@ -123,6 +125,10 @@ func (s *upstreamStream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
 			if strings.HasPrefix(line, "data:") {
 				data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			s.Close()
+			return llm.ResponseEvent{}, err
 		}
 		if s.timedOut.Load() {
 			s.Close()

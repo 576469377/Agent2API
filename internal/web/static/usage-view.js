@@ -1,4 +1,4 @@
-import { buildUsage, curveSeries, curvePath, lifetimeUsage, heatmapColumns, liveGeneration, tokenUsageMissing } from "./usage.js";
+import { cachedUsage, curveSeries, curvePath, lifetimeUsage, heatmapColumns, liveGeneration, tokenUsageMissing } from "./usage.js";
 
 export function liveRequestStatus(row, L, now) {
   const labels = {
@@ -66,7 +66,7 @@ export function lifetimeUsageView(metrics, ui) {
 
 // Detailed provenance belongs to a deliberate inspection, separate from charts.
 export function usageMethodologyView(metrics, state, ui) {
-  const { e, L, n } = ui, usage = buildUsage(metrics, state), storage = metrics?.storage;
+  const { e, L, n } = ui, usage = cachedUsage(metrics, state), storage = metrics?.storage;
   if (!usage) return "";
   const item = (title, body) => `<div><dt>${e(title)}</dt><dd>${e(body)}</dd></div>`;
   const snapshots = usage.sources.filter(source => source.kind === "snapshot" && source.snapshot_requests > 0);
@@ -86,7 +86,7 @@ export function usageMethodologyView(metrics, state, ui) {
 
 export function usageView(metrics, state, ui) {
   const { e, L, n, compact, icon } = ui;
-  const usage = buildUsage(metrics, state);
+  const usage = cachedUsage(metrics, state);
   if (!usage) return "";
   const historyLabel = L("全部记录", "All records");
   const rangeName = state.range === "all" ? historyLabel : L(`近 ${state.range} 天`, `Last ${state.range} days`);
@@ -152,7 +152,7 @@ export function usageView(metrics, state, ui) {
   </div>`;
 }
 export function usageTooltip(metrics, state, index, ui) {
-  const { e, L, n } = ui, usage = buildUsage(metrics, state), day = usage?.days[index];
+  const { e, L, n } = ui, usage = cachedUsage(metrics, state), day = usage?.days[index];
   if (!day) return "";
   if (day.coverage === "unknown") return `<strong>${e(day.date)} · UTC</strong><p>${e(L("该日期暂无记录", "No records for this date"))}</p>`;
   const series = curveSeries(usage, state.metric, state.hidden).filter((m) => !m.hidden && m.values[index] > 0);

@@ -1,67 +1,96 @@
-// Package web 提供内置网页控制台。
-//
-// 采用 go:embed 把静态资源编进二进制，保持「单文件、零依赖」的交付形态——
-// 不需要额外的前端构建步骤，也不需要单独的静态服务器。
+// Package web provides the embedded, build-free web console.
 package web
 
 import (
+	"crypto/sha256"
 	"embed"
+	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
+	"strings"
+	"sync"
 )
 
 //go:embed static
 var staticFS embed.FS
 
-// sub 是 static 目录对应的只读文件系统。
-func sub() (fs.FS, error) {
-	return fs.Sub(staticFS, "static")
+type assets struct {
+	fsys  fs.FS
+	etags map[string]string
 }
 
-// Index 返回控制台页面。
-func Index(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "仅支持 GET", http.StatusMethodNotAllowed)
-		return
+// Hash immutable embedded files once. Keep serving the FS directly rather than
+// retaining another copy of every asset or hashing it on each page load.
+func newAssets(fsys fs.FS) (*assets, error) {
+	a := &assets{fsys: fsys, etags: make(map[string]string)}
+	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		file, err := fsys.Open(name)
+		if err != nil {
+			return err
+		}
+		hash := sha256.New()
+		_, err = io.Copy(hash, file)
+		closeErr := file.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		a.etags[name] = fmt.Sprintf("\"%x\"", hash.Sum(nil))
+		return nil
+	})
+	return a, err
+}
+
+var embeddedAssets = sync.OnceValues(func() (*assets, error) {
+	fsys, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return nil, err
 	}
-	fsys, err := sub()
+	return newAssets(fsys)
+})
+
+func serve(w http.ResponseWriter, r *http.Request, name string) {
+	a, err := embeddedAssets()
 	if err != nil {
 		http.Error(w, "静态资源不可用", http.StatusInternalServerError)
 		return
 	}
-	raw, err := fs.ReadFile(fsys, "index.html")
-	if err != nil {
-		http.Error(w, "控制台页面缺失", http.StatusInternalServerError)
+	a.serve(w, r, name)
+}
+
+func (a *assets) serve(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "仅支持 GET / HEAD", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(raw)
-}
-
-// Static 返回静态资源处理器（对应 /static/ 前缀）。
-//
-// 必须加 no-cache：go:embed 的文件 ModTime 恒为零值（实测），
-// http.FileServer 因此既不发 Last-Modified 也不发 ETag，只能靠
-// Cache-Control 要求浏览器重新校验；即使入口带有版本查询串，模块导入
-// 仍可能复用原路径。一旦 JS 被直接复用，升级后就会出现「新 HTML 调新字段、
-// 旧 JS 读旧字段」的混搭，这类故障最难定位。
-func Static() http.Handler {
-	fsys, err := sub()
-	if err != nil {
-		// embed 路径是编译期常量，这里理论上不可达。
-		return http.NotFoundHandler()
+	etag, ok := a.etags[name]
+	if !ok {
+		http.NotFound(w, r)
+		return
 	}
-	return noCache(http.FileServer(http.FS(fsys)))
+	// Revalidate module imports as well as the entry point after every upgrade.
+	// An unchanged asset now returns 304 instead of transferring its body again.
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFileFS(w, r, a.fsys, name)
 }
 
-// noCache 给响应加上「每次都要重新校验」的缓存头。
-//
-// 用 no-cache 而非 no-store：静态文件本身可以留在磁盘缓存里，
-// 只是每次使用前必须向服务端确认，既避免混搭又不牺牲重复加载速度。
-func noCache(next http.Handler) http.Handler {
+// Index serves the console entry point, including conditional GET and HEAD.
+func Index(w http.ResponseWriter, r *http.Request) {
+	serve(w, r, "index.html")
+}
+
+// Static handles paths after the /static/ prefix has been removed.
+func Static() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		next.ServeHTTP(w, r)
+		serve(w, r, strings.TrimPrefix(r.URL.Path, "/"))
 	})
 }

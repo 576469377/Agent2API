@@ -74,6 +74,10 @@ func (s *stream) Recv(ctx context.Context) (llm.ResponseEvent, error) {
 			return llm.ResponseEvent{}, err
 		}
 		event, data, err := s.frame()
+		if err := ctx.Err(); err != nil {
+			s.Close()
+			return llm.ResponseEvent{}, err
+		}
 		if s.timedOut.Load() {
 			s.Close()
 			return llm.ResponseEvent{}, &llm.Failure{Code: "trae_stream_idle", Message: "TRAE 流长时间没有数据", Timeout: true, Cause: context.DeadlineExceeded}

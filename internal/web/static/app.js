@@ -18,7 +18,7 @@ import { requestKey, accountKey, filterRequests, summarizeRequests, selectTrend,
 import { mergePricingSnapshot, modelPricing, pricingCategory, compareModelRates, rateRefreshDue, verifyRateObservations, pricingChanges, confirmedFreeModels } from "./pricing.js";
 import { pageResources, refreshResources, filterModelCatalog, compareModelIdentity, remainingCooldown, availabilityState, pageSnapshotTime, loadResources, modelAvailability } from "./resources.js";
 import { dashboardMetrics, accountReadiness, usageShares } from "./dashboard.js";
-import { buildUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
+import { cachedUsage, curveSeries, usageComposition, heatmapColumns, sampleLive } from "./usage.js";
 import { usageView, usageTooltip, lifetimeUsageView, liveUsageView, usageMethodologyView, usageDayView, usageWeekView } from "./usage-view.js";
 import { recentHealthView, requestSampleView, requestDiagnostic, gatewayPolicyView } from "./insights.js";
 import { allocationPeriod } from "./usage-allocation.js";
@@ -1836,7 +1836,7 @@ document.addEventListener("click", async (event) => {
         s.usageInsights.heatMode = ["daily", "weekly", "cumulative"].includes(value) ? value : "daily";
         return draw();
       case "usage-week": {
-        const usage=buildUsage(s.cache.metrics,s.usageInsights), columns=heatmapColumns(usage.calendar,s.usageInsights.heatMode,s.usageInsights.heatMetric);
+        const usage=cachedUsage(s.cache.metrics,s.usageInsights), columns=heatmapColumns(usage.calendar,s.usageInsights.heatMode,s.usageInsights.heatMetric);
         const column=columns[Number(value)];
         if (!column) return;
         const cumulative=s.usageInsights.heatMode==="cumulative";
@@ -1851,7 +1851,7 @@ document.addEventListener("click", async (event) => {
         const hidden = s.usageInsights.hidden;
         if (hidden.has(value)) hidden.delete(value);
         else {
-          const current = curveSeries(buildUsage(s.cache.metrics, s.usageInsights), s.usageInsights.metric, hidden);
+          const current = curveSeries(cachedUsage(s.cache.metrics, s.usageInsights), s.usageInsights.metric, hidden);
           if (current.filter((m) => !m.hidden).length <= 1) return toast(L("至少保留一条曲线", "Keep at least one curve visible"));
           hidden.add(value);
         }
@@ -1862,7 +1862,7 @@ document.addEventListener("click", async (event) => {
       case "usage-model-requests":
         return openRequestFilters({ platform: platform || "all", model: target.dataset.model });
       case "usage-day": {
-        const usage = buildUsage(s.cache.metrics, s.usageInsights), day = usage.calendar.find((d) => d.date === value);
+        const usage = cachedUsage(s.cache.metrics, s.usageInsights), day = usage.calendar.find((d) => d.date === value);
         if (!day) return;
 
         modal(`${day.date} · UTC`, usageDayView(day, { e, L, n, compact }));

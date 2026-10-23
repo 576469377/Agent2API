@@ -91,7 +91,7 @@ func TestStreamIncompleteToolCallKeptInOutput(t *testing.T) {
 			t.Fatalf("编码 %s 失败: %v", ev.Type, err)
 		}
 		for _, sse := range out {
-			if sse.Name != "response.completed" {
+			if sse.Name != "response.failed" {
 				continue
 			}
 			var frame struct {
@@ -100,7 +100,7 @@ func TestStreamIncompleteToolCallKeptInOutput(t *testing.T) {
 				} `json:"response"`
 			}
 			if err := json.Unmarshal(sse.Data, &frame); err != nil {
-				t.Fatalf("response.completed 解析失败: %v", err)
+				t.Fatalf("response.failed 解析失败: %v", err)
 			}
 			completedItem = map[string]any{}
 			for _, item := range frame.Response.Output {
@@ -109,7 +109,7 @@ func TestStreamIncompleteToolCallKeptInOutput(t *testing.T) {
 		}
 	}
 	if completedItem == nil {
-		t.Fatal("没有 response.completed 帧")
+		t.Fatal("没有 response.failed 帧")
 	}
 	fcAny, ok := completedItem["function_call"]
 	if !ok {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/576469377/Agent2API/internal/api/common"
@@ -246,9 +247,10 @@ func normalizeToolChoice(v any) *llm.ToolChoice {
 
 // StreamEncoder 把 IR 事件编码为 Responses 流式事件。
 type StreamEncoder struct {
-	id      string
-	model   string
-	created int64
+	id       string
+	model    string
+	created  int64
+	sequence int
 	// itemID 把 output_index 映射到 output item 的 id。
 	itemID map[int]string
 	// kind/callID/name/args 记录每个块的类型与进行中的内容，
@@ -256,11 +258,29 @@ type StreamEncoder struct {
 	kind      map[int]string
 	callID    map[int]string
 	name      map[int]string
-	args      map[int]string
-	text      map[int]string
-	thinking  map[int]string
+	args      contentBuffers
+	text      contentBuffers
+	thinking  contentBuffers
 	completed map[int]any
 	toolNames map[string]toolName
+}
+
+// Keep each growing block in a builder: concatenating every delta copies all
+// previous output and makes long responses allocate quadratically.
+type contentBuffers map[int]*strings.Builder
+
+func (b contentBuffers) append(index int, text string) {
+	if b[index] == nil {
+		b[index] = &strings.Builder{}
+	}
+	b[index].WriteString(text)
+}
+
+func (b contentBuffers) text(index int) string {
+	if b[index] == nil {
+		return ""
+	}
+	return b[index].String()
 }
 
 // NewStreamEncoder 构造流式编码器。
@@ -273,9 +293,9 @@ func (p Protocol) NewStreamEncoder(model string, includeUsage bool) *StreamEncod
 		kind:      map[int]string{},
 		callID:    map[int]string{},
 		name:      map[int]string{},
-		args:      map[int]string{},
-		text:      map[int]string{},
-		thinking:  map[int]string{},
+		args:      contentBuffers{},
+		text:      contentBuffers{},
+		thinking:  contentBuffers{},
 		completed: map[int]any{},
 		toolNames: p.toolNames,
 	}
@@ -303,6 +323,8 @@ func (e *StreamEncoder) ev(name string, payload map[string]any) ([]common.SSEEve
 		e.completed[payload["output_index"].(int)] = payload["item"]
 	}
 	payload["type"] = name
+	payload["sequence_number"] = e.sequence
+	e.sequence++
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -323,15 +345,23 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 
 	case llm.EventThinkingStart:
 		id := e.item(ev.ContentIndex, "reasoning")
-		return e.ev("response.output_item.added", map[string]any{
+		added, err := e.ev("response.output_item.added", map[string]any{
 			"output_index": ev.ContentIndex,
 			"item": map[string]any{
 				"id": id, "type": "reasoning", "summary": []any{},
 			},
 		})
+		if err != nil {
+			return nil, err
+		}
+		part, err := e.ev("response.reasoning_summary_part.added", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "summary_index": 0,
+			"part": map[string]any{"type": "summary_text", "text": ""},
+		})
+		return append(added, part...), err
 
 	case llm.EventThinkingDelta:
-		e.thinking[ev.ContentIndex] += ev.Delta
+		e.thinking.append(ev.ContentIndex, ev.Delta)
 		id := e.item(ev.ContentIndex, "reasoning")
 		return e.ev("response.reasoning_summary_text.delta", map[string]any{
 			"item_id": id, "output_index": ev.ContentIndex, "summary_index": 0, "delta": ev.Delta,
@@ -339,36 +369,72 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 
 	case llm.EventThinkingEnd:
 		id := e.item(ev.ContentIndex, "reasoning")
-		return e.ev("response.output_item.done", map[string]any{
-			"output_index": ev.ContentIndex,
-			"item":         map[string]any{"id": id, "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": e.thinking[ev.ContentIndex]}}},
+		text, err := e.ev("response.reasoning_summary_text.done", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "summary_index": 0, "text": e.thinking.text(ev.ContentIndex),
 		})
+		if err != nil {
+			return nil, err
+		}
+		part, err := e.ev("response.reasoning_summary_part.done", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "summary_index": 0,
+			"part": map[string]any{"type": "summary_text", "text": e.thinking.text(ev.ContentIndex)},
+		})
+		if err != nil {
+			return nil, err
+		}
+		item, err := e.ev("response.output_item.done", map[string]any{
+			"output_index": ev.ContentIndex,
+			"item":         map[string]any{"id": id, "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": e.thinking.text(ev.ContentIndex)}}},
+		})
+		return append(append(text, part...), item...), err
 
 	case llm.EventTextStart:
 		id := e.item(ev.ContentIndex, "message")
-		return e.ev("response.output_item.added", map[string]any{
+		added, err := e.ev("response.output_item.added", map[string]any{
 			"output_index": ev.ContentIndex,
 			"item": map[string]any{
 				"id": id, "type": "message", "role": "assistant", "status": "in_progress", "content": []any{},
 			},
 		})
+		if err != nil {
+			return nil, err
+		}
+		part, err := e.ev("response.content_part.added", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "content_index": 0,
+			"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}, "logprobs": []any{}},
+		})
+		return append(added, part...), err
 
 	case llm.EventTextDelta:
-		e.text[ev.ContentIndex] += ev.Delta
+		e.text.append(ev.ContentIndex, ev.Delta)
 		id := e.item(ev.ContentIndex, "message")
 		return e.ev("response.output_text.delta", map[string]any{
-			"item_id": id, "output_index": ev.ContentIndex, "content_index": 0, "delta": ev.Delta,
+			"item_id": id, "output_index": ev.ContentIndex, "content_index": 0, "delta": ev.Delta, "logprobs": []any{},
 		})
 
 	case llm.EventTextEnd:
 		id := e.item(ev.ContentIndex, "message")
-		return e.ev("response.output_item.done", map[string]any{
+		text, err := e.ev("response.output_text.done", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "content_index": 0, "text": e.text.text(ev.ContentIndex), "logprobs": []any{},
+		})
+		if err != nil {
+			return nil, err
+		}
+		part, err := e.ev("response.content_part.done", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "content_index": 0,
+			"part": map[string]any{"type": "output_text", "text": e.text.text(ev.ContentIndex), "annotations": []any{}, "logprobs": []any{}},
+		})
+		if err != nil {
+			return nil, err
+		}
+		item, err := e.ev("response.output_item.done", map[string]any{
 			"output_index": ev.ContentIndex,
 			"item": map[string]any{
 				"id": id, "type": "message", "role": "assistant", "status": "completed",
-				"content": []any{map[string]any{"type": "output_text", "text": e.text[ev.ContentIndex], "annotations": []any{}}},
+				"content": []any{map[string]any{"type": "output_text", "text": e.text.text(ev.ContentIndex), "annotations": []any{}}},
 			},
 		})
+		return append(append(text, part...), item...), err
 
 	case llm.EventToolCallStart:
 		id := e.item(ev.ContentIndex, "function_call")
@@ -381,25 +447,35 @@ func (e *StreamEncoder) Encode(ev llm.ResponseEvent) ([]common.SSEEvent, error) 
 
 	case llm.EventToolCallDelta:
 		id := e.item(ev.ContentIndex, "function_call")
-		e.args[ev.ContentIndex] += ev.Delta
+		e.args.append(ev.ContentIndex, ev.Delta)
 		return e.ev("response.function_call_arguments.delta", map[string]any{
 			"item_id": id, "output_index": ev.ContentIndex, "delta": ev.Delta,
 		})
 
 	case llm.EventToolCallEnd:
 		id := e.item(ev.ContentIndex, "function_call")
-		return e.ev("response.output_item.done", map[string]any{
-			"output_index": ev.ContentIndex,
-			"item":         toolItem(e.toolNames, id, ev.ToolCallID, ev.ToolName, ev.ToolArguments, "completed"),
+		completed := toolItem(e.toolNames, id, ev.ToolCallID, ev.ToolName, ev.ToolArguments, "completed")
+		arguments, err := e.ev("response.function_call_arguments.done", map[string]any{
+			"item_id": id, "output_index": ev.ContentIndex, "name": completed["name"], "arguments": ev.ToolArguments,
 		})
+		if err != nil {
+			return nil, err
+		}
+		item, err := e.ev("response.output_item.done", map[string]any{
+			"output_index": ev.ContentIndex,
+			"item":         completed,
+		})
+		return append(arguments, item...), err
 
 	case llm.EventDone:
 		usage := map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 		if ev.Usage != nil {
 			usage = encodeUsage(*ev.Usage)
 		}
-		return e.ev("response.completed", map[string]any{
-			"response": e.responseShell("completed", usage),
+		response := e.responseShell("completed", usage)
+		applyStopReason(response, ev.StopReason)
+		return e.ev("response."+response["status"].(string), map[string]any{
+			"response": response,
 		})
 
 	case llm.EventError:
@@ -425,7 +501,7 @@ func (e *StreamEncoder) responseShell(status string, usage map[string]any) map[s
 		usage = map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 	}
 	output := []any{}
-	text := ""
+	var text strings.Builder
 	indices := make([]int, 0, len(e.itemID))
 	for idx := range e.itemID {
 		indices = append(indices, idx)
@@ -439,11 +515,11 @@ func (e *StreamEncoder) responseShell(status string, usage map[string]any) map[s
 			// 让客户端知道这块内容存在且被截断。
 			output = append(output, e.incompleteItem(idx))
 		}
-		text += e.text[idx]
+		text.WriteString(e.text.text(idx))
 	}
 	return map[string]any{
 		"id": e.id, "object": "response", "created_at": e.created, "status": status,
-		"model": e.model, "output": output, "output_text": text,
+		"model": e.model, "output": output, "output_text": text.String(),
 		"parallel_tool_calls": true, "tool_choice": "auto", "tools": []any{},
 		"usage": usage,
 	}
@@ -454,17 +530,17 @@ func (e *StreamEncoder) incompleteItem(idx int) map[string]any {
 	id := e.itemID[idx]
 	switch e.kind[idx] {
 	case "function_call":
-		return toolItem(e.toolNames, id, e.callID[idx], e.name[idx], e.args[idx], "incomplete")
+		return toolItem(e.toolNames, id, e.callID[idx], e.name[idx], e.args.text(idx), "incomplete")
 	case "reasoning":
 		return map[string]any{
 			"id": id, "type": "reasoning", "summary": []any{
-				map[string]any{"type": "summary_text", "text": e.thinking[idx]},
+				map[string]any{"type": "summary_text", "text": e.thinking.text(idx)},
 			}, "status": "incomplete",
 		}
 	default:
 		return map[string]any{
 			"id": id, "type": "message", "role": "assistant", "status": "incomplete",
-			"content": []any{map[string]any{"type": "output_text", "text": e.text[idx], "annotations": []any{}}},
+			"content": []any{map[string]any{"type": "output_text", "text": e.text.text(idx), "annotations": []any{}}},
 		}
 	}
 }
@@ -475,26 +551,25 @@ func (p Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, 
 		msg = &llm.AssistantMessage{}
 	}
 	output := make([]any, 0, len(msg.Content))
-	text := ""
+	var text strings.Builder
 	for _, c := range msg.Content {
 		switch c.Type {
 		case llm.ContentText:
-			text += c.Text
+			text.WriteString(c.Text)
+			output = append(output, map[string]any{
+				"id": "msg_" + randomHex(24), "type": "message", "role": "assistant", "status": "completed",
+				"content": []any{map[string]any{"type": "output_text", "text": c.Text, "annotations": []any{}}},
+			})
 		case llm.ContentThinking:
 			output = append(output, map[string]any{
-				"id": "rs_" + randomHex(24), "type": "reasoning", "summary": []any{},
+				"id": "rs_" + randomHex(24), "type": "reasoning",
+				"summary": []any{map[string]any{"type": "summary_text", "text": c.Thinking}},
 			})
 		case llm.ContentToolCall:
 			if c.ToolCall != nil {
 				output = append(output, toolItem(p.toolNames, "fc_"+randomHex(24), c.ToolCall.ID, c.ToolCall.Name, c.ToolCall.Arguments, "completed"))
 			}
 		}
-	}
-	if text != "" {
-		output = append(output, map[string]any{
-			"id": "msg_" + randomHex(24), "type": "message", "role": "assistant", "status": "completed",
-			"content": []any{map[string]any{"type": "output_text", "text": text, "annotations": []any{}}},
-		})
 	}
 	id := msg.ResponseID
 	if id == "" {
@@ -504,12 +579,31 @@ func (p Protocol) EncodeFinal(msg *llm.AssistantMessage, model string) ([]byte, 
 	if msg.Model != "" {
 		m = msg.Model
 	}
-	return json.Marshal(map[string]any{
+	response := map[string]any{
 		"id": id, "object": "response", "created_at": time.Now().Unix(), "status": "completed",
-		"model": m, "output": output, "output_text": text,
+		"model": m, "output": output, "output_text": text.String(),
 		"parallel_tool_calls": true, "tool_choice": "auto", "tools": []any{},
 		"usage": encodeUsage(msg.Usage),
-	})
+	}
+	applyStopReason(response, msg.StopReason)
+	return json.Marshal(response)
+}
+
+// Responses distinguishes truncated generation from successful completion.
+func applyStopReason(response map[string]any, reason llm.StopReason) {
+	response["incomplete_details"] = nil
+	response["error"] = nil
+	switch reason {
+	case llm.StopReasonLength:
+		response["status"] = "incomplete"
+		response["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
+	case llm.StopReasonContentFilter:
+		response["status"] = "incomplete"
+		response["incomplete_details"] = map[string]any{"reason": "content_filter"}
+	case llm.StopReasonError:
+		response["status"] = "failed"
+		response["error"] = map[string]any{"code": "server_error", "message": "Upstream generation failed"}
+	}
 }
 
 func encodeUsage(u llm.Usage) map[string]any {

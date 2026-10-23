@@ -62,7 +62,7 @@
 
 ## 调研与历史记录
 
-[最新控制台与全仓审查](reviews/2026-10-23-console-and-repository-review.md)记录本轮外部项目对照、已实施改进、验证和仍需评估的工作。[网关稳定性审查](reviews/2026-10-23-gateway-stability-review.md)记录请求预算、队列和大请求超时修正。
+[最新项目优化审查](reviews/2026-10-24-project-optimization-review.md)记录协议兼容、阻塞取消、指标与前端性能、静态缓存、跨平台验证及外部源码对照。[控制台与文档审查](reviews/2026-10-23-console-and-repository-review.md)记录上一轮设计与文档调整；[网关稳定性审查](reviews/2026-10-23-gateway-stability-review.md)记录请求预算、队列和大请求超时修正。
 
 - [调研索引](research/README.md)：协议、ZCode、WorkBuddy 国际版和 Cursor 的证据与日期边界。
 - [设计索引](design/README.md)：历史方案、视觉规范和当时的取舍。

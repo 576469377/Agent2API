@@ -69,12 +69,22 @@ func TestMetricsSnapshotsStayConsistentDuringConcurrentUpdates(t *testing.T) {
 	go func() { workers.Wait(); close(done) }()
 	for {
 		s := m.Snapshot()
-		var groups int64
+		var groups, dailyTotal, dailyInput, dailyOutput int64
 		for _, g := range s.ByModel {
 			groups += g.Total
 		}
+		for _, day := range s.UsageHistory.Days {
+			for _, model := range day.Models {
+				dailyTotal += model.Total
+				dailyInput += model.InputTokens
+				dailyOutput += model.OutputTokens
+			}
+		}
 		if s.Total != s.OK+s.Failed || s.Total != groups || s.InputTokens != 2*s.Total || s.OutputTokens != 3*s.Total {
 			t.Fatalf("mixed snapshot: %+v", s)
+		}
+		if dailyTotal != s.Total || dailyInput != s.InputTokens || dailyOutput != s.OutputTokens {
+			t.Fatalf("history and counters use different snapshots: daily=%d/%d/%d total=%d/%d/%d", dailyTotal, dailyInput, dailyOutput, s.Total, s.InputTokens, s.OutputTokens)
 		}
 		live := m.LiveSnapshot()
 		if live.InFlight != int64(len(live.Active)) {
