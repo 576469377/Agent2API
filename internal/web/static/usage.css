@@ -160,7 +160,7 @@ button.usage-heat-cell:hover { outline:1px solid var(--text); outline-offset:1px
 @media(max-width:640px) { .usage-live-stats {grid-template-columns:1fr 1fr;padding:0 18px 18px;gap:18px;} .live-request-list {margin:0 18px 15px;} .live-request-list>div {flex-wrap:wrap;} .live-request-list .live-model {flex-basis:60%;} .usage-live-note,.usage-live-idle {padding:0 18px 15px;} }
 
 
-/* Data first; methodology is available from the header and coverage badges. */
+/* Data first; methodology is available from the header. */
 .analytics-workspace { max-width: 1360px; margin: 0 auto; }
 .usage-title-row,.usage-header-actions { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
 .usage-title-row h2 { margin:0; }

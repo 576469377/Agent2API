@@ -84,7 +84,7 @@ python scripts/diagnose-console.py --config config.json
 python scripts/diagnose-console.py --config config.json --scan-history
 ```
 
-找到可恢复的旧快照或日志后，按[历史导入配置](console.md#恢复本地旧统计存档)只读导入。交集未知的累计快照不能简单相加；日志中的 Token 日期不能根据请求数猜测。没有留存明细时只能说明缺口，或在界面使用明确标识的均摊估算。
+找到可恢复的旧快照或日志后，按[历史导入配置](console.md#恢复本地旧统计存档)只读导入。交集未知的累计快照不能简单相加；日志中的 Token 日期不能根据请求数猜测。没有留存明细时保留缺口；如需将旧累计量纳入趋势，可使用控制台的历史用量设置，计算方式见“统计口径”。
 
 ## 常见维护任务
 

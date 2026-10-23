@@ -11,10 +11,6 @@ button.health-sample-item:hover { background: var(--surface-alt); }
 .footer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
 .footer-links a { color: var(--muted); }
 .footer-links a:hover { color: var(--accent); }
-.usage-data-note { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin: -8px 0 20px; padding: 9px 12px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-small); color: var(--muted); }
-.usage-data-note > div { display: flex; align-items: center; gap: 8px; }
-.usage-data-note .status-dot { background: var(--muted); flex: none; }
-.usage-data-note.contains-estimates .status-dot { background: #c88b36; }
 .usage-calendar { margin-top: 16px; margin-bottom: 18px; }
 .usage-calendar > summary { display: flex; justify-content: space-between; align-items: center; gap: 20px; list-style: none; padding: 15px 20px; cursor: pointer; }
 .usage-calendar > summary::-webkit-details-marker { display: none; }
@@ -25,7 +21,6 @@ button.health-sample-item:hover { background: var(--surface-alt); }
 .usage-calendar > summary .icon { width: 15px; height: 15px; transition: transform .15s; }
 .usage-calendar[open] > summary .icon { transform: rotate(90deg); }
 .usage-calendar-body { border-top: 1px solid var(--border); }
-.usage-heat-cell.estimated { border-style: dashed; border-color: color-mix(in srgb, var(--text) 55%, transparent); }
 .usage-live-phases { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 0 20px 15px; }
 .live-phase-badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; color: var(--muted); font-size: var(--font-small); }
 .live-phase-badge.receiving { color: var(--text); }
@@ -45,7 +40,6 @@ button.health-sample-item:hover { background: var(--surface-alt); }
   .health-sample-item:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
   .health-sample-item strong { font-size: 23px; }
   .footer-links { gap: 10px; }
-  .usage-data-note { align-items: flex-start; }
   .usage-calendar > summary { padding: 15px; gap: 10px; }
   .usage-calendar > summary > span:last-child { font-size: 0; }
   .usage-live-phases { padding: 0 18px 14px; }

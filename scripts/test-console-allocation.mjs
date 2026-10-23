@@ -77,19 +77,27 @@ test("invalid dates, live-day overlap and excess archived data never overwrite m
   assert.equal(missingGroups.tokens, metrics.input_tokens + metrics.output_tokens);
 });
 
-test("derived history is visibly marked and its allocation rule remains inspectable", () => {
-  const ui = { e: escapeHTML, n: number, compact, icon, L: zh => zh };
-  const html = usageView(metrics, state, ui), methodology = usageMethodologyView(metrics, state, ui);
-  assert.ok(html.includes("含历史均摊估算"));
-  assert.ok(usageTooltip(metrics, state, 0, ui).includes("不能视为当日实测"));
-  assert.ok(html.includes("workbuddy/deepseek-v4.1-flash"));
-  assert.ok(!html.includes('stroke-dasharray="5 4"'));
-  assert.ok(html.includes('data-action="usage-allocation-settings"'));
-  assert.ok(methodology.includes("2026-09-15"));
-  assert.ok(methodology.includes("28,766"));
-  assert.ok(methodology.includes("workbuddy/deepseek-v4.1-flash"));
-  assert.ok(methodology.includes('data-action="usage-allocation-settings"'));
-  assert.ok(!html.includes('data-model="deepseek-v4.1-flash"')); // No generated request-log link.
+test("usage charts show values directly while allocation details stay in methodology", () => {
+  for (const L of [zh => zh, (_, en) => en]) {
+    const ui = { e: escapeHTML, n: number, compact, icon, L };
+    const methodology = usageMethodologyView(metrics, state, ui);
+    assert.ok(methodology.includes("2026-09-15"));
+    assert.ok(methodology.includes("28,766"));
+    assert.ok(methodology.includes("workbuddy/deepseek-v4.1-flash"));
+    assert.ok(methodology.includes('data-action="usage-allocation-settings"'));
+    for (const heatMode of ["daily", "weekly", "cumulative"]) {
+      const expanded = { ...state, heatMode, calendarExpanded: true };
+      const html = usageView(metrics, expanded, ui), tooltip = usageTooltip(metrics, expanded, 0, ui);
+      assert.doesNotMatch(html + tooltip, /含历史均摊|不能视为当日实测|historical estimates|measured daily total/);
+      assert.ok(!html.includes("usage-data-note"));
+      assert.doesNotMatch(html, /class="usage-heat-cell[^"]*\bestimated\b/);
+      assert.ok(!html.includes('stroke-dasharray="5 4"'));
+      assert.ok(!html.includes('data-action="usage-allocation-settings"'));
+      assert.ok(html.includes("workbuddy/deepseek-v4.1-flash"));
+      assert.ok(tooltip.includes(number(buildUsage(metrics, expanded).days[0].tokens) + " tokens"));
+      assert.ok(!html.includes('data-model="deepseek-v4.1-flash"')); // No generated request-log link.
+    }
+  }
 });
 
 test("old generated model allocations are replaced and dated DeepSeek rows stay intact", () => {
