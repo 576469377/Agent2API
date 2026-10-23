@@ -93,7 +93,7 @@ const s = {
     controller: null,
     params: {
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: null,
       reasoning_effort: "",
       system: "",
     },
@@ -1613,7 +1613,7 @@ function updateMessage(index, scroll = true) {
   const footer = element.querySelector(".message-footer");
   footer.innerHTML =
     message.role === "assistant" && !message.pending
-      ? `${iconButton("copy", L("复制回复", "Copy response"), "copy-message", `data-index="${index}"`)}<span>${e(message.stopped ? L("已停止", "Stopped") : message.error ? L("未完成", "Incomplete") : L("已完成", "Completed"))}</span>${message.duration ? `<span>${e(duration(message.duration))}</span>` : ""}${message.usage ? `<span>${n(message.usage.prompt_tokens)} / ${n(message.usage.completion_tokens)} tokens</span>` : ""}`
+      ? `${iconButton("copy", L("复制回复", "Copy response"), "copy-message", `data-index="${index}"`)}<span>${e(message.stopped ? L("已停止", "Stopped") : message.error ? L("未完成", "Incomplete") : L("已完成", "Completed"))}</span>${message.duration ? `<span>${e(duration(message.duration))}</span>` : ""}${message.usage ? `<span>${e(L("输入", "Input"))} ${n(message.usage.prompt_tokens)} · ${e(L("输出", "Output"))} ${n(message.usage.completion_tokens)} Token</span>` : ""}`
       : "";
   if (scroll && nearBottom) host.scrollTop = host.scrollHeight;
 }
@@ -1633,6 +1633,7 @@ async function sendChat(event) {
   }
   const start = performance.now(),
     model = s.chat.model,
+    selectedModel = models().find(item => routeId(item) === model),
     requestKey = s.key,
     params = { ...s.chat.params };
   s.chat.messages.push({ role: "user", content: s.chat.draft.trim() });
@@ -1660,6 +1661,7 @@ async function sendChat(event) {
   syncChatControls();
   const result = s.chat.messages[index];
   try {
+    const maxTokens = params.max_tokens ?? automaticChatMaxTokens(selectedModel);
     const request = {
       model,
       messages: params.system
@@ -1668,12 +1670,12 @@ async function sendChat(event) {
       stream: true,
       stream_options: { include_usage: true },
       temperature: params.temperature,
-      max_tokens: params.max_tokens,
+      ...(maxTokens == null ? {} : { max_tokens: maxTokens }),
       ...(params.reasoning_effort
         ? { reasoning_effort: params.reasoning_effort }
         : {}),
     };
-    if (models().some(m => routeId(m) === model && ["trae-cn","kiro"].includes(m.platform))) {
+    if (["trae-cn","kiro"].includes(selectedModel?.platform)) {
       delete request.temperature;
       delete request.max_tokens;
       delete request.reasoning_effort;
@@ -1712,7 +1714,10 @@ async function sendChat(event) {
           if (call.function?.arguments)
             result.tools[i].function.arguments += call.function.arguments;
         }
-        if (choice.finish_reason) completed = true;
+        if (choice.finish_reason) {
+          result.finishReason = choice.finish_reason;
+          completed = true;
+        }
       }
       updateMessage(index);
     }
@@ -1723,6 +1728,12 @@ async function sendChat(event) {
           "The connection ended before completion. The response may be incomplete.",
         ),
       );
+    if (result.finishReason === "length")
+      throw new Error(L("达到输出上限，回复已截断。", "The response reached its output limit and was truncated."));
+    if (result.finishReason === "content_filter")
+      throw new Error(L("上游内容过滤终止了回复。", "The provider's content filter stopped the response."));
+    if (result.reasoning && !result.content.trim() && !result.tools.length)
+      throw new Error(L("模型只返回了思考过程，未生成正文。", "The model returned reasoning without a final answer."));
   } catch (error) {
     if (controller.signal.aborted) result.stopped = true;
     else {
@@ -1738,12 +1749,22 @@ async function sendChat(event) {
     if ($("chatInput")) $("chatInput").focus();
   }
 }
+function automaticChatMaxTokens(model) {
+  if (!(model?.max_output_tokens > 0)) return null;
+  // Match the default output budget used by the generated client configs.
+  return model.platform === "openrouter" ? Math.min(model.max_output_tokens, 8192) : model.max_output_tokens;
+}
 function chatSettings() {
   const params = s.chat.params;
-  const fixed = models().some(m => routeId(m) === s.chat.model && ["trae-cn","kiro"].includes(m.platform));
+  const model = models().find(m => routeId(m) === s.chat.model);
+  const fixed = ["trae-cn","kiro"].includes(model?.platform);
+  const automaticLimit = automaticChatMaxTokens(model);
+  const automatic = automaticLimit
+    ? L(`自动 · ${n(automaticLimit)} Token`, `Auto · ${n(automaticLimit)} tokens`)
+    : L("自动 · 由上游决定", "Auto · provider default");
   modal(
     L("生成参数", "Generation settings"),
-    `<form id="chatSettingsForm">${fixed ? `<p class="muted">${e(L("当前平台的输出长度、采样和思考由上游控制，以下参数不生效。", "This provider controls output length, sampling and reasoning; these settings do not apply."))}</p>` : ""}<div class="fields-grid"><label class="field"><span>Temperature</span><input id="chatTemperature" ${fixed ? "disabled" : ""} type="number" min="0" max="2" step="0.1" required value="${params.temperature}"></label><label class="field"><span>Max tokens</span><input id="chatMaxTokens" ${fixed ? "disabled" : ""} type="number" min="1" max="1000000" required value="${params.max_tokens}"></label></div><label class="field"><span>${e(L("思考强度", "Reasoning effort"))}</span><select id="chatEffort" ${fixed ? "disabled" : ""}>${options(
+    `<form id="chatSettingsForm">${fixed ? `<p class="muted">${e(L("当前平台的输出长度、采样和思考由上游控制，以下参数不生效。", "This provider controls output length, sampling and reasoning; these settings do not apply."))}</p>` : ""}<div class="fields-grid"><label class="field"><span>Temperature</span><input id="chatTemperature" ${fixed ? "disabled" : ""} type="number" min="0" max="2" step="0.1" required value="${params.temperature}"></label><label class="field"><span>Max tokens</span><input id="chatMaxTokens" ${fixed ? "disabled" : ""} type="number" min="1" max="1000000" value="${params.max_tokens ?? ""}" placeholder="${e(automatic)}"></label></div>${fixed ? "" : `<p class="muted">${e(L("输出 Token 包含思考与正文；留空根据当前模型自动设置。", "Output tokens include reasoning and the final answer; leave blank to set the budget automatically for the current model."))}</p>`}<label class="field"><span>${e(L("思考强度", "Reasoning effort"))}</span><select id="chatEffort" ${fixed ? "disabled" : ""}>${options(
       [
         ["", L("模型默认", "Model default")],
         ["low", L("低", "Low")],
@@ -2287,7 +2308,7 @@ document.addEventListener("submit", (event) => {
     event.preventDefault();
     s.chat.params = {
       temperature: Number($("chatTemperature").value),
-      max_tokens: Number($("chatMaxTokens").value),
+      max_tokens: $("chatMaxTokens").value.trim() ? Number($("chatMaxTokens").value) : null,
       reasoning_effort: $("chatEffort").value,
       system: $("chatSystem").value,
     };
