@@ -1,95 +1,100 @@
+<div align="center">
+
+![Agent2API — Your models. One endpoint.](docs/assets/gateway.svg)
+
 # Agent2API
 
-**One local gateway for multiple AI platforms, with standard LLM APIs.**
+**Connect your models. Keep your workflow.**
 
-Platform adapters connect upstream services to shared Chat Completions, Responses and Anthropic Messages endpoints, routing, streaming and a management console. **Currently implemented: WorkBuddy / CodeBuddy China, WorkBuddy International, free OpenRouter models, Cursor Free and TRAE China Free allowance.**
+<p>One local gateway. Six platform integrations. Three standard LLM APIs.<br>Shared routing, accounts and usage for ZCode, Claude Code, Codex CLI and pi.</p>
 
-[![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml) [![Go](https://img.shields.io/badge/Go-1.23%2B-6da7f2?logo=go&logoColor=white&labelColor=202938&style=flat-square)](go.mod)
 
-[简体中文](README.md) · **English** · [Quick start](docs/quickstart.md) · [Platforms](docs/platforms.md) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/576469377/Agent2API/issues)
+[Quick start](#quick-start) · [Console preview](#web-console) · [Platforms](#choose-an-upstream) · [Documentation](docs/README.md) · [简体中文](README.md)
 
-![Extensible platform adapters, one gateway and standard API protocols](docs/assets/gateway.svg)
+</div>
 
-> [!IMPORTANT]
-> A personal learning and research project, for your own authorized accounts on your machine or a controlled private environment. Private upstream protocols may change, and this usage may conflict with upstream terms. Read the [disclaimer](DISCLAIMER.md); do not offer a public service or publish credentials. No license has been selected.
+## Web console
+
+One workspace for your models, accounts, requests and usage.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-en-dark.jpg">
+  <img src="docs/assets/console-en-light.jpg" alt="Agent2API usage analytics with lifetime counters, daily model trends and token distribution; demonstration data" width="1200">
+</picture>
+
+<p align="center"><sub>Built-in console · English / Chinese · Light / dark themes · Demonstration data</sub></p>
 
 ## What it does
 
-Connect Claude Code, ZCode, Codex CLI and other compatible clients to one local endpoint. Each adapter handles its upstream protocol while clients keep using standard APIs. New platforms reuse the existing protocol layers, routing and console.
+| Standard APIs | Visible requests | Connected clients |
+|:---|:---|:---|
+| Chat Completions, Responses and Anthropic Messages. Streaming, qualified model IDs, aliases and native tool calls. | Inspect uploads, queues, first output and final usage, with linked trends, cache metrics and request logs. | Configure ZCode, cc-switch and pi with verified free access, automatic backups and existing preferences preserved. |
 
-| Capability | Available today |
-|---|---|
-| APIs | Chat Completions, Responses, Anthropic Messages; streaming and non-streaming |
-| Routing | Platform prefixes, aliases, optional same-name fallback before stream acceptance |
-| Accounts | WorkBuddy region isolation, credential discovery and refresh, pools, affinity, optional concurrency limits |
-| Conversations | Text, image input, reasoning and native tool calls; model capabilities vary |
-| Management | Nine-page console, interactive trends, usage analytics, combined log filters, account tables, client setup, English / Chinese and themes |
-| Extension | Platform adapters reuse shared routing, protocol layers and the console |
-
-## Choose an upstream
-
-| Platform ID | Authentication | Scope and limits |
-|---|---|---|
-| `workbuddy` | China desktop login or console device authorization | Account pools; client setup and model tests select only currently confirmed free models |
-| `workbuddy-global` | International desktop login or console device authorization | Independent region and pool; encrypted desktop credentials verified on Windows |
-| `openrouter` | Your own `OPENROUTER_API_KEY` | Live free catalogue; paid and unknown-price models rejected; no WorkBuddy pool |
-| `cursor` | Personal Free desktop login under the same OS user | Only `cursor/composer-2.5`; entitlement checks before each generation; no images or sampling parameters |
-| `trae-cn` | Official browser authorization through CLI or console | Verified personal Free monthly and check-in credits; DeepSeek / GLM 1M context and Seed 256K; text, reasoning and native client tools; [limits](docs/trae.md) |
-| `kiro` | Official CLI web sign-in with Google / GitHub / AWS Builder ID | Personal Free monthly credits; five verified account-selectable models; text and client-executed tools; [setup and limits](docs/kiro.md) |
-
-**Starting without a config enables only the two WorkBuddy regions. [config.example.json](config.example.json) enables all six platforms.** Keep the platforms you need and load it explicitly with `-config config.json`. API compatibility does not imply identical upstream capabilities. See [platform support and limits](docs/platforms.md) (Chinese).
-
-For TRAE, run `login -platform trae-cn`, authorize in the official browser page, then start with `-platform trae-cn`. No paid plan or API key is required. Each generation checks verified Free monthly and check-in grants and stops on exhausted or unverified entitlements. See the [detailed free-account research](docs/research/06-免费账号平台接入调研.md) for other candidates and implementation priorities.
+Platform adapters share the protocol layers, routing, streaming and console. Capabilities depend on the upstream model. [Explore the architecture →](docs/architecture.md)
 
 ## Quick start
 
-Install **Go 1.23+**. These commands build the current default branch and start WorkBuddy without a config file. Reuse an authorized desktop login or sign in through the console. Other platforms have their own setup steps in the [quick-start guide](docs/quickstart.md).
+Install **Go 1.23+**, clone and start. Web assets are embedded; no frontend toolchain is required.
+
+<details open>
+<summary><b>Windows · PowerShell</b></summary>
 
 ```powershell
-# Windows PowerShell
 git clone https://github.com/576469377/Agent2API.git
 cd Agent2API
 go build -trimpath -o bin/agent2api.exe ./cmd/agent2api
 ./bin/agent2api.exe
 ```
 
+</details>
+
+<details>
+<summary><b>macOS / Linux</b></summary>
+
 ```bash
-# macOS / Linux
 git clone https://github.com/576469377/Agent2API.git
 cd Agent2API
 go build -trimpath -o bin/agent2api ./cmd/agent2api
 ./bin/agent2api
 ```
 
-Open **[http://127.0.0.1:8787](http://127.0.0.1:8787)**. Confirm the platform and its authentication method on Platforms, complete sign-in or key setup, copy a complete model ID from Models, then verify a reply in the playground.
+</details>
 
-- Default startup keeps both regions available. Platforms without usable credentials show “Sign in needed” and accept a first account through the console.
-- Select China with `-platform workbuddy`, or International with `-platform workbuddy-global`.
-- Without a desktop login, open Accounts → Add account and choose China or Global; the `login -region cn/global` command also works.
-- International encrypted desktop credentials are verified on Windows. Their macOS / Linux path has not yet been verified end to end; see the [integration report](docs/research/04-WorkBuddy国际版接入.md).
-- International chat requests include the required conversation headers and preserve a stable conversation ID across turns. This fixes `11128 / request illegal` when the same account still works in the official client; the error alone does not establish an account ban. See [troubleshooting](docs/troubleshooting.md).
-- Requests share an attempt budget and routing deadline across accounts and platforms. Explicit account concurrency limits use a bounded queue; the console shows live phases, queue time and individual attempts. See [configuration](docs/configuration.md#请求预算和等待队列gateway) and the [stability review](docs/reviews/2026-10-23-gateway-stability-review.md).
-- WorkBuddy streaming uploads and long conversation preprocessing use a 600-second routing budget by default. The non-streaming 60-second timeout no longer cancels these requests prematurely, and gateway timeouts are recorded separately from client cancellations.
+Open **[127.0.0.1:8787](http://127.0.0.1:8787)** → sign in under **Platforms** → copy a qualified route from **Models** → verify a response in **Playground**.
 
-The detailed [quick-start guide](docs/quickstart.md) is in Chinese; commands and flags work in either language.
+The default starts both WorkBuddy regions. For other integrations, create a local config from [config.example.json](config.example.json), keep the platforms you need and load it with `-config config.json`. [Installation and login guide →](docs/quickstart.md)
+
+## Choose an upstream
+
+| Platform | Authentication | Available today |
+|:---|:---|:---|
+| **WorkBuddy China**<br>`workbuddy` | Desktop login / console device authorization | Account pools, session affinity and per-model cooldowns |
+| **WorkBuddy International**<br>`workbuddy-global` | Desktop login / console device authorization | Separate regional pool; encrypted desktop credentials verified on Windows |
+| **OpenRouter**<br>`openrouter` | Your own `OPENROUTER_API_KEY` | Live free catalogue; paid and unknown-price models rejected |
+| **Cursor Free**<br>`cursor` | Cursor desktop login under the same OS user | Composer 2.5; personal Free entitlement checked before generation |
+| **TRAE China**<br>`trae-cn` | Official browser authorization | Verified Free monthly and check-in credits; text, reasoning and client tools |
+| **Kiro Free**<br>`kiro` | Official CLI web sign-in | Personal Free monthly credits, account-selectable models and client tools |
+
+Automatic client setup and model tests select currently confirmed free models. Raw WorkBuddy API requests follow account permissions. Capabilities and allowances remain platform-specific. See [platform support](docs/platforms.md), the [TRAE guide](docs/trae.md) and the [Kiro guide](docs/kiro.md).
 
 ## Client connections
 
-Clients use gateway port **8787**. The separate console's default port **8788** is a management entry point.
+Clients use gateway port **8787**. **Client setup** can configure **ZCode / cc-switch / pi**. cc-switch supports both Claude Code and Codex. Writes create backups and preserve other providers and defaults.
 
-| Client / protocol | Address | Model |
-|---|---|---|
-| Chat Completions | Base URL: `http://127.0.0.1:8787/v1` | Copy from the catalog |
-| Responses | `POST http://127.0.0.1:8787/v1/responses` | Copy from the catalog |
-| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` | Aliases can map client model names |
-| ZCode | Anthropic Messages; Base URL: `http://127.0.0.1:8787/v1` | Prefer `platform/model` IDs |
+| Client / protocol | Endpoint |
+|:---|:---|
+| Chat Completions | `http://127.0.0.1:8787/v1` |
+| Responses | `POST http://127.0.0.1:8787/v1/responses` |
+| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` |
+| ZCode · Anthropic Messages | Base URL: `http://127.0.0.1:8787/v1` |
 
-Without a gateway key, authentication is disabled; use `agent2api-local` if a client requires a value. With a gateway key configured, every client must use that same key. Keep default content sanitization enabled for client integration.
+Copy the full `platform/model` route from the catalogue. Without a gateway key, use `agent2api-local` if a client requires an API key; otherwise supply the configured gateway key. Keep default content sanitization enabled. [Client configuration and request examples →](docs/clients.md)
 
-Client setup configures **ZCode, cc-switch and pi Coding Agent** locally. Select multiple upstream platforms for cc-switch / pi, write both clients in one batch, and choose Claude Code and/or Codex in cc-switch. Each write verifies free access, creates a backup, and preserves other providers and defaults. See the [client guide](docs/clients.md#cc-switch-与-pi-快捷配置).
+<details>
+<summary><b>ZCode command-line sync</b></summary>
 
-Sync confirmed free models from connected platforms into one ZCode provider. Paid, dynamic, unknown and unavailable entries are removed; retained free models keep their preferences and ordering. A removed default is replaced with an enabled free model. Start the gateway and prepare a local config first:
+With the gateway running, preview and then apply confirmed free models:
 
 ```powershell
 Copy-Item config.example.json config.json  # First setup only; preserve an existing config
@@ -97,88 +102,51 @@ python scripts/sync-zcode.py --config config.json --dry-run
 python scripts/sync-zcode.py --config config.json
 ```
 
-See the [client guide](docs/clients.md) for authentication, requests, backups and recovery.
+Retained free models keep ordering, enabled state and capability preferences. Paid, dynamic and unknown-price entries are removed. See [backups and recovery](docs/clients.md#恢复).
+
+</details>
 
 ## Models and routing
 
-| Requested model ID | Routing |
-|---|---|
-| `workbuddy/model` | Pins China |
-| `workbuddy-global/model` | Pins International |
-| `cursor/composer-2.5` | Personal Cursor Free allowance; signed-in desktop installation required |
-| `openrouter/author/model:free` | Pins a free OpenRouter model; copy the exact catalogue ID |
-| Bare model name | First matching platform in configuration order |
-| Configured alias | Maps to a real model, optionally pinning a platform |
+`workbuddy/model` pins China; `workbuddy-global/model` pins International. Other integrations use the same `platform/model` format. Bare names follow platform configuration order; aliases can map to real models and pin a platform.
 
-`models.fallback_on_unavailable` defaults to `false`. When enabled, bare IDs may try the same model on another platform after quota, rate-limit or HTTP 5xx refusals before a stream is accepted. Qualified IDs and platform-pinned aliases stay in their region. An accepted stream never switches platforms.
-
-The catalog is account-dependent. **Catalog support, scheduling readiness and remaining quota are separate facts.** A listed model may still fail to generate. See the [configuration guide](docs/configuration.md).
-
-## Web console
-
-Overview, request logs, usage analytics, accounts, platforms, models, playground, client setup and settings share data from configured platforms. Interactive trends, diagnostics and cumulative rankings link to filtered logs. Add account offers WorkBuddy authorization and pools, TRAE official web sign-in, OpenRouter key validation and saving, and Cursor desktop login checks. Disabled integrations include configuration guidance. Client setup can verify and configure free models in local ZCode with automatic backups, and provides real gateway endpoints and request examples for all three protocols.
-
-TRAE accounts show credit balances and check-in status. Automatic check-in runs daily at 09:00 Beijing time; manual check-in is a fallback after a failed automatic run. See the [TRAE guide](docs/trae.md#每日自动签到与余额).
-
-The UI is embedded in the gateway; no frontend build is required. A standalone console can load updated assets **without restarting a gateway in use or changing client endpoints**. See the [console guide](docs/console.md). Ordinary pages use local resources; math loads KaTeX on demand and falls back to source text offline.
-
-Request logs separate recent samples from lifetime failures, distinguish client cancellations, and expose first-output timing, cache fractions and a content-free diagnostic summary. Live stages distinguish upload, response waiting and output receipt. Historical estimates are visible, and the yearly calendar is rendered only when expanded. Model tests validate current free pricing and concrete platform routes before sending. Raw WorkBuddy API requests still follow account permissions; this UI policy is not a gateway-wide free-model restriction.
+Optional same-name fallback happens only before stream acceptance and is off by default. Qualified routes keep their platform. Model catalogue support, scheduling readiness and quota are shown separately. [Routing and request budgets →](docs/configuration.md)
 
 ## Documentation
 
-Detailed guides are currently in Chinese, with copyable commands, field names and examples.
+Detailed guides are currently in Chinese; commands, fields and examples work in either language.
 
-| Task | Guide |
-|---|---|
-| Install, log in, start and verify | [Quick start](docs/quickstart.md) |
-| Compare platform authentication, capabilities and limits | [Platforms](docs/platforms.md) |
-| Connect ZCode or other clients | [Clients](docs/clients.md) |
-| Configure regions, prefixes, aliases and fallback | [Configuration](docs/configuration.md) |
-| Manage accounts, cooldowns and concurrency | [Accounts](docs/accounts.md) |
-| Use or update the UI | [Console](docs/console.md) |
-| Upgrade, roll back and preserve history | [Operations](docs/operations.md) |
-| Understand tokens, caching, P95 and estimates | [Metrics and data scope](docs/metrics.md) |
-| Inspect endpoints, auth and request examples | [API](docs/api.md) |
-| Diagnose keys, models, quota and login | [Troubleshooting](docs/troubleshooting.md) |
-| Understand or contribute to the code | [Repository guide](docs/development.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md) |
-| Review the research, findings and tradeoffs | [Console and repository review](docs/reviews/2026-10-23-console-and-repository-review.md) |
+| Get started | Operate | Go deeper |
+|:---|:---|:---|
+| [Install and make a first call](docs/quickstart.md) | [Console and standalone preview](docs/console.md) | [API reference](docs/api.md) |
+| [Platform capabilities](docs/platforms.md) | [Balances and daily check-in](docs/account-benefits.md) | [Configuration and routing](docs/configuration.md) |
+| [Client setup](docs/clients.md) | [Upgrade, backup and recovery](docs/operations.md) | [Tokens, cache and live metrics](docs/metrics.md) |
+| [TRAE](docs/trae.md) · [Kiro](docs/kiro.md) | [Troubleshooting](docs/troubleshooting.md) | [Repository guide](docs/development.md) · [Architecture](docs/architecture.md) |
 
-The [documentation index](docs/README.md) separates historical designs from protocol research and dated verification reports.
+[All documentation →](docs/README.md) · [Changelog](CHANGELOG.md) · [Protocol and platform research](docs/research/README.md)
 
-## Configuration
+<details>
+<summary><b>More runtime and development details</b></summary>
 
-See the [configuration guide](docs/configuration.md) for CLI flags, environment variables, JSON, multi-platform examples, aliases, concurrency and Prometheus. Start with [config.example.json](config.example.json), remove platforms you do not need and load it explicitly.
+### Standalone console
 
-## Multi-account pools
+Load updated UI assets from disk without restarting a gateway in use or changing client URLs. The standalone console defaults to **8788**; clients continue using **8787**. [Console guide](docs/console.md#不重启正在运行的网关).
 
-WorkBuddy pools schedule your authorized accounts by health, with affinity, optional concurrency limits and model cooldowns. Concurrency is unlimited by default. Keep the regions in separate credential directories. OpenRouter, Cursor and TRAE do not use this pool. See [Accounts](docs/accounts.md).
+### Configuration and accounts
 
-## Supported APIs
+The [configuration reference](docs/configuration.md) covers CLI flags, environment variables, JSON, concurrency and Prometheus. WorkBuddy regions have separate pools with health-based scheduling, affinity and model cooldowns. Other integrations use their own authentication. See [account management](docs/accounts.md).
 
-Generation endpoints are `/v1/chat/completions`, `/v1/responses` and `/v1/messages`, with `/v1/models`, `/health` and `/metrics` alongside them. See the [API guide](docs/api.md).
+### Credits and check-in
 
-Responses supports namespaced `function` tools used by Codex MCP, preserving tool names, namespaces and result continuations in streaming and non-streaming responses. A free catalogue entry does not guarantee remaining account quota; see [client setup](docs/clients.md#cc-switch-与-pi-快捷配置).
+The account page displays the balances supplied by each upstream, preserving its units. WorkBuddy and TRAE check daily sign-in at 09:00 Beijing time by default; the gateway can do this with the web page closed. See [balances and check-in](docs/account-benefits.md).
 
-## Security
+### APIs and architecture
 
-Credentials grant account access. Do not publish local config, account files, ZCode configuration or runtime metrics. Remove keys, nicknames and upstream request IDs from reports. The gateway binds to `127.0.0.1` by default; expanded network access requires an API key and access controls. See [SECURITY.md](SECURITY.md).
+Generation endpoints are `/v1/chat/completions`, `/v1/responses` and `/v1/messages`, with `/v1/models`, `/health` and `/metrics` alongside them. Responses preserves Codex MCP tool namespaces and continuation links. See the [API reference](docs/api.md).
 
-## Architecture
+Protocol codecs share an IR with platform adapters. The Hub handles routing, WorkBuddy uses separate regional pools, and OpenRouter, Cursor, TRAE and Kiro each use their own authentication. See [architecture](docs/architecture.md).
 
-Protocol codecs communicate with upstream adapters through a dependency-free IR. The Hub routes between WorkBuddy's regional pools and independently authenticated OpenRouter, Cursor and TRAE adapters. See the [current architecture](docs/architecture.md); original design proposals remain in the documentation index.
-
-## Known Limitations
-
-- Private upstream interfaces have no stability promise; models and quota depend on the upstream and account.
-- Non-streaming responses aggregate an upstream stream. This gateway does not implement the full OpenAI / Anthropic product API.
-- No unified cross-platform balance API; TRAE separately reports verified monthly credits. A schedulable account on other platforms may have no usable quota.
-- Cooldowns, affinity and concurrency slots are process-local; instances do not share state.
-- Reasoning has no upstream signature. Text-mode DSML tool-call fallback is not implemented.
-- International encrypted desktop credentials have only been verified end to end on Windows.
-- Cursor retains native Agent rules and receives client system instructions as context. Images, sampling, effort, JSON output mode and stop parameters are unsupported. Output budgets are enforced by the gateway; see [platform limits](docs/platforms.md).
-- TRAE accepts verified personal Free monthly grants and check-in rewards with confirmed receipts. Other grant sources are rejected until validated. Images, JSON mode and stop are unsupported; max_tokens, sampling and thinking controls do not take effect. Expired credentials require web authorization again. See [TRAE limits](docs/trae.md).
-
-## Testing
+### Testing
 
 ```bash
 go test ./...
@@ -188,29 +156,42 @@ python -m unittest discover -s scripts -p 'test_*.py'
 python scripts/check-docs.py
 ```
 
-Tests use offline fixtures and mock services rather than consuming real model quota. Frontend tests need Node.js; ZCode and diagnostic tooling need Python 3.9+. Ordinary gateway builds need neither runtime; Cursor credential reading on macOS / Linux requires Python 3. See [Contributing](CONTRIBUTING.md) for race detection and development workflows.
+Tests use offline fixtures and mock services, without consuming real model quota. Ordinary builds need neither Node.js nor Python. Frontend tests need Node.js; scripts need Python 3.9+. Cursor credential reading on macOS / Linux needs Python 3. See [Contributing](CONTRIBUTING.md) for race detection.
 
-## FAQ
+</details>
 
-See [Troubleshooting](docs/troubleshooting.md) for keys, model collisions, quota, regional credentials and ZCode configuration loading.
+## Known Limitations
+
+- Private upstream protocols may change. Models and quota depend on the platform and account; three standard APIs do not imply identical upstream capabilities.
+- The gateway implements compatible generation endpoints and aggregates streams for non-streaming responses, rather than the full OpenAI / Anthropic product APIs.
+- Cooldowns, affinity and concurrency slots are process-local; instances do not share them.
+- International encrypted desktop credentials have only been verified end to end on Windows.
+- Cursor, TRAE and Kiro retain native Agent, parameter and tool boundaries. Some upstreams do not return token usage or output ceilings. See [platform support](docs/platforms.md).
+- Reasoning has no upstream signature; text-mode DSML tool-call fallback is not implemented.
 
 ## Roadmap
 
-- [x] Unified China / International management, qualified IDs and same-name fallback
-- [x] Redesigned console and standalone UI without gateway restarts
-- [x] Incremental ZCode model sync preserving preferences
-- [x] Account pools, concurrency limits, model aliases and Prometheus metrics
-- [x] Free-only OpenRouter models and Cursor Composer 2.5 Free allowance
+- [x] Six platforms, three APIs and a shared console
+- [x] Incremental ZCode / cc-switch / pi configuration and backups
+- [x] Account balances, daily check-in, request logs and usage analytics
+- [ ] More verified platforms and allowance sources
 - [ ] macOS / Linux verification of international encrypted credentials
-- [ ] Additional upstream platforms and protocol drift detection
-- [ ] Quota queries, per-key usage and shared scheduling state
+- [ ] Per-key usage and shared scheduling state
+
+## Security
+
+The default listener is `127.0.0.1`. Do not publish local configuration, credentials, client files or runtime metrics. Expanded network access needs a gateway key and access controls. Remove keys, account identities and upstream request IDs from reports. See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Issues and PRs are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+[Issues](https://github.com/576469377/Agent2API/issues) and PRs are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report vulnerabilities privately through the [security policy](SECURITY.md).
 
 ## License
 
-**TBD** — the repository ships no LICENSE file, so all rights are reserved by default. Do not use commercially or redistribute until a license is chosen.
+**TBD**. The repository ships no LICENSE file; all rights are reserved by default. Do not use commercially or redistribute until a license is chosen.
 
-This is a personal learning and research project, for use only with your own authorized accounts on your own machine or a private environment, at your own risk. Full terms in [DISCLAIMER.md](DISCLAIMER.md).
+This is a personal learning and research project for your own authorized accounts, on your machine or a controlled private environment. Upstream terms and the complete scope are described in the [disclaimer](DISCLAIMER.md).
+
+---
+
+<p align="center"><a href="#quick-start">Get started</a> · <a href="docs/README.md">Read the docs</a> · <a href="CHANGELOG.md">See what's new</a></p>

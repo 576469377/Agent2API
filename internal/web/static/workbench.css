@@ -2,20 +2,20 @@
    Component layout lives in style.css; chart layouts live in their page sheets. */
 :root {
   color-scheme: light;
-  --bg: #f8f9fb;
+  --bg: #f5f7fb;
   --surface: #ffffff;
-  --surface-alt: #f4f4f5;
-  --sidebar-bg: #f3f4f6;
-  --hover: #f0f0f3;
-  --text: #242428;
-  --muted: #60616d;
-  --faint: #767681;
-  --border: #e7e7eb;
-  --border-strong: #d4d4db;
-  --accent: #3d6cd7;
-  --accent-soft: #eef3fd;
-  --action: #27272b;
-  --action-hover: #3f3f46;
+  --surface-alt: #f0f3f8;
+  --sidebar-bg: #fbfcfe;
+  --hover: #eaf0f9;
+  --text: #1e2a3e;
+  --muted: #53627a;
+  --faint: #5f6f87;
+  --border: #e0e6ef;
+  --border-strong: #c8d3e3;
+  --accent: #3566d5;
+  --accent-soft: #eaf1ff;
+  --action: #3566d5;
+  --action-hover: #2856be;
   --green: #357657;
   --green-soft: #eef6f0;
   --amber: #966122;
@@ -31,25 +31,25 @@
   --font-small: 12px;
   --font-badge: 11px;
   --action-fg: #ffffff;
-  --selected: #e9ebef;
-  --panel-shadow: 0 2px 4px #15151605, 0 1px 2px #15151604;
+  --selected: #eaf0fc;
+  --panel-shadow: 0 4px 16px #23355305, 0 1px 2px #23355305;
   font-family: "Inter", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 14px;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #18181b;
-  --surface: #202024;
-  --surface-alt: #26262b;
-  --sidebar-bg: #17171a;
-  --hover: #2b2b31;
-  --text: #e9e9ee;
-  --muted: #b0b0bc;
-  --faint: #9999a6;
-  --border: #323238;
-  --border-strong: #4b4b53;
-  --accent: #a2bfff;
-  --accent-soft: #27354d;
+  --bg: #10141c;
+  --surface: #181e28;
+  --surface-alt: #202835;
+  --sidebar-bg: #10151e;
+  --hover: #253045;
+  --text: #edf2fa;
+  --muted: #b2bed1;
+  --faint: #92a2bc;
+  --border: #2a3445;
+  --border-strong: #435673;
+  --accent: #a8c8ff;
+  --accent-soft: #223451;
   --green: #8bc4a1;
   --green-soft: #253129;
   --amber: #d3b07b;
@@ -58,27 +58,27 @@
   --red-soft: #362729;
   --violet: #b09bcf;
   --chart-color: #83adf6;
-  --panel-shadow: none;
-  --action: #e9e9ee;
-  --action-hover: #ffffff;
-  --action-fg: #202024;
-  --selected: #2c2c32;
+  --panel-shadow: 0 4px 18px #00000014, inset 0 1px #ffffff03;
+  --action: #b7d2ff;
+  --action-hover: #d0e2ff;
+  --action-fg: #17253c;
+  --selected: #1f2e46;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
     color-scheme: dark;
-    --bg: #18181b;
-    --surface: #202024;
-    --surface-alt: #26262b;
-    --sidebar-bg: #17171a;
-    --hover: #2b2b31;
-    --text: #e9e9ee;
-    --muted: #b0b0bc;
-    --faint: #9999a6;
-    --border: #323238;
-    --border-strong: #4b4b53;
-    --accent: #a2bfff;
-    --accent-soft: #27354d;
+    --bg: #10141c;
+    --surface: #181e28;
+    --surface-alt: #202835;
+    --sidebar-bg: #10151e;
+    --hover: #253045;
+    --text: #edf2fa;
+    --muted: #b2bed1;
+    --faint: #92a2bc;
+    --border: #2a3445;
+    --border-strong: #435673;
+    --accent: #a8c8ff;
+    --accent-soft: #223451;
     --green: #8bc4a1;
     --green-soft: #253129;
     --amber: #d3b07b;
@@ -87,11 +87,11 @@
     --red-soft: #362729;
     --violet: #b09bcf;
     --chart-color: #83adf6;
-    --panel-shadow: none;
-    --action: #e9e9ee;
-    --action-hover: #ffffff;
-    --action-fg: #202024;
-    --selected: #2c2c32;
+    --panel-shadow: 0 4px 18px #00000014, inset 0 1px #ffffff03;
+    --action: #b7d2ff;
+    --action-hover: #d0e2ff;
+    --action-fg: #17253c;
+    --selected: #1f2e46;
   }
 }
 body { line-height: 1.6; -webkit-font-smoothing: antialiased; }
@@ -100,17 +100,17 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button { transition: background-color .15s, border-color .15s, color .15s; }
 .sidebar { background: var(--sidebar-bg); padding: 20px 12px 16px; border-right: 1px solid var(--border); }
 .brand { padding: 0 10px; gap: 10px; margin-bottom: 20px; }
-.brand-icon { background: var(--surface); color: var(--text); border: 1px solid var(--border); width: 32px; height: 32px; border-radius: 9px; padding: 0; }
+.brand-icon { background: linear-gradient(145deg,var(--accent-soft),var(--surface)); color: var(--accent); border: 1px solid color-mix(in srgb,var(--accent) 35%,var(--border)); width: 34px; height: 34px; border-radius: 10px; padding: 0; box-shadow: 0 2px 8px color-mix(in srgb,var(--accent) 8%,transparent); }
 .brand-icon svg { width: 28px; height: 28px; }
-.brand strong { font-size: 16px; font-weight: 650; letter-spacing: -.35px; }
+.brand strong { font-size: 17px; font-weight: 650; letter-spacing: -.45px; }
 .brand small { font-size: 11px; color: var(--faint); letter-spacing: 0; margin-top: 2px; }
 #nav { gap: 4px; }
 .nav-group-label { padding: 12px 10px 6px; font-size: 11px; color: var(--faint); letter-spacing: 0; }
 .nav-group-label:not(:first-child) { margin-top: 16px; }
 .nav-item { padding: 8px 10px; min-height: 36px; gap: 10px; font-size: var(--font-body); border-radius: 6px; color: var(--muted); }
 .nav-item .icon { width: 17px; height: 17px; stroke-width: 1.5; }
-.nav-item.active { background: var(--selected); box-shadow: none; color: var(--text); font-weight: 550; }
-.nav-item.active .icon { color: var(--text); stroke-width: 1.8; }
+.nav-item.active { background: var(--selected); box-shadow: inset 2px 0 var(--accent); color: var(--accent); font-weight: 600; }
+.nav-item.active .icon { color: var(--accent); stroke-width: 1.8; }
 .nav-count { font-size: var(--font-small); color: var(--faint); background: transparent; padding: 0 2px; }
 .sidebar-shortcut { border: 0; background: transparent; border-radius: 7px; padding: 10px 12px; font-size: var(--font-small); color: var(--muted); margin-bottom: 13px; }
 .sidebar-shortcut:hover { background: var(--hover); color: var(--text); }
@@ -118,7 +118,7 @@ button { transition: background-color .15s, border-color .15s, color .15s; }
 .preferences { padding: 13px 12px 0; gap: 12px; }
 .preferences select { font-size: var(--font-small); }
 .status-dot { box-shadow: none; width: 6px; height: 6px; }
-.topbar { height: 52px; padding: 0 28px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.topbar { height: 52px; padding: 0 28px; background: color-mix(in srgb,var(--bg) 90%,transparent); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); }
 .topbar-leading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sidebar-toggle { color: var(--muted); }
 .breadcrumbs { font-size: var(--font-small); gap: 11px; }
@@ -132,7 +132,7 @@ button { transition: background-color .15s, border-color .15s, color .15s; }
 #main { max-width: 1600px; padding: 28px; }
 .page-header { align-items: center; margin-bottom: 24px; gap: 20px; }
 .eyebrow { display: none; }
-.page-header h1 { font-size: 24px; font-weight: 600; letter-spacing: -.6px; line-height: 1.4; }
+.page-header h1 { font-size: 26px; font-weight: 650; letter-spacing: -.8px; line-height: 1.4; }
 .page-header p { color: var(--muted); margin-top: 4px; font-size: var(--font-caption); line-height: 1.6; max-width: 640px; }
 .page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; flex-shrink: 0; gap: 8px; }
 .page-actions .updated-at { display: none; }
@@ -151,7 +151,7 @@ button { transition: background-color .15s, border-color .15s, color .15s; }
 .segmented { background: var(--surface-alt); border-radius: 6px; padding: 2px; border: 1px solid var(--border); gap: 2px; }
 .segmented button { font-size: var(--font-small); padding: 4px 10px; border-radius: 4px; min-height: 26px; }
 .segmented button.active { color: var(--text); background: var(--surface); box-shadow: 0 1px 3px #00000010; }
-.card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: none; }
+.card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--panel-shadow); }
 .card-head { padding: 16px 20px; }
 .card-head h2 { font-size: var(--font-body); font-weight: 600; }
 .card-head p { font-size: var(--font-small); margin-top: 5px; line-height: 1.65; }
@@ -576,7 +576,7 @@ body[data-density="compact"] .resource-table .requested-model { display: none; }
 .operations-notices > button:hover:not(:disabled) { background: var(--surface-alt); }
 .operations-notices > button > .icon { margin-left: auto; flex: none; width: 14px; color: var(--muted); }
 .notice-value { font-size: 24px; font-weight: 600; min-width: 24px; font-variant-numeric: tabular-nums; }
-.dashboard-kpis { margin-bottom: 20px; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.dashboard-kpis { margin-bottom: 20px; gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: linear-gradient(120deg,var(--surface),color-mix(in srgb,var(--accent) 3%,var(--surface))); box-shadow: var(--panel-shadow); }
 .dashboard-kpis .dashboard-kpi { border-radius: 0; border: 0; }
 .dashboard-kpi + .dashboard-kpi { border-left: 1px solid var(--border); }
 .dashboard-kpi-heading > .icon { display: none; }

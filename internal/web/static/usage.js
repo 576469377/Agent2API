@@ -1,7 +1,7 @@
 import { allocateHistory } from "./usage-allocation.js";
 // UTC calendar aggregates, separate from the latest-200 request log.
 export const DAY = 86400000;
-export const palette = ["#438ff4", "#36b989", "#9b78ec", "#ef9860", "#ec6883", "#31afc7", "#ccaf53", "#798cae"];
+export const palette = ["#438ff4", "#2a9c75", "#9b78ec", "#cf7a3c", "#d95e7b", "#288da8", "#a3822c", "#798cae"];
 const count = (v) => Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0;
 export const dateKey = (ms) => new Date(ms).toISOString().slice(0, 10);
 export const modelKey = (platform, model) => JSON.stringify([platform || "", model || ""]);
