@@ -21,6 +21,8 @@ TRAE 国内版使用独立单账号网页授权：执行 `agent2api login -platf
 
 Kiro Free 使用官方 CLI 的当前单账号：「添加账号 → Kiro Free」提供 Google、GitHub 和 AWS Builder ID 网页登录，以及检测现有连接。也可运行 `agent2api login -platform kiro -provider google`。凭证留在官方 CLI，每次调用核验 Free 月度额度，不使用 WorkBuddy 号池。详见 [Kiro 指南](kiro.md)。
 
+Kilo Free 不需要账号或上游密钥。启用 `kilo` 后，在「添加账号 → Kilo Free」点击「检测免费通道」；该操作只核验目录，不产生模型调用。账号卡展示匿名连接，没有 WorkBuddy 号池、重新登录或密钥保存操作，见 [Kilo 指南](kilo.md)。
+
 ```bash
 agent2api login -region cn -out auths/cn/account-a.json
 agent2api login -region cn -out auths/cn/account-b.json

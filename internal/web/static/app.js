@@ -198,7 +198,7 @@ const regionName = (id) =>
     : id === "workbuddy-global"
       ? L("国际版", "Global")
       : id === "(别名)" ? L("别名", "Alias") : id || "—";
-const platformMark = (id) => id === "workbuddy" ? "CN" : id === "workbuddy-global" ? "GL" : String(id || "AP").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
+const platformMark = (id) => id === "workbuddy" ? "CN" : id === "workbuddy-global" ? "GL" : id === "kilo" ? "KL" : String(id || "AP").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const regionTag = (id) =>
   `<span class="tag region-tag">${e(regionName(id))}</span>`;
 const routeId = (model) =>
@@ -956,15 +956,17 @@ function accountStatus(a) {
   return [L("暂不可用", "Unavailable"), "red"];
 }
 function credentialStatus(a) {
+  if (a.platform === "kilo") return L("无需登录", "No sign-in required");
   if (a.platform === "openrouter") return L("API Key 连接", "API key connection");
   if (a.platform === "cursor") return L("由 Cursor 管理", "Managed by Cursor");
   if (a.platform === "trae-cn") return L("官方网页授权", "Official web authorization");
   return { sign_in: L("需要重新登录", "Sign in again"), unknown: L("未提供信息", "No information"), refresh: L("等待自动刷新", "Awaiting refresh"), signed_in: L("已登录", "Signed in") }[credentialState(a)];
 }
 function accountSource(a) {
-  return { cli: L("官方 CLI 登录", "Official CLI sign-in"), web: L("网页授权", "Web authorization"), api_key: "API Key", desktop: L("桌面应用", "Desktop app"), file: L("凭证文件", "Credential file"), unknown: L("未提供来源", "Source unavailable") }[accountConnection(a).source];
+  return { anonymous: L("匿名免费通道", "Anonymous free access"), cli: L("官方 CLI 登录", "Official CLI sign-in"), web: L("网页授权", "Web authorization"), api_key: "API Key", desktop: L("桌面应用", "Desktop app"), file: L("凭证文件", "Credential file"), unknown: L("未提供来源", "Source unavailable") }[accountConnection(a).source];
 }
 function platformSetupHint(id) {
+  if (id === "kilo") return L("无需账号或密钥；使用 Kilo 官方匿名免费通道，免费请求按出口 IP 共享限流。", "No account or key required. Kilo official anonymous free access shares a rate limit per egress IP.");
   if (id === "kiro") return L("使用官方 Kiro CLI 完成 Google、GitHub 或 AWS Builder ID 网页登录。仅个人 Free 月度额度与账号实际可选模型；输出预算和采样由平台控制，工具由客户端执行。", "Sign in through the official Kiro CLI using Google, GitHub or AWS Builder ID. Personal Free monthly credits and account-selectable models only; output and sampling are provider controlled. The client executes tools.");
   if (id === "trae-cn") return L("在本机浏览器完成官方网页授权；使用已验证的个人 Free 月赠与签到积分。DeepSeek / GLM 支持 1M 上下文；当前不支持图片，输出预算和采样由平台控制。", "Authorize in a browser on this computer. Uses verified personal Free monthly and check-in credits. DeepSeek / GLM support 1M context. Images are unsupported; output budgets and sampling are provider controlled.");
   if (id === "openrouter") return L("在添加账号中填写自己的 API Key，验证后保存并立即生效。仅接入确认免费的模型，仍受上游额度和频率限制。", "Enter your API key in Add account to validate and save it immediately. Only confirmed free models are allowed; upstream quotas and rate limits still apply.");
@@ -974,7 +976,7 @@ function platformSetupHint(id) {
 }
 function accountActions(a) {
   const access = accountConnection(a), identity = a.identity || {};
-  if (!access.pooled) return `${platformSetup({ id: a.platform }) ? `<button type="button" class="button" data-action="platform-setup" data-platform="${e(a.platform)}">${e(a.platform === "openrouter" ? L("配置密钥", "Configure key") : a.platform === "cursor" ? L("检测桌面登录", "Check desktop login") : L("登录与检测", "Sign in or check"))}</button>` : ""}<p class="muted">${e(platformSetupHint(a.platform) || L("请按该平台的认证方式管理连接。", "Manage this connection using the platform's authentication method."))}</p>`;
+  if (!access.pooled) return `${platformSetup({ id: a.platform }) ? `<button type="button" class="button" data-action="platform-setup" data-platform="${e(a.platform)}">${e(a.platform === "kilo" ? L("检测免费通道", "Check free access") : a.platform === "openrouter" ? L("配置密钥", "Configure key") : a.platform === "cursor" ? L("检测桌面登录", "Check desktop login") : L("登录与检测", "Sign in or check"))}</button>` : ""}<p class="muted">${e(platformSetupHint(a.platform) || L("请按该平台的认证方式管理连接。", "Manage this connection using the platform's authentication method."))}</p>`;
   return `${button(a.state === "disabled" ? L("启用账号", "Enable account") : L("停用账号", "Disable account"), "account-control", "", a.state === "disabled" ? "check" : "stop").replace('data-action="account-control"', `data-action="account-control" data-value="${a.state === "disabled" ? "enable" : "disable"}" data-platform="${e(a.platform)}" data-label="${e(a.label)}"`)}<button class="button" data-action="account-control" data-value="reset" data-platform="${e(a.platform)}" data-label="${e(a.label)}">${icon("refresh")}${e(L("重置冷却", "Reset cooldown"))}</button>${access.source === "desktop" ? `<p class="muted">${e(L("请在对应桌面应用中重新登录。已载入的 WorkBuddy 账号不会自动重新载入外部凭证变更，请按登录提示更新账号或重启网关。", "Sign in again in the desktop app. Loaded WorkBuddy accounts do not automatically reload external credential changes; follow the sign-in guidance to update the account or restart the gateway."))}</p>` : `<button class="button" data-action="relogin" data-platform="${e(a.platform)}" data-label="${e(identity.credential_path ? identity.credential_path.split(/[\\/]/).pop() : a.label)}">${e(L("重新登录", "Sign in again"))}</button>`}`;
 }
 function accountPage() {
@@ -1404,7 +1406,7 @@ async function saveCheckinSettings(form) {
 }
 let setupPlatforms = [];
 function setupMethodName(p) {
-  return { cli_oauth: L("官网授权 · 官方 CLI", "Web authorization · official CLI"), device_code: L("浏览器授权 · 多账号", "Browser authorization · account pool"), web_oauth: L("网页登录 · 单账号", "Web sign-in · single account"), api_key: L("API Key · 单连接", "API key · single connection"), desktop: L("桌面登录态 · 单账号", "Desktop login · single account") }[platformSetup(p)?.method] || "";
+  return { anonymous: L("匿名免费 · 无需密钥", "Anonymous free access · no key"), cli_oauth: L("官网授权 · 官方 CLI", "Web authorization · official CLI"), device_code: L("浏览器授权 · 多账号", "Browser authorization · account pool"), web_oauth: L("网页登录 · 单账号", "Web sign-in · single account"), api_key: L("API Key · 单连接", "API key · single connection"), desktop: L("桌面登录态 · 单账号", "Desktop login · single account") }[platformSetup(p)?.method] || "";
 }
 function addAccountDialog(preferred = "") {
   setupPlatforms = connectionPlatforms(s.cache.platforms?.active || platforms(), s.cache.platforms?.available || []);
@@ -1421,10 +1423,12 @@ function updateSetupPanel(id) {
   if (!submit) return;
   $("connectionStatus").textContent = "";
   submit.disabled = !p?.enabled || !setup;
-  submit.textContent = !p?.enabled ? L("请先启用平台", "Enable this platform first") : setup?.method === "api_key" ? L("验证并保存密钥", "Validate and save key") : setup?.method === "desktop" ? L("重新检测登录态", "Check desktop login") : L("开始登录", "Start sign-in");
+  submit.textContent = !p?.enabled ? L("请先启用平台", "Enable this platform first") : setup?.method === "anonymous" ? L("检测免费通道", "Check free access") : setup?.method === "api_key" ? L("验证并保存密钥", "Validate and save key") : setup?.method === "desktop" ? L("重新检测登录态", "Check desktop login") : L("开始登录", "Start sign-in");
   let content = `<p class="login-platform-note">${e(platformSetupHint(id))}</p>`;
   if (!p?.enabled) {
     content += `<div class="setup-notice"><strong>${e(L("此平台已实现，当前网关尚未启用", "Implemented, but not enabled in this gateway"))}</strong><p>${e(L("在网关配置的 platforms 列表中追加以下条目，保留原有平台，然后重启网关。", "Append this entry to platforms in the gateway configuration, keep existing platforms, then restart the gateway."))}</p><pre><code>${e(JSON.stringify({ id }, null, 2))}</code></pre></div>`;
+  } else if (setup.method === "anonymous") {
+    content += `<div class="setup-notice">${e(L("不需要登录、充值或填写 API Key。仅发布最新目录明确免费的具体模型，生成时重新核验；不会携带账号、组织或 BYOK 凭据。", "No sign-in, purchase or API key required. Only explicitly free concrete models are published and rechecked before generation. Account, organization and BYOK credentials are never sent."))}</div><a class="text-link" href="https://kilo.ai/docs/gateway/authentication" target="_blank" rel="noopener noreferrer">${e(L("官方免费通道说明", "Official free access documentation"))}${icon("external")}</a>`;
   } else if (setup.method === "api_key") {
     content += `<label class="field"><span>OpenRouter API Key</span><input id="connectionAPIKey" name="apiKey" type="password" autocomplete="off" spellcheck="false" maxlength="4096" required placeholder="${e(L("输入新密钥，现有密钥不会显示", "Enter a new key; existing keys are never displayed"))}"></label><p class="muted">${e(L("验证成功后替换当前单连接，并保存在网关本机；重启后继续生效。已保存的密钥优先于启动配置。", "A validated key replaces this single connection and is saved on the gateway computer, including after restart. Saved keys take precedence over startup settings."))}</p><div class="setup-links"><a class="text-link" href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">${e(L("前往官网创建密钥", "Create a key on OpenRouter"))}${icon("external")}</a>${button(L("检测现有连接", "Check existing connection"), "check-connection").replace('data-action="check-connection"', `data-action="check-connection" data-platform="${e(id)}"`)}</div>`;
   } else if (setup.method === "desktop") {
@@ -1445,7 +1449,7 @@ async function connectPlatform(platform, action, key = "") {
   const controls = [...form.querySelectorAll("input, button")];
   controls.forEach(control => control.disabled = true);
   status.className = "login-status";
-  status.textContent = action === "save_key" ? L("正在验证并保存密钥…", "Validating and saving key…") : L("正在检测登录态与免费模型…", "Checking credentials and free models…");
+  status.textContent = action === "save_key" ? L("正在验证并保存密钥…", "Validating and saving key…") : platform === "kilo" ? L("正在核验免费通道与模型目录…", "Checking free access and model catalogue…") : L("正在检测登录态与免费模型…", "Checking credentials and free models…");
   try {
     const result = await api(`/api/accounts/connect?platform=${encodeURIComponent(platform)}`, { action, ...(action === "save_key" ? { api_key: key } : {}) });
     if (form.isConnected) {
@@ -2301,7 +2305,7 @@ document.addEventListener("submit", (event) => {
     const p = setupPlatforms.find(p => p.id === platform), method = platformSetup(p)?.method;
     if (!p?.enabled || event.target.dataset.busy) return;
     if (method === "api_key") connectPlatform(platform, "save_key", new FormData(event.target).get("apiKey") || "");
-    else if (method === "desktop") connectPlatform(platform, "check");
+    else if (method === "desktop" || method === "anonymous") connectPlatform(platform, "check");
     else if (["device_code", "web_oauth", "cli_oauth"].includes(method)) startLogin(platform, "", new FormData(event.target).get("kiroProvider") || "google");
   }
   if (event.target.id === "chatSettingsForm") {

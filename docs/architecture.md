@@ -14,7 +14,7 @@ Agent2API 把多种上游服务转换为 Chat Completions、Responses 和 Anthro
 | WorkBuddy 号池 | `internal/adapter/Pool` | 同一区域的账号、亲和、容量、模型冷却和健康度 |
 | 指标 | `internal/obs` | 请求计数、实际用量、实时观测和可恢复快照 |
 
-默认启动保留 WorkBuddy 两区入口。声明平台列表后，可同时启用 OpenRouter、Cursor、TRAE 国内和 Kiro；具体能力与认证见[平台支持](platforms.md)。
+默认启动保留 WorkBuddy 两区入口。声明平台列表后，可同时启用 OpenRouter、Cursor、TRAE 国内、Kiro 和 Kilo；具体能力与认证见[平台支持](platforms.md)。
 
 ## 请求路径
 
@@ -29,11 +29,13 @@ flowchart TB
   A --> CU[Cursor 桌面 Free 登录态]
   A --> TR[TRAE 官方网页 Free 登录态]
   A --> KI[Kiro 官方 CLI ACP 与调用方 MCP]
+  A --> KL[Kilo 官方匿名免费 API]
   WB --> S[统一事件流]
   OR --> S
   CU --> S
   TR --> S
   KI --> S
+  KL --> S
   S --> O[实时观测与上游用量]
   O --> E{客户端输出方式}
   E --> SSE[协议 SSE 编码]

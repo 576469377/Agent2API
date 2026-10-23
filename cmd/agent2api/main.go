@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/576469377/Agent2API/internal/adapter/kilo"
 	"github.com/576469377/Agent2API/internal/adapter/kiro"
 	"github.com/576469377/Agent2API/internal/adapter/trae"
 	"github.com/576469377/Agent2API/internal/adapter/workbuddy"
@@ -91,7 +92,7 @@ func addServerFlags(fs *flag.FlagSet) *serverFlags {
 	fs.StringVar(&sf.accountsDir, "accounts-dir", "", "多账号号池目录；目录下每个 *.json 视为一个账号（agent2api login -out 攒凭证）")
 	fs.StringVar(&sf.baseURL, "base-url", "", "上游地址，默认按平台选择")
 	fs.BoolVar(&sf.noSanitize, "no-sanitize", false, "关闭内容脱敏（接入 Claude Code/Codex 时不建议关闭）")
-	fs.StringVar(&sf.platform, "platform", "", "上游平台（workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro；缺省自动探测 WorkBuddy）")
+	fs.StringVar(&sf.platform, "platform", "", "上游平台（workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro / kilo；缺省自动探测 WorkBuddy）")
 	fs.StringVar(&sf.metricsFile, "metrics-file", "", "指标落盘路径；默认写到配置文件同目录的 metrics.json")
 	fs.BoolVar(&sf.noPersist, "no-persist", false, "关闭指标落盘（重启后统计清零）")
 	return sf
@@ -175,7 +176,7 @@ func runServer(args []string) {
 	// 平台合法性在 buildHub 里逐个校验（自动集成模式下 Platform 为空是正常的）。
 	// 这里只拦「显式写了不支持平台」的低级错误，快速失败。
 	if cfg.Upstream.Platform != "" && !supportedPlatforms[cfg.Upstream.Platform] {
-		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro）", cfg.Upstream.Platform)
+		log.Fatalf("暂不支持的平台: %s（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro / kilo）", cfg.Upstream.Platform)
 	}
 
 	logger := log.New(os.Stdout, "[agent2api] ", log.LstdFlags|log.Lmicroseconds)
@@ -386,7 +387,7 @@ func printBanner(cfg config.Config, hub *app.Hub) {
 
 // supportedPlatforms 是 buildHub 能装配的平台集合（与 newPlatformAdapter 工厂一致）。
 // 新增平台适配器后在此追加。
-var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlatform: true, "openrouter": true, "cursor": true, trae.Platform: true, kiro.Platform: true}
+var supportedPlatforms = map[string]bool{"workbuddy": true, workbuddy.GlobalPlatform: true, "openrouter": true, "cursor": true, trae.Platform: true, kiro.Platform: true, kilo.Platform: true}
 
 // buildHub 按配置装配多平台枢纽。
 //
@@ -401,7 +402,7 @@ func buildHub(cfg config.Config, logger *log.Logger) (*app.Hub, error) {
 	for _, pc := range pcs {
 		if !supportedPlatforms[pc.ID] {
 			failures = append(failures, pc.ID+": 不支持的平台")
-			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro）", pc.ID)
+			logger.Printf("平台 %s 不受支持，已跳过（当前支持 workbuddy / workbuddy-global / openrouter / cursor / trae-cn / kiro / kilo）", pc.ID)
 			continue
 		}
 		clone := cfg.CloneForPlatform(pc)
@@ -448,6 +449,10 @@ func runLogin(args []string) {
 	_ = fs.Parse(args)
 
 	loginTimeout := 6 * time.Minute
+	if *platform == kilo.Platform {
+		fmt.Println("Kilo 官方匿名免费通道无需登录或密钥；请运行 agent2api -platform kilo，或在多平台配置中添加 kilo 后检测免费通道。")
+		return
+	}
 	if *platform == trae.Platform || *platform == kiro.Platform {
 		loginTimeout = 30 * time.Minute
 	}

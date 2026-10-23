@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/576469377/Agent2API/internal/llm"
 )
@@ -38,6 +39,8 @@ func decodeTools(raw []rawTool) ([]llm.ToolDefinition, map[string]toolName, erro
 			}
 			names[name] = toolName{Namespace: namespace, Name: t.Name}
 			t.Description = fmt.Sprintf("Namespace %s: %s\n%s", namespace, description, t.Description)
+		} else {
+			names[name] = toolName{Name: t.Name}
 		}
 		if seen[name] {
 			return invalidTools("工具名称重复或与命名空间的内部标识冲突")
@@ -90,8 +93,21 @@ func Bind(body []byte) (Protocol, error) {
 
 func toolItem(names map[string]toolName, id, callID, name, arguments, status string) map[string]any {
 	item := map[string]any{"id": id, "type": "function_call", "call_id": callID, "name": name, "arguments": arguments, "status": status}
-	if original, ok := names[name]; ok {
-		item["name"], item["namespace"] = original.Name, original.Namespace
+	original, ok := names[name]
+	if !ok {
+		// 部分模型会把描述中的命名空间再加到内部别名前。只接受当前请求中
+		// 已登记的完整 namespace.alias 配对，不能猜测叶子函数或任意前缀。
+		if split := strings.LastIndexByte(name, '.'); split >= 0 {
+			if known, exists := names[name[split+1:]]; exists && known.Namespace == name[:split] {
+				original, ok = known, true
+			}
+		}
+	}
+	if ok {
+		item["name"] = original.Name
+		if original.Namespace != "" {
+			item["namespace"] = original.Namespace
+		}
 	}
 	return item
 }

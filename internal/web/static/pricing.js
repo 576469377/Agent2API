@@ -41,9 +41,13 @@ export function mergePricingSnapshot(models, snapshot) {
 export function modelPricing(model, now = Date.now()) {
   const p = model?.pricing;
   const time = Date.parse(p?.observed_at || "");
-  if (!p || !["upstream_config", "openrouter_models", "cursor_free_plan", "trae_account_catalog", "kiro_cli_catalog"].includes(p.source) || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
+  if (!p || !["upstream_config", "openrouter_models", "cursor_free_plan", "trae_account_catalog", "kiro_cli_catalog", "kilo_models"].includes(p.source) || !Number.isFinite(time) || time > now + 300000) return { status: "unknown" };
   const result = { status: "unknown", observedAt: p.observed_at, raw: typeof p.upstream_label === "string" ? p.upstream_label.slice(0, 128) : "", stale: now - time > RATE_MAX_AGE_MS, refreshFailed: model.pricing_sync_failed === true };
-  if (p.source === "openrouter_models" || p.source === "cursor_free_plan") {
+  if (p.source === "kilo_models") {
+    if (model.platform !== "kilo") return result;
+    if (Object.hasOwn(p, "expires_at") && (typeof p.expires_at !== "string" || !Number.isFinite(Date.parse(p.expires_at)) || now >= Date.parse(p.expires_at))) return result;
+  }
+  if (["openrouter_models", "cursor_free_plan", "kilo_models"].includes(p.source)) {
     if (p.status === "free" && !result.stale && !result.refreshFailed) result.status = "free";
     return result;
   }
@@ -52,7 +56,7 @@ export function modelPricing(model, now = Date.now()) {
     result.multiplier = rate;
     if (!result.stale && !result.refreshFailed) result.status = rate === 0 ? "free" : "credits";
   } else if (p.status === "dynamic" && !result.stale && !result.refreshFailed) result.status = "dynamic";
-  if (["trae_account_catalog", "kiro_cli_catalog"].includes(p.source)) {
+  if (["trae_account_catalog", "kiro_cli_catalog", "kilo_models"].includes(p.source)) {
     const access = model.access, checked = Date.parse(access?.checked_at || "");
     const kiro = p.source === "kiro_cli_catalog";
     result.freeAllowance = model.platform === (kiro ? "kiro" : "trae-cn") && !model.pricing_from_snapshot && p.status === "credits" && result.status === "credits" && !result.stale && !result.refreshFailed && access?.source === (kiro ? "kiro_cli_free_plan" : "trae_free_plan") && access.basis === "recurring_free_allowance" && access.plan === "free" && access.overage_enabled === false && Number.isFinite(access.remaining_credits) && access.remaining_credits > 0 && Number.isFinite(checked) && checked <= now + 60000 && now - checked <= RATE_MAX_AGE_MS;

@@ -6,7 +6,7 @@
 
 **Connect your models. Keep your workflow.**
 
-<p>One local gateway. Six platform integrations. Three standard LLM APIs.<br>Shared routing, accounts and usage for ZCode, Claude Code, Codex CLI and pi.</p>
+<p>One local gateway. Seven platform integrations. Three standard LLM APIs.<br>Shared routing, accounts and usage for ZCode, Claude Code, Codex CLI and pi.</p>
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml) [![Go](https://img.shields.io/badge/Go-1.23%2B-6da7f2?logo=go&logoColor=white&labelColor=202938&style=flat-square)](go.mod)
 
@@ -75,6 +75,7 @@ The default starts both WorkBuddy regions. For other integrations, create a loca
 | **Cursor Free**<br>`cursor` | Cursor desktop login under the same OS user | Composer 2.5; personal Free entitlement checked before generation |
 | **TRAE China**<br>`trae-cn` | Official browser authorization | Verified Free monthly and check-in credits; text, reasoning and client tools |
 | **Kiro Free**<br>`kiro` | Official CLI web sign-in | Personal Free monthly credits, account-selectable models and client tools |
+| **Kilo Free**<br>`kilo` | Official anonymous free access; no key | Concrete free models, per-generation catalogue checks, three APIs and client tools |
 
 Automatic client setup and model tests select currently confirmed free models. Raw WorkBuddy API requests follow account permissions. Capabilities and allowances remain platform-specific. See [platform support](docs/platforms.md), the [TRAE guide](docs/trae.md) and the [Kiro guide](docs/kiro.md).
 
@@ -121,7 +122,7 @@ Detailed guides are currently in Chinese; commands, fields and examples work in 
 | [Install and make a first call](docs/quickstart.md) | [Console and standalone preview](docs/console.md) | [API reference](docs/api.md) |
 | [Platform capabilities](docs/platforms.md) | [Balances and daily check-in](docs/account-benefits.md) | [Configuration and routing](docs/configuration.md) |
 | [Client setup](docs/clients.md) | [Upgrade, backup and recovery](docs/operations.md) | [Tokens, cache and live metrics](docs/metrics.md) |
-| [TRAE](docs/trae.md) · [Kiro](docs/kiro.md) | [Troubleshooting](docs/troubleshooting.md) | [Repository guide](docs/development.md) · [Architecture](docs/architecture.md) |
+| [TRAE](docs/trae.md) · [Kiro](docs/kiro.md) · [Kilo](docs/kilo.md) | [Troubleshooting](docs/troubleshooting.md) | [Repository guide](docs/development.md) · [Architecture](docs/architecture.md) |
 
 [All documentation →](docs/README.md) · [Changelog](CHANGELOG.md) · [Protocol and platform research](docs/research/README.md)
 
@@ -171,7 +172,7 @@ Tests use offline fixtures and mock services, without consuming real model quota
 
 ## Roadmap
 
-- [x] Six platforms, three APIs and a shared console
+- [x] Seven platforms, three APIs and a shared console
 - [x] Incremental ZCode / cc-switch / pi configuration and backups
 - [x] Account balances, daily check-in, request logs and usage analytics
 - [ ] More verified platforms and allowance sources

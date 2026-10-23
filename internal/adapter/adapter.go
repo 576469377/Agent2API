@@ -45,6 +45,7 @@ type ModelPricing struct {
 	UpstreamLabel    string   `json:"upstream_label,omitempty"`
 	Source           string   `json:"source"`
 	ObservedAt       string   `json:"observed_at"`
+	ExpiresAt        string   `json:"expires_at,omitempty"`
 }
 
 // Adapter 把供应商无关的请求转换为具体平台调用，并返回有序响应流。

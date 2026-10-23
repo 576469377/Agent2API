@@ -2,7 +2,7 @@ import { escapeHTML as e } from "./core.js";
 import { confirmedFreeModels } from "./pricing.js";
 
 export const configClients = ["cc-switch", "pi"];
-const names = { workbuddy: "WorkBuddy 国内", "workbuddy-global": "WorkBuddy 国际", openrouter: "OpenRouter", cursor: "Cursor", "trae-cn": "TRAE 国内", kiro:"Kiro Free" };
+const names = { workbuddy: "WorkBuddy 国内", "workbuddy-global": "WorkBuddy 国际", openrouter: "OpenRouter", cursor: "Cursor", "trae-cn": "TRAE 国内", kiro:"Kiro Free", kilo:"Kilo Free" };
 
 export function clientModelHasBudget(model) {
   return model.context_tokens > 0 && (model.max_output_tokens > 0 || (model.platform === "kiro" && model.max_output_tokens === 0));

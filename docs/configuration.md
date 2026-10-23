@@ -40,7 +40,7 @@
 | `-metrics-file` | — | 指标落盘路径；缺省写配置文件同目录的 `metrics.json`，无配置文件时写工作目录的 `agent2api-metrics.json` |
 | `-no-persist` | — | 关闭指标落盘 |
 | `-no-sanitize` | — | 关闭内容脱敏 |
-| `-platform` | — | 固定单平台（`workbuddy` / `workbuddy-global` / `openrouter` / `cursor` / `trae-cn`）；缺省自动集成 WorkBuddy 两区 |
+| `-platform` | — | 固定单平台（`workbuddy` / `workbuddy-global` / `openrouter` / `cursor` / `trae-cn` / `kiro` / `kilo`）；缺省自动集成 WorkBuddy 两区 |
 
 ## 多平台配置（upstream.platforms）
 

@@ -81,7 +81,7 @@ func newResult(models []Model) Result {
 }
 
 func PlatformName(id string) string {
-	if name := map[string]string{"workbuddy": "WorkBuddy 国内", "workbuddy-global": "WorkBuddy 国际", "openrouter": "OpenRouter", "cursor": "Cursor", "trae-cn": "TRAE 国内", "kiro": "Kiro Free"}[id]; name != "" {
+	if name := map[string]string{"workbuddy": "WorkBuddy 国内", "workbuddy-global": "WorkBuddy 国际", "openrouter": "OpenRouter", "cursor": "Cursor", "trae-cn": "TRAE 国内", "kiro": "Kiro Free", "kilo": "Kilo Free"}[id]; name != "" {
 		return name
 	}
 	return id

@@ -17,6 +17,7 @@
 | `internal/adapter/cursor` | 桌面登录态、Free 权益、HTTP/2 Connect 与客户端工具 | [adapter.go](../internal/adapter/cursor/adapter.go) |
 | `internal/adapter/trae` | 官方网页授权、Free 积分来源、原生消息与 SSE | [adapter.go](../internal/adapter/trae/adapter.go)、[protocol_test.go](../internal/adapter/trae/protocol_test.go) |
 | `internal/adapter/kiro` | 官方 CLI ACP、模型目录与调用方 MCP | [adapter.go](../internal/adapter/kiro/adapter.go)、[runtime.go](../internal/adapter/kiro/runtime.go) |
+| `internal/adapter/kilo` | 匿名免费目录、到期检查与无鉴权的 Chat 传输；共用 OpenRouter 的 Chat 编解码 | [adapter.go](../internal/adapter/kilo/adapter.go)、[回归](../internal/adapter/kilo/adapter_test.go) |
 | `internal/clientconfig`、`internal/zcode` | 免费模型筛选、客户端增量合并、备份及并发写入校验 | [models.go](../internal/clientconfig/models.go)、[files.go](../internal/clientconfig/files.go)、[store.go](../internal/zcode/store.go) |
 | `internal/api` | Chat、Responses、Messages 的请求与输出转换 | [protocols.go](../internal/app/protocols.go)中的装配入口 |
 | `internal/app` | HTTP、Hub 路由、图片策略、管理 API 和指标协调 | [app.go](../internal/app/app.go)、[routing.go](../internal/app/routing.go)、[api.go](../internal/app/api.go) |

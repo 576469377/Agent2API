@@ -1,0 +1,337 @@
+{
+  "observed_date": "2026-10-23",
+  "source": "https://ai-gateway.kilo.ai/api/v1/models",
+  "evidence": "Public unauthenticated GET only; no inference or account entitlement verification.",
+  "catalog_count": 401,
+  "zero_input_output_count": 19,
+  "explicit_free_tool_model_count": 14,
+  "selection": "isFree=true; prompt=0; completion=0; tools declared; text-only output; named model rather than Auto/router",
+  "models": [
+    {
+      "id": "nvidia/nemotron-3.5-super-vl:free",
+      "name": "NVIDIA: Nemotron 3.5 Super VL (free)",
+      "context": 1000000,
+      "max_output": 131072,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "nvidia"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "reflection/beam-free",
+      "name": "Reflection: Beam 1.0 (free)",
+      "context": 1048576,
+      "max_output": 131072,
+      "tools": true,
+      "tools_choice": false,
+      "is_free": true,
+      "providers": [
+        "reflection"
+      ],
+      "prompt_price": "0.000000000000",
+      "completion_price": "0.000000000000",
+      "request_price": "0",
+      "image_price": "0",
+      "web_search_price": "0",
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "stealth/glyph-cluster",
+      "name": "Stealth: Glyph Cluster (free)",
+      "context": 256000,
+      "max_output": 256000,
+      "tools": true,
+      "tools_choice": false,
+      "is_free": true,
+      "providers": [
+        "stealth"
+      ],
+      "prompt_price": "0.000000000000",
+      "completion_price": "0.000000000000",
+      "request_price": "0",
+      "image_price": "0",
+      "web_search_price": "0",
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "recursive/flint-v1.0:free",
+      "name": "Recursive: Flint (free)",
+      "context": 262144,
+      "max_output": 235929,
+      "tools": true,
+      "tools_choice": false,
+      "is_free": true,
+      "providers": [
+        "recursive"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "xingchen-agi/xing4.0-29b-a4b:free",
+      "name": "XingChen: Xing4.0 29B A4B (free)",
+      "context": 262144,
+      "max_output": 235929,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "phala"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "dots-studio/dots-3-note-preview:free",
+      "name": "Dots Studio: Dots3-Note Preview (free)",
+      "context": 512000,
+      "max_output": 460800,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "atlas-cloud"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": "2026-12-31"
+    },
+    {
+      "id": "liquid/lfm-2.5-2.6b:free",
+      "name": "LiquidAI: LFM2.5-2.6B (free)",
+      "context": 65536,
+      "max_output": 8192,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "liquid"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning:free",
+      "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+      "context": 1000000,
+      "max_output": 65536,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "nvidia"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "poolside/laguna-s-2.1:free",
+      "name": "Poolside: Laguna S 2.1 (free)",
+      "context": 262144,
+      "max_output": 32768,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "poolside"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "poolside/laguna-xs-2.1:free",
+      "name": "Poolside: Laguna XS 2.1 (free)",
+      "context": 262144,
+      "max_output": 32768,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "poolside"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "cohere/north-mini-code:free",
+      "name": "Cohere: North Mini Code (free)",
+      "context": 256000,
+      "max_output": 64000,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "cohere"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "name": "NVIDIA: Nemotron 3 Ultra (free)",
+      "context": 1000000,
+      "max_output": 65536,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "nvidia"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+      "context": 256000,
+      "max_output": 65536,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "nvidia"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "name": "NVIDIA: Nemotron 3 Super (free)",
+      "context": 262144,
+      "max_output": 235929,
+      "tools": true,
+      "tools_choice": true,
+      "is_free": true,
+      "providers": [
+        "nvidia"
+      ],
+      "prompt_price": "0",
+      "completion_price": "0",
+      "request_price": null,
+      "image_price": null,
+      "web_search_price": null,
+      "output_modalities": [
+        "text"
+      ],
+      "expires": null
+    }
+  ],
+  "excluded_zero_token_price_ids": [
+    {
+      "id": "kilo-auto/free",
+      "is_free": true,
+      "tools": true,
+      "reason": "Automatic router; does not identify a specific model"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-content-safety:free",
+      "is_free": true,
+      "tools": false,
+      "reason": "Safety-only model without tool calling"
+    },
+    {
+      "id": "google/lyria-3-pro-preview",
+      "is_free": false,
+      "tools": false,
+      "reason": "Audio generation; zero text token prices do not establish free access"
+    },
+    {
+      "id": "google/lyria-3-clip-preview",
+      "is_free": false,
+      "tools": false,
+      "reason": "Audio generation; zero text token prices do not establish free access"
+    },
+    {
+      "id": "openrouter/free",
+      "is_free": true,
+      "tools": true,
+      "reason": "Automatic router; does not identify a specific model"
+    }
+  ]
+}

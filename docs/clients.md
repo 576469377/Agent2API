@@ -40,7 +40,7 @@ TRAE 的 DeepSeek / GLM 已使用经真实免费账号验证的 1M 档位。同�
 
 在网关所在电脑打开[客户端接入页](http://127.0.0.1:8787/#connection)，在「更多客户端快捷配置」中勾选上游平台，点击「配置到 cc-switch」或「配置到 pi」。也可以点击「同时配置 cc-switch 和 pi」，依次写入两个客户端，每个结果和失败原因分别显示。批量操作不会回滚已经成功的另一个客户端。
 
-可选 WorkBuddy 国内 / 国际、OpenRouter、Cursor、TRAE 国内以及已核验 Free 权益的 Kiro。点击后重新验证**所选平台**的认证和免费目录，只有刚确认免费、明确支持工具调用且上下文与输出预算可配置的模型才能写入；某个所选平台无合格模型时整个客户端操作停止。未选平台的配置保留，其故障不会阻止已选平台同步。TRAE 使用已验证的 Free 赠送额度，仍消耗积分；付费、试用、浮动费率和未知来源不导入。所有模型均使用完整的 `平台/模型` 路由，OpenRouter 输出预算不超过 8192。Kiro 未公布最大输出值，导入时的 8192 为客户端建议预算，ACP 不提供硬截断承诺，详见 [Kiro 限制](kiro.md)。
+可选 WorkBuddy 国内 / 国际、OpenRouter、Cursor、TRAE 国内、已核验 Free 权益的 Kiro，以及 Kilo 官方匿名免费通道。点击后重新验证**所选平台**的认证和免费目录，只有刚确认免费、明确支持工具调用且上下文与输出预算可配置的模型才能写入；某个所选平台无合格模型时整个客户端操作停止。未选平台的配置保留，其故障不会阻止已选平台同步。TRAE 使用已验证的 Free 赠送额度，仍消耗积分；付费、试用、浮动费率和未知来源不导入。所有模型均使用完整的 `平台/模型` 路由，OpenRouter 输出预算不超过 8192。Kiro 未公布最大输出值，导入时的 8192 为客户端建议预算，ACP 不提供硬截断承诺，详见 [Kiro 限制](kiro.md)。
 
 | 客户端 | 写入位置与组织方式 | 使用方法 |
 |---|---|---|
@@ -60,6 +60,8 @@ Codex 的 MCP `function` 工具可按命名空间分组。网关在内部适配�
 两个入口都只接受本机访问，写入地址由实际网关配置决定，浏览器不能指定任意路径或密钥接收地址。配置在核验期间被客户端修改时停止操作；重复点击无变化时不重写、不重复添加或生成备份。cc-switch 当前检测默认用户目录下的数据库；使用自定义数据目录的实例需手动配置，按钮不会搜索或接管其他目录。
 
 实现依据：[cc-switch 供应商与配置格式](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/provider.rs)、[数据库事务写入](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/database/dao/providers.rs)、[pi 模型配置](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models-configuration.md)、[pi 配置目录](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md)。
+
+Kilo 不需要上游 API Key；三个一键配置入口使用 `kilo/作者/模型` 完整路由及当前目录的上下文、输出上限。到期、价格未知、自动路由和非工具模型不写入。目录免费不代表供应商当前可用，实测范围见 [Kilo 指南](kilo.md)。
 
 ## ZCode 手动配置
 

@@ -45,7 +45,7 @@ func (a *App) apiAccountsConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setup := adapter.SetupFor(rt.ID)
-	if setup == nil || (setup.Method != "api_key" && setup.Method != "desktop" && setup.Method != "web_oauth" && setup.Method != "cli_oauth") {
+	if setup == nil || (setup.Method != "api_key" && setup.Method != "desktop" && setup.Method != "web_oauth" && setup.Method != "cli_oauth" && setup.Method != "anonymous") {
 		fail(http.StatusBadRequest, "请使用此平台的账号授权入口", false)
 		return
 	}

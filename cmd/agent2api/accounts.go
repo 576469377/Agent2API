@@ -9,6 +9,7 @@ import (
 
 	"github.com/576469377/Agent2API/internal/adapter"
 	"github.com/576469377/Agent2API/internal/adapter/cursor"
+	"github.com/576469377/Agent2API/internal/adapter/kilo"
 	"github.com/576469377/Agent2API/internal/adapter/kiro"
 	"github.com/576469377/Agent2API/internal/adapter/openrouter"
 	"github.com/576469377/Agent2API/internal/adapter/trae"
@@ -18,7 +19,7 @@ import (
 
 // platformDefaultPaths 返回平台各自的默认凭证位置。
 func platformDefaultPaths(platform string) []string {
-	if platform == kiro.Platform {
+	if platform == kiro.Platform || platform == kilo.Platform {
 		return nil
 	}
 	if platform == trae.Platform {
@@ -41,7 +42,7 @@ func platformDefaultPaths(platform string) []string {
 // 任一账号加载失败只记日志不阻断启动——多账号场景下坏一个文件不该拖死网关；
 // 没有可用凭证时保留空池，供控制台首次登录和目录监视器后续入池。
 func buildAdapter(cfg config.Config, logger interface{ Printf(string, ...any) }) (adapter.Adapter, *adapter.Pool, error) {
-	if cfg.Upstream.Platform == openrouter.Platform || cfg.Upstream.Platform == cursor.Platform || cfg.Upstream.Platform == trae.Platform || cfg.Upstream.Platform == kiro.Platform {
+	if cfg.Upstream.Platform == openrouter.Platform || cfg.Upstream.Platform == cursor.Platform || cfg.Upstream.Platform == trae.Platform || cfg.Upstream.Platform == kiro.Platform || cfg.Upstream.Platform == kilo.Platform {
 		a, err := newPlatformAdapter(cfg, "", nil)
 		return a, nil, err
 	}
@@ -120,6 +121,9 @@ func accountLabel(path string, adp adapter.Adapter) string {
 // 平台差异全部收在这个工厂里：号池与下游协议都只依赖 adapter.Adapter 接口，
 // 新增平台时只需在这里加一个分支。
 func newPlatformAdapter(cfg config.Config, credPath string, logf func(string, ...any)) (adapter.Adapter, error) {
+	if cfg.Upstream.Platform == kilo.Platform {
+		return kilo.New(kilo.Config{BaseURL: cfg.Upstream.BaseURL, RequestTimeout: cfg.RequestTimeout(), StreamIdleTimeout: cfg.StreamIdleTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL()})
+	}
 	if cfg.Upstream.Platform == kiro.Platform {
 		return kiro.New(kiro.Config{CLIPath: cfg.Upstream.CLIPath, RequestTimeout: cfg.RequestTimeout(), StreamTotalTimeout: cfg.StreamTotalTimeout(), ModelCacheTTL: cfg.ModelCacheTTL()})
 	}

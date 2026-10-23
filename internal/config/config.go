@@ -104,7 +104,7 @@ func (s ServerConfig) MaxBodyBytes() int64 {
 
 // UpstreamConfig 是上游配置。
 type UpstreamConfig struct {
-	// Platform 是单平台模式的上游平台（workbuddy / workbuddy-global / openrouter / cursor）。
+	// Platform 是单平台模式的上游平台；多平台模式使用下方 Platforms 列表。
 	//
 	// 空字符串（默认）表示「自动集成」：ResolvePlatforms 返回 autoPlatforms
 	// （国内版与国际版），网关自动探测本机登录态。显式填写（配置文件或
@@ -232,7 +232,7 @@ func (c Config) CloneForPlatform(pc PlatformConfig) Config {
 	c.Upstream.CLIPath = pc.CLIPath
 	// Direct providers must not inherit another platform's endpoint or desktop
 	// credential path. Single-platform ResolvePlatforms already copies its values.
-	if pc.ID == "cursor" || pc.ID == "openrouter" || pc.ID == "trae-cn" || pc.ID == "kiro" {
+	if pc.ID == "cursor" || pc.ID == "openrouter" || pc.ID == "trae-cn" || pc.ID == "kiro" || pc.ID == "kilo" {
 		c.Upstream.BaseURL = pc.BaseURL
 		c.Upstream.CredentialPath = pc.CredentialPath
 		c.Upstream.AccountsDir = ""

@@ -49,6 +49,15 @@ func Eligible(m Model, now time.Time) bool {
 		return p.Source == "upstream_config" && p.CreditMultiplier != nil && *p.CreditMultiplier == 0
 	case "openrouter":
 		return p.Source == "openrouter_models"
+	case "kilo":
+		if p.Source != "kilo_models" {
+			return false
+		}
+		if p.ExpiresAt != "" {
+			until, err := time.Parse(time.RFC3339Nano, p.ExpiresAt)
+			return err == nil && now.Before(until)
+		}
+		return true
 	case "cursor":
 		return p.Source == "cursor_free_plan"
 	default:

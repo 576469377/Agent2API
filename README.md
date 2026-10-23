@@ -6,7 +6,7 @@
 
 **连接你的模型，专注你的工作流。**
 
-<p>一个本地入口，连接六个平台，提供三种标准 LLM API。<br>让 ZCode、Claude Code、Codex CLI 与 pi 共用模型路由、账号和用量控制台。</p>
+<p>一个本地入口，连接七个平台，提供三种标准 LLM API。<br>让 ZCode、Claude Code、Codex CLI 与 pi 共用模型路由、账号和用量控制台。</p>
 
 [![CI](https://github.com/576469377/Agent2API/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/576469377/Agent2API/actions/workflows/ci.yml) [![Go](https://img.shields.io/badge/Go-1.23%2B-6da7f2?logo=go&logoColor=white&labelColor=202938&style=flat-square)](go.mod)
 
@@ -75,6 +75,7 @@ go build -trimpath -o bin/agent2api ./cmd/agent2api
 | **Cursor Free**<br>`cursor` | 同一系统用户的 Cursor 桌面登录态 | Composer 2.5；生成前核验个人 Free 权益 |
 | **TRAE 国内版**<br>`trae-cn` | 官方网页登录 | Free 月赠与已确认签到积分；文本、思考与客户端工具 |
 | **Kiro Free**<br>`kiro` | 官方 CLI 网页登录 | 个人 Free 月度积分、账号自选模型与客户端工具 |
+| **Kilo Free**<br>`kilo` | 官方匿名免费通道，无需密钥 | 具体免费模型、逐次目录核验、三协议与客户端工具 |
 
 客户端自动配置和模型测试选择当前确认免费的模型；WorkBuddy 原始 API 按账号权限受理手工请求。不同平台的能力和额度各自独立，详见[平台支持](docs/platforms.md)、[TRAE 指南](docs/trae.md)与 [Kiro 指南](docs/kiro.md)。
 
@@ -119,7 +120,7 @@ python scripts/sync-zcode.py --config config.json
 | [安装与首次调用](docs/quickstart.md) | [控制台与独立预览](docs/console.md) | [API 参考](docs/api.md) |
 | [平台与能力](docs/platforms.md) | [账号、余额与签到](docs/account-benefits.md) | [配置与模型路由](docs/configuration.md) |
 | [客户端配置](docs/clients.md) | [升级、备份与恢复](docs/operations.md) | [Token、缓存与实时指标](docs/metrics.md) |
-| [TRAE](docs/trae.md) · [Kiro](docs/kiro.md) | [错误与登录排查](docs/troubleshooting.md) | [开发导览](docs/development.md) · [当前架构](docs/architecture.md) |
+| [TRAE](docs/trae.md) · [Kiro](docs/kiro.md) · [Kilo](docs/kilo.md) | [错误与登录排查](docs/troubleshooting.md) | [开发导览](docs/development.md) · [当前架构](docs/architecture.md) |
 
 [全部文档 →](docs/README.md) · [更新日志](CHANGELOG.md) · [协议与平台调研](docs/research/README.md)
 
@@ -169,7 +170,7 @@ python scripts/check-docs.py
 
 ## 路线图
 
-- [x] 六个平台、三种协议与统一控制台
+- [x] 七个平台、三种协议与统一控制台
 - [x] ZCode / cc-switch / pi 增量配置与备份
 - [x] 账号余额、每日签到、调用日志与用量分析
 - [ ] 更多可验证的平台与额度来源

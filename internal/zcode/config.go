@@ -353,7 +353,7 @@ func Prepare(source []byte, models []Model, baseURL, key string, now time.Time) 
 }
 
 func adjustOptions(config object, model Model) error {
-	if model.Platform != "openrouter" && model.Platform != "cursor" && model.Platform != "trae-cn" && model.Platform != "kiro" {
+	if model.Platform != "openrouter" && model.Platform != "cursor" && model.Platform != "trae-cn" && model.Platform != "kiro" && model.Platform != "kilo" {
 		return nil
 	}
 	specs, err := child(config, "optionSpecs")

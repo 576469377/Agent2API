@@ -512,5 +512,23 @@ class FreeOnlySyncTest(unittest.TestCase):
         self.assertEqual(preserved['config']['optionSpecs']['maxOutputTokens']['max'], 512)
 
 
+class KiloFreeEvidenceTest(unittest.TestCase):
+    def test_only_current_native_unexpired_kilo_evidence_is_free(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        price = {'status': 'free', 'source': 'kilo_models', 'observed_at': now.isoformat()}
+        model = {'platform': 'kilo', 'pricing': price}
+        self.assertTrue(sync.confirmed_free(model))
+        for patch in [
+            {'platform': 'openrouter'}, {'pricing_from_snapshot': True}, {'pricing_sync_failed': True},
+            *[{'pricing': {**price, **value}} for value in [
+                {'status': 'credits'}, {'source': 'unknown'},
+                {'expires_at': now.isoformat()}, {'expires_at': 'later'}, {'expires_at': False},
+                {'observed_at': (now - datetime.timedelta(minutes=6)).isoformat()},
+            ]],
+        ]:
+            with self.subTest(patch=patch):
+                self.assertFalse(sync.confirmed_free({**model, **patch}))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -38,8 +38,18 @@ def confirmed_free(model):
             return False
     if pricing.get("status") != "free" or model.get("pricing_sync_failed"):
         return False
-    if pricing.get("source") not in ("upstream_config", "openrouter_models", "cursor_free_plan"):
+    if pricing.get("source") not in ("upstream_config", "openrouter_models", "cursor_free_plan", "kilo_models"):
         return False
+    if pricing.get("source") == "kilo_models":
+        if model.get("platform") != "kilo" or model.get("pricing_from_snapshot"):
+            return False
+        if "expires_at" in pricing:
+            try:
+                expires = datetime.datetime.fromisoformat(pricing["expires_at"].replace("Z", "+00:00"))
+                if datetime.datetime.now(datetime.timezone.utc) >= expires:
+                    return False
+            except (AttributeError, TypeError, ValueError):
+                return False
     if pricing.get("source") == "upstream_config" and pricing.get("credit_multiplier") != 0:
         return False
     try:
@@ -287,7 +297,7 @@ def main():
     for kind in ("providerModelRules", "manualProviderModelRules"):
         for rule in rules[kind]:
             model = by_id.get(rule["modelId"], {})
-            if rule["providerId"] == args.provider_id and model.get("platform") in ("openrouter", "kiro"):
+            if rule["providerId"] == args.provider_id and model.get("platform") in ("openrouter", "kiro", "kilo"):
                 spec = rule.setdefault("config", {}).setdefault("optionSpecs", {}).setdefault("maxOutputTokens", {})
                 limit = output_limit(model)
                 previous_max = spec.get("max")

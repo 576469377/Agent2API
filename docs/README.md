@@ -9,7 +9,7 @@
 | 目标 | 直接阅读 |
 |---|---|
 | 第一次安装、登录和启动 | [快速开始](quickstart.md) |
-| 了解六个平台和免费边界 | [平台支持](platforms.md) |
+| 了解七个平台和免费边界 | [平台支持](platforms.md) |
 | 接入 ZCode / Claude Code / 其他客户端 | [客户端接入](clients.md) |
 | 调用失败、很慢或一直没有输出 | [故障排查](troubleshooting.md) |
 | 升级网关且保留统计与账号 | [运行、升级与恢复](operations.md) |
@@ -35,6 +35,7 @@
 |---|---|
 | [控制台](console.md) | 九个页面、日志筛选、详情、实时状态与独立预览 |
 | [Kiro Free](kiro.md) | 官方 CLI 网页登录、自选免费模型、客户端工具与 ZCode 同步 |
+| [Kilo Free](kilo.md) | 匿名免费通道、模型筛选、限流与三个客户端的一键配置 |
 | [账号与调度](accounts.md) | WorkBuddy 两区登录、亲和、并发、限流与重新授权 |
 | [运行、升级与恢复](operations.md) | 进程与源码的区别、空闲升级、回退、备份和旧存档 |
 | [故障排查](troubleshooting.md) | 从具体错误定位问题，保留可分享的诊断摘要 |

@@ -83,6 +83,9 @@ func (m *loginManager) Start(platform, outPath string, baseURLs ...string) (*log
 	if platform == "cursor" {
 		return nil, &llm.Failure{Code: "cursor_desktop_login", Message: "请在本机 Cursor 桌面端登录个人 Free 账号，再刷新模型目录", ClientFixable: true}
 	}
+	if platform == "kilo" {
+		return nil, &llm.Failure{Code: "anonymous_access", Message: "Kilo 无需登录或密钥，请在添加账号中检测免费通道", ClientFixable: true}
+	}
 	if platform != "workbuddy" && platform != workbuddy.GlobalPlatform {
 		return nil, &llm.Failure{Code: "api_key_required", Message: "该平台使用 API Key；OpenRouter 请设置 OPENROUTER_API_KEY 后重启网关", ClientFixable: true}
 	}

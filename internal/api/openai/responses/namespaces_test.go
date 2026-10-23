@@ -172,3 +172,42 @@ func TestInvalidNamespaceTools(t *testing.T) {
 		}
 	}
 }
+
+func TestQualifiedInternalAliasOnlyRestoresItsRegisteredNamespace(t *testing.T) {
+	p, err := Bind(namespaceFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := namespaceToolName("mcp__acceptance", "read_acceptance_file")
+	for _, name := range []string{alias, "mcp__acceptance." + alias} {
+		body, err := p.EncodeFinal(&llm.AssistantMessage{Content: []llm.Content{{Type: llm.ContentToolCall, ToolCall: &llm.ToolCall{ID: "call_fixture", Name: name, Arguments: "{}"}}}}, "test-model")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Output []map[string]any `json:"output"`
+		}
+		if json.Unmarshal(body, &result) != nil || result.Output[0]["name"] != "read_acceptance_file" || result.Output[0]["namespace"] != "mcp__acceptance" {
+			t.Fatalf("registered qualified alias not restored: %s", body)
+		}
+	}
+	for _, name := range []string{"foreign." + alias, "mcp__acceptance.read_acceptance_file", "mcp__acceptance.unknown"} {
+		item := toolItem(p.toolNames, "fc_fixture", "call_fixture", name, "{}", "completed")
+		if item["name"] != name || item["namespace"] != nil {
+			t.Fatalf("unregistered tool was guessed: %+v", item)
+		}
+	}
+	var fixture map[string]any
+	json.Unmarshal(namespaceFixture(t), &fixture)
+	qualified := "mcp__acceptance." + alias
+	fixture["tools"] = append(fixture["tools"].([]any), map[string]any{"type": "function", "name": qualified, "parameters": map[string]any{"type": "object"}})
+	raw, _ := json.Marshal(fixture)
+	p, err = Bind(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := toolItem(p.toolNames, "fc_fixture", "call_fixture", qualified, "{}", "completed")
+	if item["name"] != qualified || item["namespace"] != nil {
+		t.Fatal("an explicitly registered flat tool was rerouted")
+	}
+}

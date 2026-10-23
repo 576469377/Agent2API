@@ -37,6 +37,7 @@ export function credentialState(account) {
 // Direct integrations expose a status record, but have no WorkBuddy pool or
 // device-login controls. Do not infer a credential file from missing identity.
 export function accountConnection(account) {
+  if (account?.platform === "kilo") return { source: "anonymous", pooled: false };
   if (account?.platform === "openrouter") return { source: "api_key", pooled: false };
   if (account?.platform === "cursor") return { source: "desktop", pooled: false };
   if (account?.platform === "trae-cn") return { source: "web", pooled: false, login: true };
@@ -58,11 +59,12 @@ export function platformSetup(platform) {
     "workbuddy-global": { method: "device_code", account_mode: "pool" },
     "trae-cn": { method: "web_oauth", account_mode: "single" },
     kiro: { method: "cli_oauth", account_mode: "single" },
+    kilo: { method: "anonymous", account_mode: "single" },
     openrouter: { method: "api_key", account_mode: "single" },
     cursor: { method: "desktop", account_mode: "single" },
   };
   const setup = platform?.connection ?? fallback[platform?.id];
-  return ["device_code", "web_oauth", "cli_oauth", "api_key", "desktop"].includes(setup?.method) ? setup : null;
+  return ["device_code", "web_oauth", "cli_oauth", "api_key", "desktop", "anonymous"].includes(setup?.method) ? setup : null;
 }
 
 export function connectionPlatforms(active = [], available = []) {

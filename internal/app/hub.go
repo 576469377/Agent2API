@@ -48,6 +48,7 @@ var platformDefaultBaseURLs = map[string]string{
 	"cursor":           "https://api2.cursor.sh",
 	"trae-cn":          "https://trae-api-cn.mchost.guru",
 	"kiro":             "kiro-cli://acp",
+	"kilo":             "https://ai-gateway.kilo.ai/api/v1",
 }
 
 // Hub 是多平台集成的核心：一个进程里管着所有上游平台，

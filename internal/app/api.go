@@ -42,6 +42,7 @@ var builtinPlatforms = []struct {
 	{ID: "cursor", Name: "Cursor", Note: "桌面个人 Free 账号，仅 Composer 2.5 免费额度，禁用按量付费", Implemented: true},
 	{ID: trae.Platform, Name: "TRAE 国内版", Note: "官方网页授权；个人 Free 月赠积分，文本与原生工具", Implemented: true},
 	{ID: kiro.Platform, Name: "Kiro Free", Note: "官方 CLI 网页登录；每月 50 免费积分，按账号实际目录自选模型", Implemented: true},
+	{ID: "kilo", Name: "Kilo Free", Note: "官方匿名免费通道；无需密钥，仅当前目录确认免费的具体模型", Implemented: true},
 }
 
 // platformEntry 是「规划中 / 可用（已实现但当前未运行）」两类平台共用的精简描述。
@@ -445,7 +446,7 @@ func (a *App) startAccountLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setup := adapter.SetupFor(rt.ID)
 	if setup == nil || setup.Method != "device_code" {
-		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"message": "该平台不使用浏览器授权，请使用对应的密钥配置或桌面登录态检测入口"}})
+		writeJSONWithStatus(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"message": "该平台不使用浏览器授权，请使用添加账号中的连接检测或密钥配置入口"}})
 		return
 	}
 	dir := rt.AccountsDir()
