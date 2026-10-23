@@ -33,6 +33,7 @@ const seriesWindow = 30
 
 // Record 是一次请求的观测记录。
 type Record struct {
+	llm.ImagePreparation
 	RequestID        string        `json:"request_id,omitempty"`
 	AttemptCount     int           `json:"attempt_count,omitempty"`
 	QueueMs          int64         `json:"queue_ms,omitempty"`

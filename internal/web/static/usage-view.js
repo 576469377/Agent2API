@@ -3,12 +3,16 @@ import { cachedUsage, curveSeries, curvePath, lifetimeUsage, heatmapColumns, liv
 export function liveRequestStatus(row, L, now) {
   const labels = {
     reading: L("正在读取请求", "Reading request"), routing: L("正在选择服务", "Selecting service"),
+    preparing_images: L("正在准备历史图片", "Preparing image references"),
     queued: L("排队等待", "Queued"), connecting: L("正在连接上游", "Connecting"),
     uploading: L("正在上传请求", "Uploading request"), waiting_headers: L("等待上游响应", "Awaiting response headers"),
     waiting_output: L("等待首段输出", "Awaiting first output"),
   };
   if (labels[row.phase]) {
     let detail = row.phase === "queued" && row.queue_ms > 0 ? ` · ${(row.queue_ms / 1000).toFixed(1)}s` : "";
+    if (row.phase === "preparing_images" && row.image_reference_candidates > 0) detail += ` · ${row.images_prepared || 0} / ${row.image_reference_candidates}`;
+    if (row.image_references > 0) detail += ` · ${L(`图片引用 ${row.image_references} 张，复用 ${row.image_references_reused || 0} 张`, `${row.image_references} image references, ${row.image_references_reused || 0} reused`)}`;
+    if (row.image_reference_fallbacks > 0) detail += ` · ${L(`保留原图 ${row.image_reference_fallbacks} 张`, `${row.image_reference_fallbacks} original images retained`)}`;
     if (row.phase === "uploading" && row.request_bytes > 0) {
       const size = bytes => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
       detail += ` · ${size(row.uploaded_bytes || 0)} / ${size(row.request_bytes)}`;

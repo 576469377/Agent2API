@@ -13,6 +13,17 @@ type executionKey struct{}
 type attemptAccountKey struct{}
 type attemptIndexKey struct{}
 
+type ImagePreparation struct {
+	ImageCandidates         int   `json:"image_reference_candidates,omitempty"`
+	ImagesPrepared          int   `json:"images_prepared,omitempty"`
+	ImageReferences         int   `json:"image_references,omitempty"`
+	ImageReferencesReused   int   `json:"image_references_reused,omitempty"`
+	ImageFilesUploaded      int   `json:"image_files_uploaded,omitempty"`
+	ImageUploadBytes        int64 `json:"image_upload_bytes,omitempty"`
+	ImageInlineBytesSaved   int64 `json:"image_inline_bytes_saved,omitempty"`
+	ImageReferenceFallbacks int   `json:"image_reference_fallbacks,omitempty"`
+}
+
 // UploadProgress contains counters and transport timing only. UploadedBytes
 // counts body bytes read by the transport, not an acknowledgement from upstream;
 // UploadCompletedAtMs is set only after the socket write has completed.
@@ -27,6 +38,7 @@ type UploadProgress struct {
 }
 
 type Attempt struct {
+	ImagePreparation
 	UploadProgress
 	Number     int    `json:"number"`
 	Platform   string `json:"platform"`
@@ -37,6 +49,7 @@ type Attempt struct {
 }
 
 type ExecutionSnapshot struct {
+	ImagePreparation
 	RequestID    string    `json:"request_id"`
 	Phase        string    `json:"phase"`
 	AttemptCount int       `json:"attempt_count"`
@@ -53,6 +66,7 @@ type Execution struct {
 	queueStarted  time.Time
 	queueDuration time.Duration
 	attempts      []Attempt
+	images        ImagePreparation
 }
 
 func NewExecution(maxAttempts int) *Execution {
@@ -87,6 +101,31 @@ func (e *Execution) StartRouting(timeout time.Duration) {
 }
 
 func (e *Execution) SetPhase(phase string) { e.mu.Lock(); e.phase = phase; e.mu.Unlock() }
+
+func BeginImagePreparation(ctx context.Context, total int) {
+	if e := ExecutionFrom(ctx); e != nil {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.images = ImagePreparation{ImageCandidates: total}
+		e.phase = "preparing_images"
+	}
+}
+
+func ObserveImagePreparation(ctx context.Context, references, reused int, uploaded, saved int64, fallback int) {
+	if e := ExecutionFrom(ctx); e != nil {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.images.ImagesPrepared += references + fallback
+		e.images.ImageReferences += references
+		e.images.ImageReferencesReused += reused
+		e.images.ImageUploadBytes += uploaded
+		e.images.ImageInlineBytesSaved += saved
+		if uploaded > 0 {
+			e.images.ImageFilesUploaded++
+		}
+		e.images.ImageReferenceFallbacks += fallback
+	}
+}
 
 // SetAttemptPhase 忽略已完成或旧尝试的迟到回调，避免双向流上传结束时覆盖接收状态。
 func SetAttemptPhase(ctx context.Context, phase string) {
@@ -160,7 +199,7 @@ func (e *Execution) Snapshot() ExecutionSnapshot {
 	if !e.queueStarted.IsZero() {
 		queue += time.Since(e.queueStarted)
 	}
-	return ExecutionSnapshot{e.id, e.phase, len(e.attempts), queue.Milliseconds(), append([]Attempt(nil), e.attempts...)}
+	return ExecutionSnapshot{ImagePreparation: e.images, RequestID: e.id, Phase: e.phase, AttemptCount: len(e.attempts), QueueMs: queue.Milliseconds(), Attempts: append([]Attempt(nil), e.attempts...)}
 }
 
 func BeginQueue(ctx context.Context) func() {
@@ -218,7 +257,7 @@ func BeginAttempt(ctx context.Context, platform string, headerTimeout time.Durat
 		}
 		account, _ := ctx.Value(attemptAccountKey{}).(string)
 		index = len(e.attempts)
-		e.attempts = append(e.attempts, Attempt{Number: index + 1, Platform: platform, AccountID: account})
+		e.attempts = append(e.attempts, Attempt{ImagePreparation: e.images, Number: index + 1, Platform: platform, AccountID: account})
 		e.phase = "connecting"
 		e.mu.Unlock()
 	}

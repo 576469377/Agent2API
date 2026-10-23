@@ -279,6 +279,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request, proto Protocol) {
 	defer func() {
 		trace := execution.Snapshot()
 		rec.RequestID, rec.AttemptCount, rec.QueueMs, rec.Attempts = trace.RequestID, trace.AttemptCount, trace.QueueMs, trace.Attempts
+		rec.ImagePreparation = trace.ImagePreparation
 		rec.DurationMs = time.Since(start).Milliseconds()
 		a.metrics.Record(*rec)
 	}()

@@ -26,3 +26,9 @@ test("upload status shows body progress and distinguishes a blocked final write"
   assert.equal(liveRequestStatus({...row,uploaded_bytes:2097152},L,3000),"正在上传请求 · 2.0 MB / 2.0 MB · 等待发送完成");
   assert.equal(liveRequestStatus({...row,phase:"waiting_headers",upload_completed_at_ms:3000},L,3000),"等待上游响应");
 });
+
+test("image preparation exposes bounded progress and reuse without image contents", () => {
+  const row={phase:"preparing_images",image_reference_candidates:72,images_prepared:40,image_references:40,image_references_reused:32};
+  assert.equal(liveRequestStatus(row,L,0),"正在准备历史图片 · 40 / 72 · 图片引用 40 张，复用 32 张");
+  assert.equal(liveRequestStatus({...row,phase:"waiting_headers"},L,0),"等待上游响应 · 图片引用 40 张，复用 32 张");
+});

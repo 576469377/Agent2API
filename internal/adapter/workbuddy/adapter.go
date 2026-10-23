@@ -57,12 +57,13 @@ func DefaultConfig() Config {
 
 // Adapter 是 WorkBuddy 平台适配器。
 type Adapter struct {
-	checkins *accountCheckin
-	benefits adapter.BenefitCache
-	cli      *httpClient
-	auth     *Auth
-	models   *modelCache
-	cfg      Config
+	imageRefs *imageReferenceCache
+	checkins  *accountCheckin
+	benefits  adapter.BenefitCache
+	cli       *httpClient
+	auth      *Auth
+	models    *modelCache
+	cfg       Config
 	// sanitize 是运行期可变的脱敏开关，控制台可以在不重启的情况下切换。
 	sanitize atomic.Bool
 }
@@ -118,6 +119,9 @@ func New(cfg Config) (*Adapter, error) {
 		cfg:    cfg,
 	}
 	a.sanitize.Store(cfg.Sanitize)
+	if cfg.Platform == GlobalPlatform {
+		a.imageRefs = newAccountImageCache(cli.baseURL, *cred)
+	}
 	a.checkins = newAccountCheckin(a)
 	return a, nil
 }
@@ -233,6 +237,10 @@ func (a *Adapter) Stream(ctx context.Context, req llm.RequestMessages) (llm.Resp
 		}
 	}
 
+	body, err := a.prepareImageReferences(ctx, body)
+	if err != nil {
+		return nil, err
+	}
 	// 一次生成的连接重试及路由回退沿用同一组会话字段；鉴权头仍每次重建。
 	conversation := a.newConversationMetadata(req.SessionKey)
 	backoff := 500 * time.Millisecond
